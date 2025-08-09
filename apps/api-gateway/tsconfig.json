@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "../../dist/apps/ingestion",
+    "rootDir": "src"
+  },
+  "references": [
+    { "path": "../../libs/models" },
+    { "path": "../../libs/utils" },
+    { "path": "../../libs/config" },
+    { "path": "../../libs/kafka-helper" },
+    { "path": "../../libs/database" },
+    { "path": "../../libs/auth" },
+    { "path": "../../libs/monitoring" }
+  ],
+  "include": ["src"]
+}

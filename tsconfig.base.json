@@ -1,21 +1,26 @@
 {
   "compilerOptions": {
-    "composite": true,
-    "declarationMap": true,
-    "emitDeclarationOnly": true,
-    "importHelpers": true,
-    "isolatedModules": true,
-    "lib": ["es2022"],
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "noEmitOnError": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "noImplicitReturns": true,
-    "noUnusedLocals": true,
-    "skipLibCheck": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "lib": ["ES2022", "DOM"],
     "strict": true,
-    "target": "es2022",
-    "customConditions": ["development"]
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "sourceMap": true,
+    "incremental": true
+    ,
+    "baseUrl": ".",
+    "paths": {
+      "@libs/models": ["libs/models/src"],
+      "@libs/utils": ["libs/utils/src"],
+      "@libs/config": ["libs/config/src"],
+      "@libs/kafka-helper": ["libs/kafka-helper/src"],
+      "@libs/database": ["libs/database/src"],
+      "@libs/auth": ["libs/auth/src"],
+      "@libs/monitoring": ["libs/monitoring/src"]
+    }
   }
 }

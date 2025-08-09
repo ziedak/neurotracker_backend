@@ -1,6 +1,15 @@
 {
-  "extends": "./tsconfig.base.json",
-  "compileOnSave": false,
   "files": [],
-  "references": []
+  "references": [
+    { "path": "libs/models" },
+    { "path": "libs/utils" },
+    { "path": "libs/config" },
+    { "path": "libs/kafka-helper" },
+    { "path": "libs/database" },
+    { "path": "libs/auth" },
+    { "path": "libs/monitoring" },
+    { "path": "apps/ingestion" },
+    { "path": "apps/prediction" },
+    { "path": "apps/api-gateway" }
+  ]
 }

@@ -1,0 +1,10 @@
+{
+  "name": "monitoring",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {}
+}

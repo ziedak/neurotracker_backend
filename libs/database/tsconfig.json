@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "../../dist/libs/database",
+    "rootDir": "src",
+    "tsBuildInfoFile": "../../dist/libs/database/tsconfig.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../../libs/models" },
+    { "path": "../../libs/utils" },
+    { "path": "../../libs/config" }
+  ],
+  "include": ["src"]
+}

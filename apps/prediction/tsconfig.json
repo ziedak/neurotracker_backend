@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "../../dist/apps/prediction",
+    "rootDir": "src"
+  },
+  "references": [
+    { "path": "../../libs/models" },
+    { "path": "../../libs/utils" }
+  ],
+  "include": ["src"]
+}

@@ -1,109 +1,172 @@
-# Backend
+# Backend Development Guide
 
-<a alt="Nx logo" href="https://nx.dev" target="_blank" rel="noreferrer"><img src="https://raw.githubusercontent.com/nrwl/nx/master/images/nx-logo.png" width="45"></a>
+This guide shows you how to run all microservices in development mode.
 
-✨ Your new, shiny [Nx workspace](https://nx.dev) is ready ✨.
+## 🚀 Quick Start
 
-[Learn more about this workspace setup and its capabilities](https://nx.dev/nx-api/js?utm_source=nx_project&amp;utm_medium=readme&amp;utm_campaign=nx_projects) or run `npx nx graph` to visually explore what was created. Now, let's get you up to speed!
+### Option 1: Run All Services (Recommended)
 
-## Run tasks
+```bash
+# Run all services in parallel
+pnpm run dev:all
 
-To run the dev server for your app, use:
-
-```sh
-npx nx serve api
+# Or simply:
+pnpm dev
 ```
 
-To create a production bundle:
+### Option 2: Individual Services
 
-```sh
-npx nx build api
+```bash
+# Run only API Gateway (port 3000)
+pnpm run dev:api
+
+# Run only Ingestion Service (port 3001)
+pnpm run dev:ingestion
+
+# Run only Prediction Service (port 3002)
+pnpm run dev:prediction
 ```
 
-To see all available targets to run for a project, run:
+### Option 3: Using Make Commands
 
-```sh
-npx nx show project api
+```bash
+# Run all services
+make dev
+
+# Run individual services
+make dev-api
+make dev-ingestion
+make dev-prediction
+
+# Build all services
+make build
+
+# Install dependencies
+make install
 ```
 
-These targets are either [inferred automatically](https://nx.dev/concepts/inferred-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) or defined in the `project.json` or `package.json` files.
+### Option 4: Using the Development Script
 
-[More about running tasks in the docs &raquo;](https://nx.dev/features/run-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-## Versioning and releasing
-
-To version and release the library use
-
-```
-npx nx release
+```bash
+# Run the development script
+./scripts/dev.sh
 ```
 
-Pass `--dry-run` to see what would happen without actually releasing the library.
+## 📍 Service Endpoints
 
-[Learn more about Nx release &raquo;](https://nx.dev/features/manage-releases?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+When all services are running, they will be available at:
 
-## Keep TypeScript project references up to date
+| Service          | URL                           | Description                            |
+| ---------------- | ----------------------------- | -------------------------------------- |
+| **API Gateway**  | http://localhost:3000         | Main entry point and API documentation |
+| **Ingestion**    | http://localhost:3001         | Event ingestion service                |
+| **Prediction**   | http://localhost:3002         | AI prediction service                  |
+| **Swagger Docs** | http://localhost:3000/swagger | API documentation                      |
 
-Nx automatically updates TypeScript [project references](https://www.typescriptlang.org/docs/handbook/project-references.html) in `tsconfig.json` files to ensure they remain accurate based on your project dependencies (`import` or `require` statements). This sync is automatically done when running tasks such as `build` or `typecheck`, which require updated references to function correctly.
+## 🔧 Development Workflow
 
-To manually trigger the process to sync the project graph dependencies information to the TypeScript project references, run the following command:
+1. **Start all services:**
 
-```sh
-npx nx sync
+   ```bash
+   pnpm dev:all
+   ```
+
+2. **Services will auto-reload** when you make changes to the source code
+
+3. **Stop all services:** Press `Ctrl+C` in the terminal
+
+## 📋 Available Commands
+
+```bash
+# Development
+pnpm dev                # Start all services
+pnpm dev:all            # Start all services
+pnpm dev:api            # Start API Gateway only
+pnpm dev:ingestion      # Start Ingestion service only
+pnpm dev:prediction     # Start Prediction service only
+
+# Building
+pnpm build              # Build all services
+pnpm build:watch        # Build and watch for changes
+
+# Testing
+pnpm test               # Run tests
+pnpm test:watch         # Run tests in watch mode
 ```
 
-You can enforce that the TypeScript project references are always in the correct state when running in CI by adding a step to your CI job configuration that runs the following command:
+## 🐳 Docker Development (Optional)
 
-```sh
-npx nx sync:check
+If you prefer using Docker:
+
+```bash
+# Start all services with Redis using Docker Compose
+docker-compose -f docker-compose.dev.yml up --build
+
+# Stop Docker services
+docker-compose -f docker-compose.dev.yml down
 ```
 
-[Learn more about nx sync](https://nx.dev/reference/nx-commands#sync)
+## 📦 Dependencies
 
-## Set up CI!
+Each service will automatically install its dependencies when started. If you need to manually install:
 
-### Step 1
+```bash
+# Install all dependencies
+pnpm install
 
-To connect to Nx Cloud, run the following command:
-
-```sh
-npx nx connect
+# Or use make
+make install
 ```
 
-Connecting to Nx Cloud ensures a [fast and scalable CI](https://nx.dev/ci/intro/why-nx-cloud?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) pipeline. It includes features such as:
+## 🔍 Troubleshooting
 
-- [Remote caching](https://nx.dev/ci/features/remote-cache?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Task distribution across multiple machines](https://nx.dev/ci/features/distribute-task-execution?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Automated e2e test splitting](https://nx.dev/ci/features/split-e2e-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Task flakiness detection and rerunning](https://nx.dev/ci/features/flaky-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+### Port Already in Use
 
-### Step 2
+If you get "port already in use" errors:
 
-Use the following command to configure a CI workflow for your workspace:
-
-```sh
-npx nx g ci-workflow
+```bash
+# Kill processes on specific ports
+lsof -ti:3000 | xargs kill -9  # API Gateway
+lsof -ti:3001 | xargs kill -9  # Ingestion
+lsof -ti:3002 | xargs kill -9  # Prediction
 ```
 
-[Learn more about Nx on CI](https://nx.dev/ci/intro/ci-with-nx#ready-get-started-with-your-provider?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+### Redis Connection Errors
 
-## Install Nx Console
+The Redis connection errors you see are normal in development if Redis is not running. The services will continue to work without Redis, but some features (like rate limiting and logging) may be reduced.
 
-Nx Console is an editor extension that enriches your developer experience. It lets you run tasks, generate code, and improves code autocompletion in your IDE. It is available for VSCode and IntelliJ.
+To start Redis locally:
 
-[Install Nx Console &raquo;](https://nx.dev/getting-started/editor-setup?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+```bash
+# Install and start Redis (Ubuntu/Debian)
+sudo apt install redis-server
+sudo systemctl start redis-server
 
-## Useful links
+# Or using Docker
+docker run -d -p 6379:6379 redis:7-alpine
+```
 
-Learn more:
+## 🏗️ Project Structure
 
-- [Learn more about this workspace setup](https://nx.dev/nx-api/js?utm_source=nx_project&amp;utm_medium=readme&amp;utm_campaign=nx_projects)
-- [Learn about Nx on CI](https://nx.dev/ci/intro/ci-with-nx?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Releasing Packages with Nx release](https://nx.dev/features/manage-releases?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [What are Nx plugins?](https://nx.dev/concepts/nx-plugins?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+```
+backend/
+├── apps/
+│   ├── api-gateway/     # Main API Gateway (port 3000)
+│   ├── ingestion/       # Event Ingestion (port 3001)
+│   └── prediction/      # AI Prediction (port 3002)
+├── libs/
+│   ├── auth/           # Authentication library
+│   ├── database/       # Database connections
+│   ├── monitoring/     # Logging and metrics
+│   └── utils/          # Shared utilities
+└── scripts/
+    └── dev.sh          # Development script
+```
 
-And join the Nx community:
-- [Discord](https://go.nx.dev/community)
-- [Follow us on X](https://twitter.com/nxdevtools) or [LinkedIn](https://www.linkedin.com/company/nrwl)
-- [Our Youtube channel](https://www.youtube.com/@nxdevtools)
-- [Our blog](https://nx.dev/blog?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+## 📝 Notes
+
+- All services support hot reloading during development
+- TypeScript compilation happens automatically
+- Environment variables are loaded from `.env` files
+- Services communicate via HTTP APIs
+- The API Gateway acts as the main entry point and service registry

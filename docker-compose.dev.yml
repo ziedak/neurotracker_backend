@@ -1,0 +1,64 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: apps/api-gateway/dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - REDIS_URL=redis://redis:6379
+      - EVENT_PIPELINE_URL=http://ingestion:3001
+      - AI_ENGINE_URL=http://prediction:3002
+      - INTERVENTION_ENGINE_URL=http://intervention:3003
+      - DATA_PLATFORM_URL=http://data:3004
+    depends_on:
+      - redis
+      - ingestion
+      - prediction
+    volumes:
+      - ./apps/api-gateway:/app
+      - ./libs:/libs
+      - /app/node_modules
+    command: pnpm dev
+
+  ingestion:
+    build:
+      context: .
+      dockerfile: apps/ingestion/dockerfile
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./apps/ingestion:/app
+      - ./libs:/libs
+      - /app/node_modules
+    command: pnpm dev
+
+  prediction:
+    build:
+      context: .
+      dockerfile: apps/prediction/dockerfile
+    ports:
+      - "3002:3000"
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./apps/prediction:/app
+      - ./libs:/libs
+      - /app/node_modules
+    command: pnpm dev
+
+volumes:
+  redis_data:

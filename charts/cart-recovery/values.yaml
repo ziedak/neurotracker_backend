@@ -1,0 +1,63 @@
+ingestion:
+  enabled: true
+  image: yourdockerhubusername/cart-recovery-ingestion:latest
+  replicas: 3
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  env:
+    NODE_ENV: production
+    KAFKA_BROKERS: kafka:9092
+
+prediction:
+  enabled: true
+  image: yourdockerhubusername/cart-recovery-prediction:latest
+  replicas: 2
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  env:
+    NODE_ENV: production
+    MODEL_REFRESH_INTERVAL: "3600"
+
+intervention:
+  enabled: true
+  image: yourdockerhubusername/cart-recovery-intervention:latest
+  replicas: 2
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  env:
+    NODE_ENV: production
+    NOTIFICATION_SERVICE_URL: https://notify.example.com
+
+dashboard:
+  enabled: true
+  image: yourdockerhubusername/cart-recovery-dashboard:latest
+  replicas: 2
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  env:
+    NODE_ENV: production
+    API_BASE_URL: https://api.yourdomain.com
+  ingress:
+    enabled: true
+    hostname: dashboard.yourdomain.com
+    tlsSecretName: dashboard-tls

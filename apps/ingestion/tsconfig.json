@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "../../dist/apps/ingestion",
+    "rootDir": "src"
+  },
+  "references": [
+    { "path": "../../libs/models" },
+    { "path": "../../libs/utils" },
+    { "path": "../../libs/config" }
+  ],
+  "include": ["src"]
+}

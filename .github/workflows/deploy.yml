@@ -1,0 +1,104 @@
+name: Build-Test-Deploy
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+env:
+  KUBECONFIG_PATH: ${{ github.workspace }}/kubeconfig
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    outputs:
+      docker_image_ingestion: ${{ steps.ingestion.outputs.image }}
+      docker_image_prediction: ${{ steps.prediction.outputs.image }}
+      docker_image_intervention: ${{ steps.intervention.outputs.image }}
+      docker_image_dashboard: ${{ steps.dashboard.outputs.image }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build all projects
+        run: pnpm build
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Build and push ingestion Docker image
+        id: ingestion
+        run: |
+          IMAGE=yourdockerhubusername/cart-recovery-ingestion:latest
+          docker build -t $IMAGE -f apps/ingestion/Dockerfile .
+          echo "::set-output name=image::$IMAGE"
+          echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+          docker push $IMAGE
+
+      - name: Build and push prediction Docker image
+        id: prediction
+        run: |
+          IMAGE=yourdockerhubusername/cart-recovery-prediction:latest
+          docker build -t $IMAGE -f apps/prediction/Dockerfile .
+          echo "::set-output name=image::$IMAGE"
+          echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+          docker push $IMAGE
+
+      - name: Build and push intervention Docker image
+        id: intervention
+        run: |
+          IMAGE=yourdockerhubusername/cart-recovery-intervention:latest
+          docker build -t $IMAGE -f apps/intervention/Dockerfile .
+          echo "::set-output name=image::$IMAGE"
+          echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+          docker push $IMAGE
+
+      - name: Build and push dashboard Docker image
+        id: dashboard
+        run: |
+          IMAGE=yourdockerhubusername/cart-recovery-dashboard:latest
+          docker build -t $IMAGE -f apps/dashboard/Dockerfile .
+          echo "::set-output name=image::$IMAGE"
+          echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+          docker push $IMAGE
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.12.0
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: "1.27.1"
+
+      - name: Configure kubeconfig
+        run: |
+          echo "${{ secrets.KUBECONFIG }}" > $KUBECONFIG_PATH
+          export KUBECONFIG=$KUBECONFIG_PATH
+
+      - name: Deploy Helm chart
+        run: |
+          helm upgrade --install cart-recovery ./charts/cart-recovery \
+            --set ingestion.image=yourdockerhubusername/cart-recovery-ingestion:latest \
+            --set prediction.image=yourdockerhubusername/cart-recovery-prediction:latest \
+            --set intervention.image=yourdockerhubusername/cart-recovery-intervention:latest \
+            --set dashboard.image=yourdockerhubusername/cart-recovery-dashboard:latest
