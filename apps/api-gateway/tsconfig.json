@@ -9,10 +9,11 @@
     { "path": "../../libs/models" },
     { "path": "../../libs/utils" },
     { "path": "../../libs/config" },
-    { "path": "../../libs/kafka-helper" },
+    { "path": "../../libs/messaging" },
     { "path": "../../libs/database" },
     { "path": "../../libs/auth" },
-    { "path": "../../libs/monitoring" }
+    { "path": "../../libs/monitoring" },
+    { "path": "../../libs/elysia-server" }
   ],
   "include": ["src"]
 }

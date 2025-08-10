@@ -1,12 +1,12 @@
 {
   "name": "utils",
   "version": "1.0.0",
-  "main": "src/index.ts",
-  "license": "MIT",
+  "main": "../../dist/libs/utils/index.js",
+  "types": "../../dist/libs/utils/index.d.ts",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-     "zod": "^3.22.4"
+    "zod": "^3.22.4"
   }
 }

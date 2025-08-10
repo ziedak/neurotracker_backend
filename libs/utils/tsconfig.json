@@ -2,9 +2,10 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
+    "rootDir": "./src",
     "outDir": "../../dist/libs/utils",
-    "rootDir": "src"
+    "tsBuildInfoFile": "../../dist/libs/utils/tsconfig.tsbuildinfo"
   },
-  "include": ["src"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
 }
-

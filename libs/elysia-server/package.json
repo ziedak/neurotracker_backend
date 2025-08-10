@@ -1,0 +1,21 @@
+{
+  "name": "@libs/elysia-server",
+  "version": "1.0.0",
+  "description": "Shared Elysia server utilities for microservices",
+  "main": "../../dist/libs/elysia-server/index.js",
+  "types": "../../dist/libs/elysia-server/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "dependencies": {
+    "elysia": "^1.3.8",
+    "@elysiajs/node": "^1.3.0",
+    "@elysiajs/cors": "^1.3.0",
+    "@elysiajs/swagger": "^1.3.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "@types/node": "^22.0.0"
+  }
+}

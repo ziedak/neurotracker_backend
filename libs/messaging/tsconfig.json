@@ -2,14 +2,15 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
-    "outDir": "../../dist/libs/kafka-helper",
     "rootDir": "src",
-    "tsBuildInfoFile": "../../dist/libs/kafka-helper/tsconfig.tsbuildinfo"
+    "outDir": "../../dist/libs/messaging",
+    "tsBuildInfoFile": "../../dist/libs/messaging/tsconfig.tsbuildinfo"
   },
   "references": [
     { "path": "../../libs/models" },
     { "path": "../../libs/utils" },
     { "path": "../../libs/config" }
   ],
-  "include": ["src"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
 }

@@ -1,0 +1,79 @@
+{
+  "workspace_info": {
+    "type": "pnpm_workspace",
+    "name": "neurotracker_backend",
+    "description": "TypeScript microservices architecture with Elysia framework",
+    "last_updated": "2025-08-09",
+    "main_technologies": [
+      "TypeScript",
+      "Elysia",
+      "pnpm",
+      "Node.js",
+      "WebSockets",
+      "Redis",
+      "PostgreSQL",
+      "ClickHouse",
+      "Kafka"
+    ]
+  },
+  "active_tasks": [
+    {
+      "name": "workspace-interfaces-scan",
+      "date": "2025-08-09",
+      "status": "completed",
+      "priority": "high",
+      "progress": 100
+    }
+  ],
+  "completed_tasks": [],
+  "workspace_scan": {
+    "status": "completed",
+    "last_scan": "2025-08-09",
+    "total_files": 50,
+    "interfaces_found": 15,
+    "classes_found": 20,
+    "microservices": [
+      {
+        "name": "api-gateway",
+        "port": 3000,
+        "features": ["websocket", "swagger", "authentication", "rate_limiting"]
+      },
+      {
+        "name": "ingestion",
+        "port": 3001,
+        "features": ["event_processing", "rate_limiting"]
+      },
+      {
+        "name": "prediction",
+        "port": 3002,
+        "features": ["ml_models", "analytics"]
+      },
+      {
+        "name": "ai-engine",
+        "port": 3003,
+        "features": ["ai_processing", "cart_recovery"]
+      }
+    ]
+  },
+  "architecture_overview": {
+    "apps": ["api-gateway", "ingestion", "prediction", "ai-engine"],
+    "shared_libs": [
+      "auth",
+      "database",
+      "monitoring",
+      "elysia-server",
+      "messaging",
+      "utils",
+      "config",
+      "models"
+    ],
+    "patterns": [
+      "microservices",
+      "shared_libraries",
+      "dependency_injection",
+      "event_driven",
+      "real_time_communication"
+    ]
+  },
+  "last_modified": "2025-08-09T12:00:00Z"
+}

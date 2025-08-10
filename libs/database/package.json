@@ -1,10 +1,10 @@
 {
   "name": "database",
   "version": "1.0.0",
-  "main": "src/index.ts",
-  "license": "MIT",
+  "main": "../../dist/libs/database/index.js",
+  "types": "../../dist/libs/database/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.json",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",

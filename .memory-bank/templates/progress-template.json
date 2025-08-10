@@ -1,0 +1,37 @@
+{
+  "task_info": {
+    "task_name": "[task-name]",
+    "date_created": "[YYYY-MM-DD]",
+    "status": "not_started",
+    "priority": "[low/medium/high/critical]",
+    "estimated_duration": "[time estimate]",
+    "completion_target": "[target date/time]"
+  },
+  "progress_metrics": {
+    "total_items": 0,
+    "completed": 0,
+    "in_progress": 0,
+    "pending": 0,
+    "blocked": 0,
+    "completion_percentage": 0
+  },
+  "milestones": {
+    "milestone_1": {
+      "status": "pending",
+      "notes": "[milestone description]"
+    },
+    "milestone_2": {
+      "status": "pending",
+      "notes": "[milestone description]"
+    }
+  },
+  "time_tracking": {
+    "started": null,
+    "time_spent_hours": 0,
+    "last_updated": null,
+    "estimated_remaining": 0
+  },
+  "next_actions": ["[next action item]", "[next action item]"],
+  "blockers": [],
+  "lessons_learned": []
+}

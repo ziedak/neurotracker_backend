@@ -1,0 +1,153 @@
+# Memory Bank Update & Task Management
+
+## Summary
+
+This document defines how GitHub Copilot maintains project memory and manages active tasks using the task-focused Memory Bank system. The Memory Bank provides persistent project knowledge and active task management across sessions.
+
+---
+
+## Core Principle
+
+**Copilot MUST read Memory Bank context at the start of EVERY task.**
+
+### Mandatory Reading Checklist:
+- [ ] Read `.memory-bank/context/current-work.json` (active task context)
+- [ ] Read `.memory-bank/core/architecture.json` (project architecture)
+- [ ] Read current task directory: `.memory-bank/tasks/YYYY-MM-DD-task-name/`
+  - [ ] `action-plan.md` (task phases and objectives)
+  - [ ] `checklist.md` (detailed task items)
+  - [ ] `progress.json` (completion metrics)
+- [ ] Read `.memory-bank/navigation/file-map-optimized.json` (for large codebase navigation)
+- [ ] Read `.memory-bank/modules/services-optimized.json` (service architecture)
+
+---
+
+## Task-Focused Memory Bank Structure
+
+The Memory Bank is organized around active task management with persistent project knowledge:
+
+```
+.memory-bank/
+├── core/                          # Persistent project knowledge
+│   └── architecture.json          # Dual DI architecture & performance infrastructure
+├── modules/                       # Current service & component mapping
+│   └── services-optimized.json    # Service architecture with optimization targets
+├── navigation/                    # Project navigation aids
+│   ├── class-map.json            # Class relationships
+│   └── file-map-optimized.json   # 460+ file navigation guide
+├── context/                       # Active work context
+│   └── current-work.json         # Current active tasks & status
+├── tasks/                         # Date-based task management
+│   └── YYYY-MM-DD-task-name/      # Individual task directories
+│       ├── action-plan.md         # Task action plan
+│       ├── checklist.md           # Detailed checklist
+│       ├── progress.json          # Progress tracking
+│       └── [task-specific files]  # Supporting documents
+└── templates/                     # Task templates
+    ├── task-template.md           # Standard task structure
+    └── progress-template.json     # Progress tracking template
+```
+
+### Critical Project Context
+- **Scale**: 460+ TypeScript files - enterprise-grade complexity
+- **Architecture**: Dual DI (ServiceRegistry + tsyringe) - leverage existing infrastructure
+- **Performance**: Sophisticated telemetry already built - enhance don't replace
+- **Risk Level**: LOW-MEDIUM when building on existing systems
+
+---
+
+## Core Workflows
+
+### Task-Focused Work Mode
+
+```mermaid
+flowchart TD
+    Start[Start] --> ReadContext[Read current-work.json]
+    ReadContext --> CheckTask{Active Task?}
+    CheckTask -->|Yes| ReadTask[Read Task Directory]
+    ReadTask --> UpdateProgress[Update Living Documents]
+    UpdateProgress --> Execute[Execute Task]
+    CheckTask -->|No| CreateTask[Create New Task]
+    CreateTask --> ReadTask
+    Execute --> TrackProgress[Track Progress in JSON]
+    TrackProgress --> Complete{Task Complete?}
+    Complete -->|No| UpdateProgress
+    Complete -->|Yes| ArchiveTask[Mark Complete & Archive]
+```
+
+### Memory Bank Update Mode
+
+```mermaid
+flowchart TD
+    Start[Update Memory Bank] --> ReviewContext[Review current-work.json]
+    ReviewContext --> CheckTasks[Check Active Tasks]
+    CheckTasks --> UpdateProgress[Update Task Progress]
+    UpdateProgress --> UpdateCore[Update Core Knowledge if Needed]
+    UpdateCore --> ValidateStructure[Validate Task Structure]
+    ValidateStructure --> Document[Document Changes]
+```
+
+---
+
+## Living Document Workflow
+
+### Real-Time Updates Required:
+1. **Progress Tracking**: Update `progress.json` with completion percentages
+2. **Checklist Management**: Mark items complete in `checklist.md`
+3. **Blocker Documentation**: Record obstacles and solutions
+4. **Milestone Tracking**: Update key accomplishments
+5. **Time Tracking**: Record effort and estimates
+
+### On "update memory bank":
+1. Review ALL active task directories
+2. Update `current-work.json` with latest status
+3. Validate progress metrics align with actual work
+4. Update core knowledge if architectural discoveries made
+5. Ensure templates are current and usable
+
+---
+
+## Task Management Commands
+
+### Update Memory Bank
+**Command**: "update memory bank"
+**Actions**:
+- Review all active tasks in `/tasks/` directories
+- Update progress metrics and completion status
+- Synchronize `current-work.json` with actual task states
+- Validate living document workflow integrity
+
+### Create New Task
+**Command**: "create new task: [task-name]"
+**Actions**:
+- Create new directory: `tasks/YYYY-MM-DD-task-name/`
+- Copy and customize templates
+- Update `current-work.json` with new active task
+- Initialize progress tracking and checklists
+
+---
+
+## Conservative Enhancement Philosophy
+
+When working on this enterprise-grade project:
+
+- ✅ **Build upon existing sophisticated infrastructure**
+- ✅ **Leverage comprehensive telemetry systems already in place**
+- ✅ **Enhance proven patterns rather than creating new complexity**
+- ⚠️ **Avoid over-engineering - project already has mature architecture**
+- 📊 **Use existing performance monitoring for optimization insights**
+
+---
+
+## How to Use This Document
+
+- Reference this file at the start of every session
+- Use the task-focused workflow for all development work
+- Update living documents in real-time as work progresses
+- Maintain the Memory Bank with precision - project effectiveness depends on accuracy
+- Follow conservative enhancement approach for this mature codebase
+
+---
+
+**REMEMBER:**
+After every memory reset, Copilot begins fresh. The task-focused Memory Bank provides both persistent project knowledge AND active work context. Maintain it with precision - safe implementation depends on comprehensive understanding of this complex, mature system.

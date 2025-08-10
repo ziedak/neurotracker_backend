@@ -17,5 +17,10 @@ export function setupCorePlugins(app: Elysia) {
       )
       // CORS
       .use(cors(APP_CONFIG.cors))
+    // Rate Limiting
+    // .use(rateLimit({
+    //   duration: 60000,
+    //   max: 5000, // 5k predictions per minute
+    // }))
   );
 }

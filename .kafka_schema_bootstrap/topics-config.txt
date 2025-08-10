@@ -1,0 +1,12 @@
+# topic_name partitions replication retention_ms cleanup_policy
+events.raw.v1 48 3 604800000 delete
+events.validated.v1 48 3 604800000 delete
+features.v1 48 3 604800000 compact
+predictions.v1 48 3 604800000 delete
+interventions.commands.v1 96 3 604800000 delete
+interventions.results.v1 48 3 2592000000 delete
+tracking.metrics.v1 12 3 86400000 delete
+events.dlq.v1 48 3 2592000000 delete
+models.events.v1 6 3 7776000000 delete
+models.prediction.audit.v1 48 3 1209600000 delete
+alerts.system.v1 12 3 1209600000 delete

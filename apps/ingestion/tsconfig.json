@@ -8,7 +8,10 @@
   "references": [
     { "path": "../../libs/models" },
     { "path": "../../libs/utils" },
-    { "path": "../../libs/config" }
+    { "path": "../../libs/config" },
+    { "path": "../../libs/messaging" },
+    { "path": "../../libs/elysia-server" }
   ],
-  "include": ["src"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
 }

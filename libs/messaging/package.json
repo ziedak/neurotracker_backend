@@ -1,0 +1,17 @@
+{
+  "name": "@libs/messaging",
+  "version": "1.0.0",
+  "main": "../../dist/messaging/index.js",
+  "types": "../../dist/messaging/index.d.ts",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "kafkajs": "^2.2.4",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.12"
+  }
+}

@@ -10,17 +10,17 @@
     "skipLibCheck": true,
     "declaration": true,
     "sourceMap": true,
-    "incremental": true
-    ,
+    "incremental": true,
     "baseUrl": ".",
     "paths": {
       "@libs/models": ["libs/models/src"],
       "@libs/utils": ["libs/utils/src"],
       "@libs/config": ["libs/config/src"],
-      "@libs/kafka-helper": ["libs/kafka-helper/src"],
+      "@libs/messaging": ["libs/messaging/src"],
       "@libs/database": ["libs/database/src"],
       "@libs/auth": ["libs/auth/src"],
-      "@libs/monitoring": ["libs/monitoring/src"]
+      "@libs/monitoring": ["libs/monitoring/src"],
+      "@libs/elysia-server": ["libs/elysia-server/src"]
     }
   }
 }

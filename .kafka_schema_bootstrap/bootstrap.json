@@ -1,0 +1,68 @@
+[
+  {
+    "subject": "events.raw.v1-value",
+    "version": 1,
+    "schemaType": "AVRO",
+    "schema": "{\"type\":\"record\",\"name\":\"EventRaw\",\"fields\":[{\"name\":\"event_id\",\"type\":\"string\"},{\"name\":\"store_id\",\"type\":\"string\"},{\"name\":\"user_id\",\"type\":[\"null\",\"string\"],\"default\":null},{\"name\":\"timestamp\",\"type\":\"long\"},{\"name\":\"type\",\"type\":\"string\"},{\"name\":\"payload\",\"type\":\"string\"}]}"
+  },
+  {
+    "subject": "events.validated.v1-value",
+    "version": 1,
+    "schemaType": "AVRO",
+    "schema": "{\"type\":\"record\",\"name\":\"EventValidated\",\"fields\":[{\"name\":\"event_id\",\"type\":\"string\"},{\"name\":\"store_id\",\"type\":\"string\"},{\"name\":\"user_id\",\"type\":[\"null\",\"string\"],\"default\":null},{\"name\":\"timestamp\",\"type\":\"long\"},{\"name\":\"type\",\"type\":\"string\"},{\"name\":\"payload\",\"type\":\"string\"},{\"name\":\"validated_at\",\"type\":\"long\"},{\"name\":\"validation_result\",\"type\":\"string\"}]}"
+  },
+  {
+    "subject": "features.v1-value",
+    "version": 1,
+    "schemaType": "AVRO",
+    "schema": "{\"type\":\"record\",\"name\":\"FeatureRecord\",\"fields\":[{\"name\":\"feature_id\",\"type\":\"string\"},{\"name\":\"store_id\",\"type\":\"string\"},{\"name\":\"user_id\",\"type\":[\"null\",\"string\"],\"default\":null},{\"name\":\"features\",\"type\":\"string\"},{\"name\":\"timestamp\",\"type\":\"long\"}]}"
+  },
+  {
+    "subject": "predictions.v1-value",
+    "version": 1,
+    "schemaType": "AVRO",
+    "schema": "{\"type\":\"record\",\"name\":\"Prediction\",\"fields\":[{\"name\":\"prediction_id\",\"type\":\"string\"},{\"name\":\"store_id\",\"type\":\"string\"},{\"name\":\"user_id\",\"type\":[\"null\",\"string\"],\"default\":null},{\"name\":\"model_version\",\"type\":\"string\"},{\"name\":\"prediction\",\"type\":\"string\"},{\"name\":\"predicted_at\",\"type\":\"long\"}]}"
+  },
+  {
+    "subject": "interventions.commands.v1-value",
+    "version": 1,
+    "schemaType": "AVRO",
+    "schema": "{\"type\":\"record\",\"name\":\"InterventionCommand\",\"fields\":[{\"name\":\"command_id\",\"type\":\"string\"},{\"name\":\"store_id\",\"type\":\"string\"},{\"name\":\"user_id\",\"type\":[\"null\",\"string\"],\"default\":null},{\"name\":\"prediction_id\",\"type\":\"string\"},{\"name\":\"action_type\",\"type\":\"string\"},{\"name\":\"action_payload\",\"type\":\"string\"},{\"name\":\"priority\",\"type\":\"int\"},{\"name\":\"created_at\",\"type\":\"long\"}]}"
+  },
+  {
+    "subject": "interventions.results.v1-value",
+    "version": 1,
+    "schemaType": "AVRO",
+    "schema": "{\"type\":\"record\",\"name\":\"InterventionResult\",\"fields\":[{\"name\":\"command_id\",\"type\":\"string\"},{\"name\":\"store_id\",\"type\":\"string\"},{\"name\":\"user_id\",\"type\":[\"null\",\"string\"],\"default\":null},{\"name\":\"status\",\"type\":\"string\"},{\"name\":\"error_reason\",\"type\":[\"null\",\"string\"],\"default\":null},{\"name\":\"delivered_at\",\"type\":[\"null\",\"long\"],\"default\":null},{\"name\":\"attempts\",\"type\":\"int\"}]}"
+  },
+  {
+    "subject": "tracking.metrics.v1-value",
+    "version": 1,
+    "schemaType": "AVRO",
+    "schema": "{\"type\":\"record\",\"name\":\"TrackingMetric\",\"fields\":[{\"name\":\"service_id\",\"type\":\"string\"},{\"name\":\"metric_name\",\"type\":\"string\"},{\"name\":\"metric_value\",\"type\":\"double\"},{\"name\":\"timestamp\",\"type\":\"long\"}]}"
+  },
+  {
+    "subject": "events.dlq.v1-value",
+    "version": 1,
+    "schemaType": "AVRO",
+    "schema": "{\"type\":\"record\",\"name\":\"DeadLetterEvent\",\"fields\":[{\"name\":\"original_topic\",\"type\":\"string\"},{\"name\":\"store_id\",\"type\":\"string\"},{\"name\":\"payload\",\"type\":\"string\"},{\"name\":\"error_reason\",\"type\":\"string\"},{\"name\":\"failed_at\",\"type\":\"long\"}]}"
+  },
+  {
+    "subject": "models.events.v1-value",
+    "version": 1,
+    "schemaType": "AVRO",
+    "schema": "{\"type\":\"record\",\"name\":\"ModelEvent\",\"fields\":[{\"name\":\"model_name\",\"type\":\"string\"},{\"name\":\"model_version\",\"type\":\"string\"},{\"name\":\"event_type\",\"type\":\"string\"},{\"name\":\"metadata\",\"type\":[\"null\",\"string\"],\"default\":null},{\"name\":\"timestamp\",\"type\":\"long\"}]}"
+  },
+  {
+    "subject": "models.prediction.audit.v1-value",
+    "version": 1,
+    "schemaType": "AVRO",
+    "schema": "{\"type\":\"record\",\"name\":\"PredictionAudit\",\"fields\":[{\"name\":\"audit_id\",\"type\":\"string\"},{\"name\":\"store_id\",\"type\":\"string\"},{\"name\":\"user_id\",\"type\":[\"null\",\"string\"],\"default\":null},{\"name\":\"model_version\",\"type\":\"string\"},{\"name\":\"features_used\",\"type\":\"string\"},{\"name\":\"prediction\",\"type\":\"string\"},{\"name\":\"requested_at\",\"type\":\"long\"},{\"name\":\"responded_at\",\"type\":\"long\"}]}"
+  },
+  {
+    "subject": "alerts.system.v1-value",
+    "version": 1,
+    "schemaType": "AVRO",
+    "schema": "{\"type\":\"record\",\"name\":\"SystemAlert\",\"fields\":[{\"name\":\"alert_id\",\"type\":\"string\"},{\"name\":\"service_id\",\"type\":\"string\"},{\"name\":\"severity\",\"type\":\"string\"},{\"name\":\"message\",\"type\":\"string\"},{\"name\":\"created_at\",\"type\":\"long\"}]}"
+  }
+]

@@ -2,8 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
-    "outDir": "../../dist/libs/auth",
     "rootDir": "src",
+    "outDir": "../../dist/libs/auth",
     "tsBuildInfoFile": "../../dist/libs/auth/tsconfig.tsbuildinfo"
   },
   "references": [
@@ -11,5 +11,6 @@
     { "path": "../../libs/utils" },
     { "path": "../../libs/config" }
   ],
-  "include": ["src"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
 }

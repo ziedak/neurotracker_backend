@@ -48,3 +48,6 @@ export class KafkaClient {
     return consumer;
   }
 }
+
+// Export WebSocket functionality
+export * from "./websocket";

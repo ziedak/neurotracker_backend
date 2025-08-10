@@ -1,15 +1,16 @@
 {
   "files": [],
   "references": [
-    { "path": "libs/models" },
-    { "path": "libs/utils" },
-    { "path": "libs/config" },
-    { "path": "libs/kafka-helper" },
-    { "path": "libs/database" },
-    { "path": "libs/auth" },
-    { "path": "libs/monitoring" },
+    { "path": "apps/api-gateway" },
     { "path": "apps/ingestion" },
     { "path": "apps/prediction" },
-    { "path": "apps/api-gateway" }
+    { "path": "libs/auth" },
+    { "path": "libs/config" },
+    { "path": "libs/database" },
+    { "path": "libs/elysia-server" },
+    { "path": "libs/messaging" },
+    { "path": "libs/models" },
+    { "path": "libs/monitoring" },
+    { "path": "libs/utils" }
   ]
 }
