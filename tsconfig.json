@@ -2,7 +2,7 @@
   "files": [],
   "references": [
     { "path": "apps/api-gateway" },
-    { "path": "apps/ingestion" },
+    { "path": "apps/event-pipeline" },
     { "path": "apps/prediction" },
     { "path": "libs/auth" },
     { "path": "libs/config" },

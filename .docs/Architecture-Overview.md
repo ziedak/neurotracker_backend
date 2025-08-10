@@ -756,7 +756,7 @@ class ModelRegistry {
 
 // ONNX Runtime serving with RedisAI as cache layer
 class ModelServingService {
-  private onnxRuntime: ONNXInferenceSession;
+  private onnxRuntime: ONNXInferen       ceSession;
   private redisAI = RedisAI.getInstance();
   private featureStore = new FeatureStore();
 

@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
-    "outDir": "../../dist/apps/ingestion",
+    "outDir": "../../dist/apps/event-pipeline",
     "rootDir": "src"
   },
   "references": [
@@ -10,7 +10,9 @@
     { "path": "../../libs/utils" },
     { "path": "../../libs/config" },
     { "path": "../../libs/messaging" },
-    { "path": "../../libs/elysia-server" }
+    { "path": "../../libs/elysia-server" },
+    { "path": "../../libs/database" },
+    { "path": "../../libs/monitoring" }
   ],
   "include": ["src/**/*"],
   "exclude": ["node_modules"]

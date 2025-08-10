@@ -1,4 +1,4 @@
-import { WebSocketManager, WebSocketMessage } from "@libs/messaging";
+import { WebSocketManager, WebSocketMessage } from "./websocket_not-used";
 
 // Example usage of WebSocket functionality
 

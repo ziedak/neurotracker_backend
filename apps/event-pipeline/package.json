@@ -1,0 +1,24 @@
+{
+  "name": "event-pipeline",
+  "version": "1.0.0",
+  "description": "event-pipeline microservice",
+  "main": "index.js",
+  "scripts": {
+    "build": "bun build src/main.ts --outdir=dist --target=bun",
+    "dev": "bun --watch src/main.ts",
+    "start": "bun src/main.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@libs/elysia-server": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.2.1",
+    "nodemon": "^3.1.10",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2"
+  }
+}

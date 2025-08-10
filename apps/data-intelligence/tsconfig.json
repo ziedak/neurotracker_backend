@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "../../dist/apps/data-intelligence",
+    "rootDir": "src"
+  },
+  "references": [
+    { "path": "../../libs/models" },
+    { "path": "../../libs/utils" },
+    { "path": "../../libs/config" },
+    { "path": "../../libs/messaging" },
+    { "path": "../../libs/elysia-server" },
+    { "path": "../../libs/database" },
+    { "path": "../../libs/monitoring" }
+  ],
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
+}

@@ -1,17 +1,20 @@
-# Use official Node.js 20 runtime as base image
-FROM node:20-alpine
+
+# Use official Bun runtime as base image
+FROM oven/bun:latest
 
 WORKDIR /app
 
-# Copy package.json and pnpm-lock.yaml for installing dependencies
-COPY package.json pnpm-lock.yaml ./
 
-# Install pnpm globally and dependencies
-RUN npm install -g pnpm
-RUN pnpm install --frozen-lockfile
+# Copy package.json and bun.lockb for installing dependencies
+COPY package.json bun.lockb ./
 
-# Copy built app files
-COPY dist/apps/ingestion ./dist
+
+# Install dependencies with Bun
+RUN bun install --frozen-lockfile
+
+
+# Copy source files
+COPY . .
 
 # Set environment variables
 ENV NODE_ENV=production
@@ -20,4 +23,4 @@ ENV NODE_ENV=production
 EXPOSE 3000
 
 # Run the service
-CMD ["node", "dist/main.js"]
+CMD ["bun", "src/main.ts"]

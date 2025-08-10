@@ -1,5 +1,4 @@
 import { Elysia, t } from "elysia";
-import { node } from "@elysiajs/node";
 import { ServerConfig, DEFAULT_SERVER_CONFIG } from "./config";
 import { setupCorePlugins } from "./plugins";
 import { setupMiddleware } from "./middleware";
@@ -118,6 +117,10 @@ export class ElysiaServerBuilder {
     message: WebSocketMessage,
     connectionId: string
   ): void {
+    if (!this.config.websocket?.enabled) {
+      // WebSocket is disabled, skip handling
+      return;
+    }
     switch (message.type) {
       case "authenticate":
         const { userId, sessionId } = message.payload;
@@ -200,7 +203,6 @@ export class ElysiaServerBuilder {
 
   build(): Elysia {
     let app = new Elysia({
-      adapter: node(),
       websocket: this.config.websocket?.enabled
         ? {
             idleTimeout: this.config.websocket.idleTimeout,
@@ -227,7 +229,7 @@ export class ElysiaServerBuilder {
       version: this.config.version,
     }));
 
-    // Add WebSocket endpoint if enabled
+    // Add WebSocket endpoint and stats only if enabled
     if (this.config.websocket?.enabled) {
       app.ws(this.config.websocket.path || "/ws", {
         body: t.Object({

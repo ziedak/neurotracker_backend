@@ -1,0 +1,20 @@
+[
+  {
+    "date": "2025-08-10",
+    "task": "dashboard-service",
+    "discoveries": [
+      "Proxy pattern for dashboard endpoints using fetchFromGateway and GATEWAY_URL is effective for decoupling and security.",
+      "Strict TypeScript handler signatures improve maintainability and error detection.",
+      "Duplicate endpoint definitions cause routing ambiguity and must be avoided.",
+      "Consistent error handling and helper usage across endpoints is critical for reliability.",
+      "No direct DB/model access in dashboard routes; all business logic is proxied or delegated."
+    ],
+    "patterns": [
+      "Use a single helper for all gateway calls.",
+      "Always use configuration constants for URLs.",
+      "Add strict type annotations for all route handlers.",
+      "Standardize error handling and response structure."
+    ],
+    "effectiveness": "All optimizations validated in code and align with Memory Bank protocols."
+  }
+]

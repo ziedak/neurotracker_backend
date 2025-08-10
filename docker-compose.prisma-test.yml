@@ -1,0 +1,10 @@
+version: "3.8"
+services:
+  prisma:
+    image: node:18-alpine
+    working_dir: /app
+    volumes:
+      - /home/zied/workspace/backend/libs/database/prisma:/app/prisma
+    environment:
+      - DATABASE_URL=postgresql://postgres:TEST@postgres:5432/neurotracker
+    command: ls -l /app/prisma

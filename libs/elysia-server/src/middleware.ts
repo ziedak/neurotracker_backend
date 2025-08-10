@@ -15,7 +15,7 @@ export function setupMiddleware(app: Elysia, config: ServerConfig) {
         userAgent: headers["user-agent"],
         ip: headers["x-forwarded-for"],
       });
-      return { requestId };
+      // Don't return anything to avoid overriding the route response
     });
 
     // Response tracking

@@ -9,6 +9,60 @@ services:
     volumes:
       - redis_data:/data
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123" # HTTP interface
+      - "9000:9000" # Native TCP interface
+    environment:
+      - CLICKHOUSE_DB=neurotracker
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: neurotracker
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: TEST
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - postgres_logs:/var/log/postgresql
+  dbgate:
+    image: dbgate/dbgate
+    restart: always
+    ports:
+      - 5000:5000
+    volumes:
+      - dbgate-data:/root/.dbgate
+    environment:
+      - CONNECTIONS=con1,con2,con3
+      - LABEL_con1=Redis
+      - SERVER_con1=redis
+      - USER_con1=root
+      - PORT_con1=6379
+      - ENGINE_con1=redis@dbgate-plugin-redis
+      - LABEL_con2=Postgres
+      - SERVER_con2=postgres
+      - USER_con2=postgres
+      - PASSWORD_con2=TEST
+      - PORT_con2=5432
+      - ENGINE_con2=postgres@dbgate-plugin-postgres
+      - LABEL_con3=clickhouse
+      - SERVER_con3=clickhouse
+      - USER_con3=default
+      - PORT_con3=8123
+      - ENGINE_con3=clickhouse@dbgate-plugin-clickhouse
+
   api-gateway:
     build:
       context: .
@@ -18,13 +72,13 @@ services:
     environment:
       - NODE_ENV=development
       - REDIS_URL=redis://redis:6379
-      - EVENT_PIPELINE_URL=http://ingestion:3001
+      - EVENT_PIPELINE_URL=http://event-pipeline:3001
       - AI_ENGINE_URL=http://prediction:3002
       - INTERVENTION_ENGINE_URL=http://intervention:3003
       - DATA_PLATFORM_URL=http://data:3004
     depends_on:
       - redis
-      - ingestion
+      - event-pipeline
       - prediction
     volumes:
       - ./apps/api-gateway:/app
@@ -32,16 +86,16 @@ services:
       - /app/node_modules
     command: pnpm dev
 
-  ingestion:
+  event-pipeline:
     build:
       context: .
-      dockerfile: apps/ingestion/dockerfile
+      dockerfile: apps/event-pipeline/dockerfile
     ports:
       - "3001:3000"
     environment:
       - NODE_ENV=development
     volumes:
-      - ./apps/ingestion:/app
+      - ./apps/event-pipeline:/app
       - ./libs:/libs
       - /app/node_modules
     command: pnpm dev
@@ -60,5 +114,24 @@ services:
       - /app/node_modules
     command: pnpm dev
 
+  prisma:
+    image: node:18-alpine
+    working_dir: /app
+    volumes:
+      - /home/zied/workspace/backend/libs/database/prisma:/app/prisma
+    command: sh -c "npm install -g prisma && npx prisma migrate dev --name init --schema=/app/prisma/schema.prisma && npx prisma generate --schema=/app/prisma/schema.prisma"
+    environment:
+      - DATABASE_URL=postgresql://postgres:TEST@postgres:5432/neurotracker
+    depends_on:
+      - postgres
+      - redis
+      - clickhouse
+    restart: "no"
 volumes:
   redis_data:
+  clickhouse_data:
+  clickhouse_logs:
+  postgres_data:
+  postgres_logs:
+  dbgate-data:
+    driver: local
