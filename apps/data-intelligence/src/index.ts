@@ -1,15 +1,46 @@
 // Entry point for Data Intelligence Service
 import { createElysiaServer, DEFAULT_SERVER_CONFIG } from "@libs/elysia-server";
 import { setupFeatureRoutes } from "./routes";
+import { container } from "./container";
 
-const server = createElysiaServer(
-  {
-    ...DEFAULT_SERVER_CONFIG,
-    name: "data-intelligence-service",
-    port: 4000,
-    version: "1.0.0",
-  },
-  setupFeatureRoutes
-);
+async function startServer() {
+  try {
+    // Initialize DI container
+    await container.initialize();
 
-server.start();
+    // Connect databases
+    await container.connectDatabases();
+
+    // Create server with ServiceRegistry-powered routes
+    const server = createElysiaServer(
+      {
+        ...DEFAULT_SERVER_CONFIG,
+        name: "data-intelligence-service",
+        port: 4000,
+        version: "1.0.0",
+      },
+      (app) => setupFeatureRoutes(app, container)
+    );
+
+    // Graceful shutdown handling
+    process.on("SIGTERM", async () => {
+      console.log("SIGTERM received, shutting down gracefully");
+      await container.dispose();
+      process.exit(0);
+    });
+
+    process.on("SIGINT", async () => {
+      console.log("SIGINT received, shutting down gracefully");
+      await container.dispose();
+      process.exit(0);
+    });
+
+    server.start();
+  } catch (error) {
+    console.error("Failed to start Data Intelligence Service:", error);
+    await container.dispose();
+    process.exit(1);
+  }
+}
+
+startServer();

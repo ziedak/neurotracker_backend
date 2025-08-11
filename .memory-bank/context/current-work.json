@@ -83,8 +83,16 @@
       "date": "2025-08-10",
       "status": "active",
       "priority": "high",
-      "progress": 0,
+      "progress": 58.3,
       "task_dir": ".memory-bank/tasks/2025-08-10-dashboard-service/"
+    },
+    {
+      "name": "review-optimize-data-intelligence",
+      "date": "2025-08-10",
+      "status": "active",
+      "priority": "high",
+      "progress": 0,
+      "task_dir": ".memory-bank/tasks/2025-08-10-review-optimize-data-intelligence/"
     }
   ],
   "paused_tasks": [
@@ -95,14 +103,6 @@
       "priority": "high",
       "progress": 0,
       "task_dir": ".memory-bank/tasks/2025-08-10-review-optimize-event-pipeline/"
-    },
-    {
-      "name": "data-intelligence-service",
-      "date": "2025-08-10",
-      "status": "paused",
-      "priority": "high",
-      "progress": 0,
-      "task_dir": ".memory-bank/tasks/2025-08-10-data-intelligence-service/"
     }
   ],
   "completed_tasks": [
@@ -171,5 +171,5 @@
       "real_time_communication"
     ]
   },
-  "last_modified": "2025-08-10T18:00:00Z"
+  "last_modified": "2025-08-10T22:00:00Z"
 }

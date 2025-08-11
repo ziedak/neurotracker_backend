@@ -104,6 +104,22 @@ export const setupDashboardRoutes: RouteSetup = (app) => {
     return { status: "created" };
   });
 
+  // --- Real-Time Metrics Summary ---
+  app.get("/api/metrics/live/summary", async ({ request }) =>
+    fetchFromGateway(
+      "/api/data/v1/metrics/live/summary",
+      request.headers.get("authorization") || ""
+    )
+  );
+
+  // --- Real-Time Analytics Endpoint ---
+  app.get("/api/analytics/real-time", async ({ request }) =>
+    fetchFromGateway(
+      "/api/data/v1/analytics/real-time",
+      request.headers.get("authorization") || ""
+    )
+  );
+
   // --- Analytics & Reporting ---
   app.get(
     "/api/analytics/:type",
@@ -276,6 +292,79 @@ export const setupDashboardRoutes: RouteSetup = (app) => {
       request.headers.get("authorization") || ""
     )
   );
+
+  // --- Real-Time Metrics WebSocket ---
+  // --- Real-Time Metrics WebSocket: Push live metrics ---
+  type MetricsPayload = {
+    usersOnline: number;
+    activeCarts: number;
+    revenue: number;
+    timestamp: string;
+  };
+
+  // Track all connected clients
+  const metricsClients = new Set<any>();
+  let metricsInterval: NodeJS.Timeout | null = null;
+
+  // Simulate backend metrics source (replace with real backend integration)
+  function getLiveMetrics(): MetricsPayload {
+    // TODO: Replace with actual backend metrics fetch
+    return {
+      usersOnline: Math.floor(Math.random() * 100),
+      activeCarts: Math.floor(Math.random() * 50),
+      revenue: Math.floor(Math.random() * 10000),
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  function broadcastMetrics() {
+    const payload = {
+      type: "metrics",
+      metrics: getLiveMetrics(),
+    };
+    for (const ws of metricsClients) {
+      try {
+        ws.send(JSON.stringify(payload));
+      } catch (err) {
+        // Ignore send errors
+      }
+    }
+  }
+
+  app.ws("/ws/metrics", {
+    open: (ws) => {
+      metricsClients.add(ws);
+      ws.send(
+        JSON.stringify({
+          type: "connection",
+          message: "Connected to real-time metrics stream",
+          timestamp: new Date().toISOString(),
+        })
+      );
+      // Start interval if first client
+      if (metricsClients.size === 1) {
+        metricsInterval = setInterval(broadcastMetrics, 2000); // Push every 2s
+      }
+    },
+    message: (ws, msg) => {
+      // Optionally handle client messages (e.g., filter, subscribe)
+      ws.send(
+        JSON.stringify({
+          type: "echo",
+          received: msg,
+          timestamp: new Date().toISOString(),
+        })
+      );
+    },
+    close: (ws, code, reason) => {
+      metricsClients.delete(ws);
+      // Stop interval if no clients
+      if (metricsClients.size === 0 && metricsInterval) {
+        clearInterval(metricsInterval);
+        metricsInterval = null;
+      }
+    },
+  });
 
   // TODO: Add more endpoints for reporting, export, UI, etc.
 

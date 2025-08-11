@@ -563,7 +563,7 @@ GET    /analytics/conversion # Conversion funnel
 
 ---
 
-## 5. Data Platform Service
+## 5. Data intelegence Service
 
 ### Functional Responsibilities
 

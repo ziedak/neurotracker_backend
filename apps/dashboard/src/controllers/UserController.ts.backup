@@ -1,0 +1,314 @@
+// User Controller - Handle user management endpoints
+import { Elysia, t } from "@libs/elysia-server";
+import { DashboardContainer } from "../container/DashboardContainer";
+import { UserService } from "../services/UserService";
+import {
+  createAuthMiddleware,
+  requireAdmin,
+  requireStoreOwner,
+  type DashboardAuthContext,
+} from "../middleware/auth.middleware";
+import { ValidationSchemas } from "../middleware/validation.middleware";
+import { ErrorCreators } from "../middleware/error.middleware";
+import { log, BusinessLogger } from "../middleware/logging.middleware";
+
+// Helper function to extract auth header
+function getAuthHeader(context: { headers: Record<string, string | undefined> }): string {
+  return context.headers.authorization || '';
+}
+
+/**
+ * Type guard for errors with status codes
+ */
+function hasStatusCode(
+  error: unknown
+): error is { statusCode: number; message: string } {
+  return typeof error === "object" && error !== null && "statusCode" in error;
+}
+
+/**
+ * Get error message from unknown error
+ */
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  return "Unknown error occurred";
+}
+
+/**
+ * User management controller with full CRUD operations
+ */
+export function createUserController(container: DashboardContainer) {
+  const userService = container.get<UserService>("UserService");
+
+  return (
+    new Elysia({ prefix: "/api/users" })
+      .use(createAuthMiddleware())
+      
+      // List users with pagination and filtering
+      .get("/", async (context: any) => {
+        try {
+          const { query, auth, headers } = context;
+          const authHeader = getAuthHeader({ headers });
+          
+          const result = await userService.getUsers(
+            authHeader,
+            parseInt(query.page) || 1,
+            parseInt(query.limit) || 20,
+            query.search
+          );
+
+          log('info', 'UserController.getUsers', {
+            userId: auth.user.id,
+            query,
+            resultCount: result.users.length
+          });
+
+          return {
+            success: true,
+            data: {
+              users: result.users,
+              pagination: {
+                total: result.total,
+                page: result.page,
+                limit: result.limit,
+                totalPages: Math.ceil(result.total / result.limit)
+              }
+            }
+          };
+        } catch (error: unknown) {
+          BusinessLogger.userActivity(auth.user.id, 'error', { 
+            action: 'fetch_users_failed',
+            error: getErrorMessage(error)
+          });
+          
+          if (hasStatusCode(error)) {
+            throw error;
+          }
+          throw new Error(`Failed to fetch users: ${getErrorMessage(error)}`);
+        }
+      })
+
+      // Get user by ID
+      .get("/:id", async (context: any) => {
+        try {
+          const { params, auth, headers } = context;
+          const authHeader = getAuthHeader({ headers });
+          const user = await userService.getUserById(params.id, authHeader);
+
+          if (!user) {
+            throw ErrorCreators.notFound("User");
+          }
+
+          // Store owners can only access users in their store (implement store logic if needed)
+          // TODO: Implement proper store isolation when User schema includes storeId
+          if (auth.user.role !== "admin") {
+            // For now, store owners can access all users they can see
+            // Future: Add store validation logic here
+          }
+
+          BusinessLogger.userActivity(auth.user.id, "view_user", {
+            targetUserId: params.id,
+          });
+
+          return {
+            success: true,
+            data: user
+          };
+        } catch (error: unknown) {
+          BusinessLogger.userActivity(auth.user.id, 'error', { 
+            action: 'fetch_user_failed',
+            targetUserId: params.id,
+            error: getErrorMessage(error)
+          });
+          
+          if (hasStatusCode(error)) {
+            throw error;
+          }
+          throw new Error(`Failed to fetch user: ${getErrorMessage(error)}`);
+        }
+      })
+
+      // Create new user
+      .post("/", async (context: any) => {
+        try {
+          const { body, auth, headers } = context;
+          const authHeader = getAuthHeader({ headers });
+
+          // For non-admin users, create users with standard permissions
+          // TODO: Implement store isolation when User schema supports storeId
+          const userData = {
+            ...body
+            // Future: Add storeId logic when User interface supports it
+          };
+
+          const newUser = await userService.createUser(userData, authHeader);
+
+          BusinessLogger.userActivity(auth.user.id, "create_user", {
+            newUserId: newUser.id,
+            newUserEmail: newUser.email,
+            newUserRole: newUser.role,
+          });
+
+          return {
+            success: true,
+            data: {
+              id: newUser.id,
+              email: newUser.email,
+              name: newUser.name,
+              role: newUser.role,
+              isActive: newUser.isActive,
+              createdAt: newUser.createdAt
+            },
+            message: "User created successfully"
+          };
+        } catch (error: unknown) {
+          BusinessLogger.userActivity(auth.user.id, 'error', { 
+            action: 'create_user_failed',
+            userData: body,
+            error: getErrorMessage(error)
+          });
+          
+          if (hasStatusCode(error)) {
+            throw error;
+          }
+          throw new Error(`Failed to create user: ${getErrorMessage(error)}`);
+        }
+      })
+
+      // Update user
+      .put("/:id", async (context: any) => {
+        try {
+          const { params, body, auth, headers } = context;
+          const authHeader = getAuthHeader({ headers });
+          
+          const existingUser = await userService.getUserById(params.id, authHeader);
+          if (!existingUser) {
+            throw ErrorCreators.notFound("User");
+          }
+
+          // Store owners can only update users in their store (implement store logic if needed)
+          // TODO: Implement proper store isolation when User schema includes storeId
+          if (auth.user.role !== "admin") {
+            // For now, store owners can update all users they can access
+            // Future: Add store validation logic here
+          }
+
+          // Prevent non-admin users from changing roles to admin
+          if (auth.user.role !== 'admin' && body.role === 'admin') {
+            throw ErrorCreators.forbidden("Cannot assign admin role");
+          }
+
+          const updatedUser = await userService.updateUser(params.id, body, authHeader);
+
+          BusinessLogger.userActivity(auth.user.id, "update_user", {
+            targetUserId: params.id,
+            updateData: body,
+          });
+
+          return {
+            success: true,
+            data: updatedUser,
+            message: "User updated successfully"
+          };
+        } catch (error: unknown) {
+          BusinessLogger.userActivity(auth.user.id, 'error', { 
+            action: 'update_user_failed',
+            targetUserId: params.id,
+            updateData: body,
+            error: getErrorMessage(error)
+          });
+          
+          if (hasStatusCode(error)) {
+            throw error;
+          }
+          throw new Error(`Failed to update user: ${getErrorMessage(error)}`);
+        }
+      })
+
+      // Delete user (soft delete)
+      .delete("/:id", async (context: any) => {
+        try {
+          const { params, auth, headers } = context;
+          const authHeader = getAuthHeader({ headers });
+          
+          const existingUser = await userService.getUserById(params.id, authHeader);
+          if (!existingUser) {
+            throw ErrorCreators.notFound("User");
+          }
+
+          // Prevent self-deletion
+          if (params.id === auth.user.id) {
+            throw ErrorCreators.forbidden("Cannot delete your own account");
+          }
+
+          // Store owners can only delete users in their store (implement store logic if needed)
+          // TODO: Implement proper store isolation when User schema includes storeId
+          if (auth.user.role !== "admin") {
+            // For now, store owners can delete all users they can access
+            // Future: Add store validation logic here
+          }
+
+          await userService.deleteUser(params.id, authHeader);
+
+          BusinessLogger.userActivity(auth.user.id, "delete_user", {
+            deletedUserId: params.id,
+            deletedUserEmail: existingUser.email,
+          });
+
+          return {
+            success: true,
+            message: "User deleted successfully"
+          };
+        } catch (error: unknown) {
+          BusinessLogger.userActivity(auth.user.id, 'error', { 
+            action: 'delete_user_failed',
+            targetUserId: params.id,
+            error: getErrorMessage(error)
+          });
+          
+          if (hasStatusCode(error)) {
+            throw error;
+          }
+          throw new Error(`Failed to delete user: ${getErrorMessage(error)}`);
+        }
+      })
+
+      // Get user activity log
+      .get("/:id/activity", async (context: any) => {
+        try {
+          const { params, query, auth, headers } = context;
+          const authHeader = getAuthHeader({ headers });
+          
+          const activities = await userService.getUserActivity(
+            params.id, 
+            authHeader,
+            parseInt(query.limit) || 50
+          );
+
+          BusinessLogger.userActivity(auth.user.id, "view_user_activity", {
+            targetUserId: params.id,
+          });
+
+          return {
+            success: true,
+            data: activities
+          };
+        } catch (error: unknown) {
+          BusinessLogger.userActivity(auth.user.id, 'error', { 
+            action: 'fetch_user_activity_failed',
+            targetUserId: params.id,
+            error: getErrorMessage(error)
+          });
+          
+          if (hasStatusCode(error)) {
+            throw error;
+          }
+          throw new Error(`Failed to fetch user activity: ${getErrorMessage(error)}`);
+        }
+      })
+
+  );
+}
+
+export default createUserController;
