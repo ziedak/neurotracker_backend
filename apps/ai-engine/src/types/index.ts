@@ -5,12 +5,14 @@
 
 export interface Prediction {
   cartId: string;
+  modelName: string;
+  modelVersion: string;
+  value: number;
   probability: number;
   confidence: number;
   recommendedAction: string;
   recommendedDiscount?: number;
   reasoning: string[];
-  modelVersion: string;
   computedAt: string;
   features?: Record<string, number>;
   metadata?: PredictionMetadata;
@@ -22,6 +24,8 @@ export interface PredictionMetadata {
   modelLoadTime?: number;
   featureComputeTime?: number;
   inferenceTime?: number;
+  modelConfidence?: number;
+  keyFeatures?: Record<string, number>;
 }
 
 export interface BatchPredictionRequest {
@@ -52,8 +56,11 @@ export interface BatchSummary {
 
 export interface PredictionRequest {
   cartId: string;
+  modelName: string;
   features?: Record<string, number>;
   modelVersion?: string;
+  forceRecompute?: boolean;
+  requestId?: string;
   options?: PredictionOptions;
 }
 
@@ -75,6 +82,12 @@ export interface PredictionError {
  * ML Model Interfaces
  */
 export interface MLModel {
+  id: string;
+  name: string;
+  version: string;
+  type: string;
+  metadata: ModelMetadata;
+  parameters: Record<string, any>;
   predict(features: Record<string, number>): Promise<Prediction>;
   getVersion(): string;
   isLoaded(): boolean;
@@ -98,7 +111,11 @@ export interface ModelPerformance {
   averageLatency: number;
   throughput: number;
   accuracy: number;
+  precision: number;
+  recall: number;
+  f1Score: number;
   lastEvaluated: string;
+  timestamp?: string;
 }
 
 export interface ModelConfig {
@@ -137,7 +154,7 @@ export interface FeatureSet {
 
 export interface FeatureDefinition {
   name: string;
-  type: 'number' | 'string' | 'boolean';
+  type: "number" | "string" | "boolean";
   description: string;
   computation: string;
   dependencies: string[];
@@ -331,6 +348,52 @@ export interface ABTestMetadata {
 }
 
 /**
+ * Service Interface Types
+ */
+export interface CacheService {
+  get(key: string): Promise<any>;
+  set(key: string, value: any, ttl?: number): Promise<void>;
+  delete(key: string): Promise<void>;
+  clear(): Promise<void>;
+  getStats(): Promise<CacheStats>;
+  getHealthStatus(): Promise<any>;
+  getModel(key: string): Promise<MLModel | undefined>;
+  setModel(key: string, model: MLModel, ttl?: number): Promise<void>;
+}
+
+export interface RateLimitMiddleware {
+  checkRateLimit(context: any): Promise<void>;
+  getRemainingRequests(key: string): Promise<number>;
+  resetRateLimit(key: string): Promise<void>;
+}
+
+export interface MetricsCollector {
+  recordHistogram(
+    metric: string,
+    value: number,
+    labels?: Record<string, string>
+  ): Promise<void>;
+  recordCounter(
+    metric: string,
+    value?: number,
+    labels?: Record<string, string>
+  ): Promise<void>;
+  recordGauge(
+    metric: string,
+    value: number,
+    labels?: Record<string, string>
+  ): Promise<void>;
+}
+
+export interface CircuitBreaker {
+  execute<T>(fn: () => Promise<T>): Promise<T>;
+  getState(): string;
+  getFailureCount(): number;
+  getLastFailureTime(): number;
+  reset(): void;
+}
+
+/**
  * Error Types
  */
 export interface AIEngineError {
@@ -342,25 +405,31 @@ export interface AIEngineError {
 }
 
 export enum ErrorCodes {
-  MODEL_NOT_FOUND = 'MODEL_NOT_FOUND',
-  MODEL_LOAD_FAILED = 'MODEL_LOAD_FAILED',
-  FEATURE_COMPUTATION_FAILED = 'FEATURE_COMPUTATION_FAILED',
-  PREDICTION_FAILED = 'PREDICTION_FAILED',
-  VALIDATION_FAILED = 'VALIDATION_FAILED',
-  RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED',
-  TIMEOUT = 'TIMEOUT',
-  CACHE_ERROR = 'CACHE_ERROR',
-  DATA_INTELLIGENCE_ERROR = 'DATA_INTELLIGENCE_ERROR',
-  UNKNOWN_ERROR = 'UNKNOWN_ERROR'
+  MODEL_NOT_FOUND = "MODEL_NOT_FOUND",
+  MODEL_LOAD_FAILED = "MODEL_LOAD_FAILED",
+  FEATURE_COMPUTATION_FAILED = "FEATURE_COMPUTATION_FAILED",
+  PREDICTION_FAILED = "PREDICTION_FAILED",
+  VALIDATION_FAILED = "VALIDATION_FAILED",
+  RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED",
+  TIMEOUT = "TIMEOUT",
+  CACHE_ERROR = "CACHE_ERROR",
+  DATA_INTELLIGENCE_ERROR = "DATA_INTELLIGENCE_ERROR",
+  UNKNOWN_ERROR = "UNKNOWN_ERROR",
 }
 
 /**
  * Event Types for monitoring and logging
  */
 export interface PredictionEvent {
-  type: 'prediction_requested' | 'prediction_completed' | 'prediction_failed';
+  type:
+    | "prediction_requested"
+    | "prediction_completed"
+    | "prediction_failed"
+    | "prediction_cached"
+    | "prediction_generated";
   cartId: string;
   modelVersion: string;
+  modelName?: string;
   timestamp: string;
   duration?: number;
   error?: string;
@@ -368,7 +437,14 @@ export interface PredictionEvent {
 }
 
 export interface ModelEvent {
-  type: 'model_loaded' | 'model_unloaded' | 'model_failed' | 'model_validated';
+  type:
+    | "model_loaded"
+    | "model_unloaded"
+    | "model_failed"
+    | "model_validated"
+    | "model_retrieved"
+    | "model_version_updated"
+    | "model_performance_recorded";
   modelVersion: string;
   timestamp: string;
   duration?: number;
@@ -377,7 +453,11 @@ export interface ModelEvent {
 }
 
 export interface FeatureEvent {
-  type: 'features_requested' | 'features_computed' | 'features_cached' | 'features_failed';
+  type:
+    | "features_requested"
+    | "features_computed"
+    | "features_cached"
+    | "features_failed";
   cartId: string;
   timestamp: string;
   duration?: number;

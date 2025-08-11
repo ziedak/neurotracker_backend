@@ -1,5 +1,5 @@
 {
-  "name": "config",
+  "name": "@libs/config",
   "version": "1.0.0",
   "main": "../../dist/libs/config/index.js",
   "types": "../../dist/libs/config/index.d.ts",

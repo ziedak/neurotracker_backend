@@ -1,5 +1,5 @@
 {
-  "name": "database",
+  "name": "@libs/database",
   "version": "1.0.0",
   "main": "../../dist/libs/database/index.js",
   "types": "../../dist/libs/database/index.d.ts",

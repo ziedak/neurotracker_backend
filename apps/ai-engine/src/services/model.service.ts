@@ -3,6 +3,85 @@ import { CacheService } from "./cache.service";
 import { MLModel, ModelMetadata, ModelPerformance, ModelEvent } from "../types";
 import { performance } from "perf_hooks";
 
+// Memory-bounded model cache (LRU)
+interface LRUCache<K, V> {
+  get(key: K): V | undefined;
+  set(key: K, value: V): void;
+  delete(key: K): boolean;
+  clear(): void;
+  has(key: K): boolean;
+  keys(): IterableIterator<K>;
+  size: number;
+}
+
+// Simple LRU implementation for models
+class ModelLRUCache<K, V> implements LRUCache<K, V> {
+  private readonly maxSize: number;
+  private readonly cache = new Map<K, V>();
+  private readonly accessOrder = new Map<K, number>();
+  private accessCounter = 0;
+
+  constructor(maxSize: number = 20) {
+    this.maxSize = maxSize;
+  }
+
+  get(key: K): V | undefined {
+    const value = this.cache.get(key);
+    if (value !== undefined) {
+      this.accessOrder.set(key, ++this.accessCounter);
+    }
+    return value;
+  }
+
+  set(key: K, value: V): void {
+    if (this.cache.size >= this.maxSize && !this.cache.has(key)) {
+      this.evictLeastRecentlyUsed();
+    }
+    this.cache.set(key, value);
+    this.accessOrder.set(key, ++this.accessCounter);
+  }
+
+  has(key: K): boolean {
+    return this.cache.has(key);
+  }
+
+  keys(): IterableIterator<K> {
+    return this.cache.keys();
+  }
+
+  private evictLeastRecentlyUsed(): void {
+    let lruKey: K | undefined;
+    let lruAccess = Infinity;
+
+    for (const [key, access] of this.accessOrder.entries()) {
+      if (access < lruAccess) {
+        lruAccess = access;
+        lruKey = key;
+      }
+    }
+
+    if (lruKey !== undefined) {
+      this.cache.delete(lruKey);
+      this.accessOrder.delete(lruKey);
+    }
+  }
+
+  delete(key: K): boolean {
+    this.accessOrder.delete(key);
+    return this.cache.delete(key);
+  }
+
+  clear(): void {
+    this.cache.clear();
+    this.accessOrder.clear();
+    this.accessCounter = 0;
+  }
+
+  get size(): number {
+    return this.cache.size;
+  }
+}
+
 /**
  * Model Service for AI Engine
  * Manages ML model loading, versioning, performance monitoring, and A/B testing
@@ -20,12 +99,12 @@ export class ModelService {
     A_B_TEST_SPLIT: 0.5, // 50/50 split for A/B testing
   };
 
-  // In-memory model registry
-  private modelRegistry: Map<string, MLModel> = new Map();
+  // In-memory model registry with memory bounds (MAX 20 models)
+  private modelRegistry: ModelLRUCache<string, MLModel> = new ModelLRUCache(20);
   private activeModelVersions: Map<string, string> = new Map(); // modelName -> version
   private abTestConfig: Map<string, any> = new Map();
 
-  // Performance tracking
+  // Performance tracking with memory bounds
   private modelPerformance: Map<string, ModelPerformance[]> = new Map();
   private lastPerformanceCheck: number = 0;
 

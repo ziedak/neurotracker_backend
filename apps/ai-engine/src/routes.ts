@@ -9,27 +9,98 @@ import { ValidationMiddleware } from "./middleware/validation.middleware";
 import { RateLimitMiddleware } from "./middleware/rateLimit.middleware";
 import { AuditMiddleware } from "./middleware/audit.middleware";
 
+// Cache service instances to reduce DI resolution overhead
+class ServiceCache {
+  private static _predictionService: PredictionService | null = null;
+  private static _modelService: ModelService | null = null;
+  private static _featureService: FeatureService | null = null;
+  private static _cacheService: CacheService | null = null;
+  private static _authMiddleware: AuthMiddleware | null = null;
+  private static _validationMiddleware: ValidationMiddleware | null = null;
+  private static _rateLimitMiddleware: RateLimitMiddleware | null = null;
+  private static _auditMiddleware: AuditMiddleware | null = null;
+
+  static get predictionService(): PredictionService {
+    if (!this._predictionService) {
+      this._predictionService =
+        container.getService<PredictionService>("predictionService");
+    }
+    return this._predictionService;
+  }
+
+  static get modelService(): ModelService {
+    if (!this._modelService) {
+      this._modelService = container.getService<ModelService>("modelService");
+    }
+    return this._modelService;
+  }
+
+  static get featureService(): FeatureService {
+    if (!this._featureService) {
+      this._featureService =
+        container.getService<FeatureService>("featureService");
+    }
+    return this._featureService;
+  }
+
+  static get cacheService(): CacheService {
+    if (!this._cacheService) {
+      this._cacheService = container.getService<CacheService>("cacheService");
+    }
+    return this._cacheService;
+  }
+
+  static get authMiddleware(): AuthMiddleware {
+    if (!this._authMiddleware) {
+      this._authMiddleware =
+        container.getService<AuthMiddleware>("authMiddleware");
+    }
+    return this._authMiddleware;
+  }
+
+  static get validationMiddleware(): ValidationMiddleware {
+    if (!this._validationMiddleware) {
+      this._validationMiddleware = container.getService<ValidationMiddleware>(
+        "validationMiddleware"
+      );
+    }
+    return this._validationMiddleware;
+  }
+
+  static get rateLimitMiddleware(): RateLimitMiddleware {
+    if (!this._rateLimitMiddleware) {
+      this._rateLimitMiddleware = container.getService<RateLimitMiddleware>(
+        "rateLimitMiddleware"
+      );
+    }
+    return this._rateLimitMiddleware;
+  }
+
+  static get auditMiddleware(): AuditMiddleware {
+    if (!this._auditMiddleware) {
+      this._auditMiddleware =
+        container.getService<AuditMiddleware>("auditMiddleware");
+    }
+    return this._auditMiddleware;
+  }
+}
+
 /**
  * Setup AI Engine routes with complete API implementation
  */
 export function setupRoutes(app: Elysia): Elysia {
-  // Get services from container
-  const predictionService =
-    container.getService<PredictionService>("predictionService");
-  const modelService = container.getService<ModelService>("modelService");
-  const featureService = container.getService<FeatureService>("featureService");
-  const cacheService = container.getService<CacheService>("cacheService");
+  // Use cached service instances (resolved once, cached forever)
+  const predictionService = ServiceCache.predictionService;
+  const modelService = ServiceCache.modelService;
+  const featureService = ServiceCache.featureService;
+  const cacheService = ServiceCache.cacheService;
 
-  // Get middleware from container
-  const authMiddleware = container.getService<AuthMiddleware>("authMiddleware");
-  const validationMiddleware = container.getService<ValidationMiddleware>(
-    "validationMiddleware"
-  );
-  const rateLimitMiddleware = container.getService<RateLimitMiddleware>(
-    "rateLimitMiddleware"
-  );
-  const auditMiddleware =
-    container.getService<AuditMiddleware>("auditMiddleware");
+  // Use cached middleware instances
+  const authMiddleware = ServiceCache.authMiddleware;
+  const validationMiddleware = ServiceCache.validationMiddleware;
+  const rateLimitMiddleware = ServiceCache.rateLimitMiddleware;
+  const auditMiddleware = ServiceCache.auditMiddleware;
+  container.getService<AuditMiddleware>("auditMiddleware");
 
   // Health check (enhanced)
   app.get("/ai-health", async () => {

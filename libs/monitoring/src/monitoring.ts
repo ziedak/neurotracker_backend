@@ -135,6 +135,23 @@ export class MetricsCollector {
     await this.storeMetric(metric);
   }
 
+  async recordHistogram(
+    name: string,
+    value: number,
+    tags?: Record<string, string>
+  ) {
+    // For now, treat histogram like a gauge
+    // In production, you'd implement proper histogram buckets
+    const metric: Metric = {
+      name: `${name}_histogram`,
+      value,
+      timestamp: Date.now(),
+      tags,
+    };
+
+    await this.storeMetric(metric);
+  }
+
   private async storeMetric(metric: Metric) {
     try {
       const key = `metrics:${metric.name}`;

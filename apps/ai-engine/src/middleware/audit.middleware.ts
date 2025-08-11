@@ -1,4 +1,4 @@
-import { Context } from "elysia";
+import { Context } from "@libs/elysia-server";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { performance } from "perf_hooks";
 

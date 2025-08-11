@@ -1,5 +1,5 @@
 {
-  "name": "monitoring",
+  "name": "@libs/monitoring",
   "version": "1.0.0",
   "main": "../../dist/libs/monitoring/index.js",
   "types": "../../dist/libs/monitoring/index.d.ts",

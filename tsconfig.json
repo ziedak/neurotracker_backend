@@ -3,6 +3,8 @@
   "references": [
     { "path": "apps/api-gateway" },
     { "path": "apps/event-pipeline" },
+    { "path": "apps/dashboard" },
+    { "path": "apps/ai-engine" },
     { "path": "apps/prediction" },
     { "path": "libs/auth" },
     { "path": "libs/config" },

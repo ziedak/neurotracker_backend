@@ -8,10 +8,10 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@libs/elysia-server": "*",
-    "@libs/monitoring": "*",
-    "@libs/auth": "*",
-    "@libs/database": "*"
+    "@libs/elysia-server": "workspace:*",
+    "@libs/monitoring": "workspace:*",
+    "@libs/auth": "workspace:*",
+    "@libs/database": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.0.0",

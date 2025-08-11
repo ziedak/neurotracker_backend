@@ -1,5 +1,5 @@
 {
-  "name": "utils",
+  "name": "@libs/utils",
   "version": "1.0.0",
   "main": "../../dist/libs/utils/index.js",
   "types": "../../dist/libs/utils/index.d.ts",

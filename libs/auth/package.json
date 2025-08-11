@@ -1,5 +1,5 @@
 {
-  "name": "auth",
+  "name": "@libs/auth",
   "version": "1.0.0",
   "main": "../../dist/libs/auth/index.js",
   "types": "../../dist/libs/auth/index.d.ts",

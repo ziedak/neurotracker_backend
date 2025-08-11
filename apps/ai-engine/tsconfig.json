@@ -1,30 +1,19 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "./dist",
-    "baseUrl": "../../",
-    "paths": {
-      "@libs/*": ["libs/*/src"],
-      "@services/*": ["./src/services/*"],
-      "@types/*": ["./src/types/*"],
-      "@utils/*": ["./src/utils/*"]
-    },
-    "lib": ["ES2022"],
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "node",
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
-    "strict": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": false,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true
+    "composite": true,
+    "outDir": "../../dist/apps/event-pipeline",
+    "rootDir": "src"
   },
+  "references": [
+    { "path": "../../libs/models" },
+    { "path": "../../libs/utils" },
+    { "path": "../../libs/config" },
+    { "path": "../../libs/messaging" },
+    { "path": "../../libs/elysia-server" },
+    { "path": "../../libs/database" },
+    { "path": "../../libs/monitoring" }
+  ],
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
 }
