@@ -1,6 +1,12 @@
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { CacheService } from "./cache.service";
-import { MLModel, ModelMetadata, ModelPerformance, ModelEvent } from "../types";
+import {
+  MLModel,
+  ModelMetadata,
+  ModelPerformance,
+  ModelEvent,
+  Prediction,
+} from "../types";
 import { performance } from "perf_hooks";
 
 // Memory-bounded model cache (LRU)
@@ -199,9 +205,9 @@ export class ModelService {
       if (!model) {
         // Check Redis cache
         const cached = await this.cacheService.getModel(modelKey);
-        if (cached) {
+        if (cached && cached.data) {
           model = cached.data;
-          this.modelRegistry.set(modelKey, model);
+          this.modelRegistry.set(modelKey, model as MLModel);
         }
       }
 
@@ -233,11 +239,10 @@ export class ModelService {
       await this.recordModelEvent({
         type: "model_retrieved",
         modelName,
-        version: targetVersion,
-        cartId,
-        requestId,
+        modelVersion: targetVersion,
         timestamp: new Date().toISOString(),
         duration,
+        metadata: { cartId, requestId, version: targetVersion },
       });
 
       return model;
@@ -304,13 +309,17 @@ export class ModelService {
     const now = new Date().toISOString();
 
     const baseModel: MLModel = {
+      id: `${modelName}_${version}`,
       name: modelName,
       version,
       type: "cart_abandonment_predictor",
       status: "active",
       metadata: {
+        version,
+        name: modelName,
         description: `${modelName} prediction model`,
         algorithm: "gradient_boosting",
+        trainedAt: now,
         features: [
           "cart_value",
           "session_duration",
@@ -327,11 +336,14 @@ export class ModelService {
           sampleCount: 100000,
         },
         performance: {
+          averageLatency: 50,
+          throughput: 100,
           accuracy: 0.85,
           precision: 0.82,
           recall: 0.88,
           f1Score: 0.85,
           auc: 0.91,
+          lastEvaluated: now,
         },
         createdAt: now,
         updatedAt: now,
@@ -347,6 +359,24 @@ export class ModelService {
         predict: `/models/${modelName}/predict`,
         batch_predict: `/models/${modelName}/batch-predict`,
         explain: `/models/${modelName}/explain`,
+      },
+
+      // Required methods
+      async predict(features: Record<string, number>): Promise<Prediction> {
+        // This would be implemented by the actual model
+        throw new Error("Predict method must be implemented by model instance");
+      },
+
+      getVersion(): string {
+        return this.version;
+      },
+
+      isLoaded(): boolean {
+        return true;
+      },
+
+      getMetadata(): ModelMetadata {
+        return this.metadata;
       },
     };
 
@@ -488,7 +518,7 @@ export class ModelService {
       await this.recordModelEvent({
         type: "model_version_updated",
         modelName,
-        version,
+        modelVersion: version,
         previousVersion: oldVersion,
         timestamp: new Date().toISOString(),
       });
@@ -577,7 +607,7 @@ export class ModelService {
       await this.recordModelEvent({
         type: "model_performance_recorded",
         modelName,
-        version,
+        modelVersion: version,
         performance: fullPerformance,
         timestamp: new Date().toISOString(),
       });

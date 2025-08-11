@@ -209,7 +209,7 @@ export class AIEngineContainer {
 
     // Rate Limit Middleware - singleton
     this._registry.registerSingleton("rateLimitMiddleware", () => {
-      const redis = this._registry.resolve<RedisClient>("redisClient");
+      const redis = RedisClient.getInstance(); // Get the Redis instance directly
       const logger = this._registry.resolve<Logger>("logger");
       const metrics =
         this._registry.resolve<MetricsCollector>("metricsCollector");

@@ -275,7 +275,7 @@ export class AuditMiddleware {
       requestSize,
       responseSize,
       clientIp: this.getClientIp(request),
-      userAgent: request.headers.get("user-agent"),
+      userAgent: request.headers.get("user-agent") || "unknown",
       requestId: metadata.requestId,
       sessionId: this.extractSessionId(request),
       success:

@@ -140,12 +140,12 @@ export function setupRoutes(app: Elysia): Elysia {
     await rateLimitMiddleware.checkRateLimit(context);
   });
 
-  app.onAfterHandle(async (context, response) => {
-    await auditMiddleware.auditPostRequest(context, response);
+  app.onAfterHandle(async (context) => {
+    await auditMiddleware.auditPostRequest(context as any, context.response);
   });
 
-  app.onError(async (context, error) => {
-    await auditMiddleware.auditError(context, error);
+  app.onError(async (context) => {
+    await auditMiddleware.auditError(context as any, context.error);
   });
 
   // Prediction endpoints

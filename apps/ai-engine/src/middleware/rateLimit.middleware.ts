@@ -431,4 +431,48 @@ export class RateLimitMiddleware {
       return { totalKeys: 0, totalRequests: 0, activeWindows: 0 };
     }
   }
+
+  // Add the missing checkRateLimit method
+  async checkRateLimit(context: any): Promise<void> {
+    const options: RateLimitOptions = {
+      windowMs: 60000, // 1 minute
+      maxRequests: 100, // 100 requests per minute
+    };
+
+    // Generate rate limit key
+    const ip =
+      context.request?.headers?.["x-forwarded-for"] ||
+      context.request?.headers?.["x-real-ip"] ||
+      context.ip ||
+      "unknown";
+    const key = `ai_rate_limit:${ip}`;
+
+    // Check current count
+    const now = Date.now();
+    const window = Math.floor(now / options.windowMs);
+    const windowKey = `${key}:${window}`;
+
+    try {
+      const count = await this.redis.incr(windowKey);
+
+      if (count === 1) {
+        await this.redis.expire(windowKey, Math.ceil(options.windowMs / 1000));
+      }
+
+      if (count > options.maxRequests) {
+        const resetTime = (window + 1) * options.windowMs;
+        const error = new Error(options.message || "Rate limit exceeded");
+        (error as any).statusCode = 429;
+        (error as any).headers = {
+          "X-RateLimit-Limit": options.maxRequests,
+          "X-RateLimit-Remaining": Math.max(0, options.maxRequests - count),
+          "X-RateLimit-Reset": new Date(resetTime).toISOString(),
+        };
+        throw error;
+      }
+    } catch (error) {
+      // If Redis fails, allow the request but log the error
+      this.logger.error("Rate limit check failed", error as Error);
+    }
+  }
 }

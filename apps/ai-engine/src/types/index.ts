@@ -14,7 +14,9 @@ export interface Prediction {
   recommendedDiscount?: number;
   reasoning: string[];
   computedAt: string;
+  timestamp?: string;
   features?: Record<string, number>;
+  explanation?: string;
   metadata?: PredictionMetadata;
 }
 
@@ -25,7 +27,8 @@ export interface PredictionMetadata {
   featureComputeTime?: number;
   inferenceTime?: number;
   modelConfidence?: number;
-  keyFeatures?: Record<string, number>;
+  keyFeatures?: Record<string, number> | number;
+  featureImportance?: Record<string, number>;
 }
 
 export interface BatchPredictionRequest {
@@ -86,8 +89,10 @@ export interface MLModel {
   name: string;
   version: string;
   type: string;
+  status?: string;
   metadata: ModelMetadata;
   parameters: Record<string, any>;
+  endpoints?: Record<string, string>;
   predict(features: Record<string, number>): Promise<Prediction>;
   getVersion(): string;
   isLoaded(): boolean;
@@ -105,6 +110,9 @@ export interface ModelMetadata {
   accuracy?: number;
   features: string[];
   performance: ModelPerformance;
+  trainingData?: any;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ModelPerformance {
@@ -114,6 +122,7 @@ export interface ModelPerformance {
   precision: number;
   recall: number;
   f1Score: number;
+  auc?: number;
   lastEvaluated: string;
   timestamp?: string;
 }
@@ -427,9 +436,12 @@ export interface PredictionEvent {
     | "prediction_failed"
     | "prediction_cached"
     | "prediction_generated";
+  requestId?: string;
   cartId: string;
   modelVersion: string;
   modelName?: string;
+  confidence?: number;
+  prediction?: number;
   timestamp: string;
   duration?: number;
   error?: string;
@@ -445,7 +457,11 @@ export interface ModelEvent {
     | "model_retrieved"
     | "model_version_updated"
     | "model_performance_recorded";
+  modelName?: string;
   modelVersion: string;
+  version?: string;
+  previousVersion?: string;
+  performance?: any;
   timestamp: string;
   duration?: number;
   error?: string;
