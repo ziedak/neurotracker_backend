@@ -1,6 +1,13 @@
 import { ServiceRegistry, IServiceRegistry } from "@libs/utils";
 import { RedisClient, PostgreSQLClient } from "@libs/database";
 import { Logger, MetricsCollector, HealthChecker } from "@libs/monitoring";
+import { DeliveryService } from "./delivery/delivery.service";
+import { TemplateService } from "./notifications/template.service";
+import { EmailService } from "./notifications/email.service";
+import { SMSService } from "./notifications/sms.service";
+import { PushService } from "./notifications/push.service";
+import { TrackingService } from "./tracking/tracking.service";
+import { AnalyticsService } from "./tracking/analytics.service";
 
 /**
  * Intervention Engine Container
@@ -30,8 +37,8 @@ export class InterventionEngineContainer {
       // Register database clients
       this.registerDatabaseClients();
 
-      // Register business services (to be implemented)
-      // this.registerBusinessServices();
+      // Register business services
+      this.registerBusinessServices();
 
       // Initialize core services in order
       this._registry.initializeCore([
@@ -88,6 +95,58 @@ export class InterventionEngineContainer {
     this._registry.registerSingleton("postgresClient", () =>
       PostgreSQLClient.getInstance()
     );
+  }
+
+  /**
+   * Register business services in dependency order
+   */
+  private registerBusinessServices(): void {
+    const logger = this._registry.resolve<Logger>("logger");
+    const metrics =
+      this._registry.resolve<MetricsCollector>("metricsCollector");
+    const redisClient = RedisClient.getInstance(); // Use direct instance
+
+    // Template service - handles template rendering
+    this._registry.registerSingleton(
+      "templateService",
+      () => new TemplateService(logger, metrics)
+    );
+
+    // Email service - handles email notifications (depends on template service)
+    this._registry.registerSingleton("emailService", () => {
+      const templateService =
+        this._registry.resolve<TemplateService>("templateService");
+      return new EmailService(logger, metrics, templateService);
+    });
+
+    // SMS service - handles SMS notifications (depends on template service)
+    this._registry.registerSingleton("smsService", () => {
+      const templateService =
+        this._registry.resolve<TemplateService>("templateService");
+      return new SMSService(logger, metrics, templateService);
+    });
+
+    // Push service - handles push notifications (depends on template service)
+    this._registry.registerSingleton("pushService", () => {
+      const templateService =
+        this._registry.resolve<TemplateService>("templateService");
+      return new PushService(logger, metrics, templateService);
+    });
+
+    // Tracking service - handles event tracking
+    this._registry.registerSingleton(
+      "trackingService",
+      () => new TrackingService(logger, metrics)
+    );
+
+    // Analytics service - handles advanced metrics
+    this._registry.registerSingleton(
+      "analyticsService",
+      () => new AnalyticsService(redisClient, logger)
+    );
+
+    // Note: DeliveryService and WebSocketGateway will be registered when routes are set up
+    // as they have circular dependency requirements that need to be resolved in main.ts
   }
 
   /**
