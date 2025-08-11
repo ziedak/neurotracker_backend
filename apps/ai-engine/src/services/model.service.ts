@@ -1,12 +1,7 @@
-import { Logger, MetricsCollector } from '@libs/monitoring';
-import { CacheService } from './cache.service';
-import { 
-  MLModel, 
-  ModelMetadata, 
-  ModelPerformance,
-  ModelEvent 
-} from '../types';
-import { performance } from 'perf_hooks';
+import { Logger, MetricsCollector } from "@libs/monitoring";
+import { CacheService } from "./cache.service";
+import { MLModel, ModelMetadata, ModelPerformance, ModelEvent } from "../types";
+import { performance } from "perf_hooks";
 
 /**
  * Model Service for AI Engine
@@ -43,8 +38,35 @@ export class ModelService {
     this.logger = logger;
     this.metrics = metrics;
 
-    this.logger.info('Model Service initialized');
+    this.logger.info("Model Service initialized");
     this.initializeModels();
+  }
+
+  /**
+   * Initialize default models and configurations
+   */
+  async initializeDefaultModels(): Promise<void> {
+    return this.initializeModels();
+  }
+
+  /**
+   * Dispose of resources and cleanup
+   */
+  async dispose(): Promise<void> {
+    try {
+      this.logger.info("Disposing Model Service");
+
+      // Clear all cached models
+      this.modelRegistry.clear();
+      this.activeModelVersions.clear();
+      this.abTestConfig.clear();
+      this.modelPerformance.clear();
+
+      this.logger.info("Model Service disposed successfully");
+    } catch (error) {
+      this.logger.error("Error during Model Service disposal", error as Error);
+      throw error;
+    }
   }
 
   /**
@@ -54,16 +76,16 @@ export class ModelService {
     try {
       // Load active models from cache or configure defaults
       await this.loadActiveModels();
-      
+
       // Initialize A/B test configurations
       await this.initializeABTests();
 
-      this.logger.info('Models initialized', {
+      this.logger.info("Models initialized", {
         modelCount: this.modelRegistry.size,
         activeVersions: this.activeModelVersions.size,
       });
     } catch (error) {
-      this.logger.error('Model initialization failed', error as Error);
+      this.logger.error("Model initialization failed", error as Error);
     }
   }
 
@@ -71,8 +93,8 @@ export class ModelService {
    * Get model for prediction with A/B testing support
    */
   async getModel(
-    modelName: string, 
-    cartId?: string, 
+    modelName: string,
+    cartId?: string,
     requestId?: string
   ): Promise<MLModel> {
     const startTime = performance.now();
@@ -87,7 +109,7 @@ export class ModelService {
         targetVersion = this.getABTestVersion(modelName, cartId, abConfig);
       } else {
         // Use the active version
-        targetVersion = this.activeModelVersions.get(modelName) || 'latest';
+        targetVersion = this.activeModelVersions.get(modelName) || "latest";
       }
 
       const modelKey = `${modelName}:${targetVersion}`;
@@ -107,26 +129,30 @@ export class ModelService {
       if (!model) {
         // Load model from storage or create default
         model = await this.loadModel(modelName, targetVersion);
-        
+
         // Cache in memory and Redis
         this.modelRegistry.set(modelKey, model);
-        await this.cacheService.setModel(modelKey, model, this.MODEL_CONFIG.DEFAULT_TTL);
+        await this.cacheService.setModel(
+          modelKey,
+          model,
+          this.MODEL_CONFIG.DEFAULT_TTL
+        );
       }
 
       const duration = performance.now() - startTime;
-      await this.metrics.recordTimer('model_retrieval_duration', duration);
+      await this.metrics.recordTimer("model_retrieval_duration", duration);
 
-      this.logger.debug('Model retrieved', {
+      this.logger.debug("Model retrieved", {
         modelName,
         version: targetVersion,
         cartId,
         requestId,
         duration: Math.round(duration),
-        source: this.modelRegistry.has(modelKey) ? 'memory' : 'cache',
+        source: this.modelRegistry.has(modelKey) ? "memory" : "cache",
       });
 
       await this.recordModelEvent({
-        type: 'model_retrieved',
+        type: "model_retrieved",
         modelName,
         version: targetVersion,
         cartId,
@@ -138,24 +164,34 @@ export class ModelService {
       return model;
     } catch (error) {
       const duration = performance.now() - startTime;
-      await this.metrics.recordTimer('model_retrieval_error_duration', duration);
-      await this.metrics.recordCounter('model_retrieval_error');
+      await this.metrics.recordTimer(
+        "model_retrieval_error_duration",
+        duration
+      );
+      await this.metrics.recordCounter("model_retrieval_error");
 
-      this.logger.error('Model retrieval failed', error as Error, {
+      this.logger.error("Model retrieval failed", error as Error, {
         modelName,
         cartId,
         requestId,
         duration: Math.round(duration),
       });
 
-      throw new Error(`Failed to retrieve model ${modelName}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(
+        `Failed to retrieve model ${modelName}: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     }
   }
 
   /**
    * Load model from storage or create default configuration
    */
-  private async loadModel(modelName: string, version: string): Promise<MLModel> {
+  private async loadModel(
+    modelName: string,
+    version: string
+  ): Promise<MLModel> {
     const startTime = performance.now();
 
     try {
@@ -164,9 +200,9 @@ export class ModelService {
       const model = this.createDefaultModel(modelName, version);
 
       const duration = performance.now() - startTime;
-      await this.metrics.recordTimer('model_loading_duration', duration);
+      await this.metrics.recordTimer("model_loading_duration", duration);
 
-      this.logger.info('Model loaded', {
+      this.logger.info("Model loaded", {
         modelName,
         version,
         duration: Math.round(duration),
@@ -174,7 +210,7 @@ export class ModelService {
 
       return model;
     } catch (error) {
-      this.logger.error('Model loading failed', error as Error, {
+      this.logger.error("Model loading failed", error as Error, {
         modelName,
         version,
       });
@@ -191,24 +227,24 @@ export class ModelService {
     const baseModel: MLModel = {
       name: modelName,
       version,
-      type: 'cart_abandonment_predictor',
-      status: 'active',
+      type: "cart_abandonment_predictor",
+      status: "active",
       metadata: {
         description: `${modelName} prediction model`,
-        algorithm: 'gradient_boosting',
+        algorithm: "gradient_boosting",
         features: [
-          'cart_value',
-          'session_duration',
-          'page_views',
-          'previous_purchases',
-          'time_since_last_purchase',
-          'device_type',
-          'traffic_source',
-          'user_engagement_score',
+          "cart_value",
+          "session_duration",
+          "page_views",
+          "previous_purchases",
+          "time_since_last_purchase",
+          "device_type",
+          "traffic_source",
+          "user_engagement_score",
         ],
         trainingData: {
-          startDate: '2024-01-01',
-          endDate: '2024-12-31',
+          startDate: "2024-01-01",
+          endDate: "2024-12-31",
           sampleCount: 100000,
         },
         performance: {
@@ -237,29 +273,32 @@ export class ModelService {
 
     // Customize based on model name
     switch (modelName) {
-      case 'cart_recovery':
-        baseModel.type = 'cart_recovery_optimizer';
-        baseModel.metadata.description = 'Cart recovery timing and messaging optimization model';
-        baseModel.metadata.algorithm = 'ensemble_classifier';
+      case "cart_recovery":
+        baseModel.type = "cart_recovery_optimizer";
+        baseModel.metadata.description =
+          "Cart recovery timing and messaging optimization model";
+        baseModel.metadata.algorithm = "ensemble_classifier";
         break;
 
-      case 'purchase_probability':
-        baseModel.type = 'purchase_predictor';
-        baseModel.metadata.description = 'Real-time purchase probability estimation model';
-        baseModel.metadata.algorithm = 'neural_network';
+      case "purchase_probability":
+        baseModel.type = "purchase_predictor";
+        baseModel.metadata.description =
+          "Real-time purchase probability estimation model";
+        baseModel.metadata.algorithm = "neural_network";
         baseModel.parameters.confidence_threshold = 0.7;
         break;
 
-      case 'customer_lifetime_value':
-        baseModel.type = 'clv_predictor';
-        baseModel.metadata.description = 'Customer lifetime value prediction model';
-        baseModel.metadata.algorithm = 'regression_ensemble';
+      case "customer_lifetime_value":
+        baseModel.type = "clv_predictor";
+        baseModel.metadata.description =
+          "Customer lifetime value prediction model";
+        baseModel.metadata.algorithm = "regression_ensemble";
         break;
 
-      case 'churn_prediction':
-        baseModel.type = 'churn_predictor';
-        baseModel.metadata.description = 'Customer churn risk assessment model';
-        baseModel.metadata.algorithm = 'random_forest';
+      case "churn_prediction":
+        baseModel.type = "churn_predictor";
+        baseModel.metadata.description = "Customer churn risk assessment model";
+        baseModel.metadata.algorithm = "random_forest";
         break;
     }
 
@@ -272,16 +311,16 @@ export class ModelService {
   private async loadActiveModels(): Promise<void> {
     try {
       // Set default active models
-      this.activeModelVersions.set('cart_recovery', '1.2.0');
-      this.activeModelVersions.set('purchase_probability', '2.1.0');
-      this.activeModelVersions.set('customer_lifetime_value', '1.0.0');
-      this.activeModelVersions.set('churn_prediction', '1.1.0');
+      this.activeModelVersions.set("cart_recovery", "1.2.0");
+      this.activeModelVersions.set("purchase_probability", "2.1.0");
+      this.activeModelVersions.set("customer_lifetime_value", "1.0.0");
+      this.activeModelVersions.set("churn_prediction", "1.1.0");
 
-      this.logger.info('Active model versions loaded', {
+      this.logger.info("Active model versions loaded", {
         versions: Object.fromEntries(this.activeModelVersions),
       });
     } catch (error) {
-      this.logger.error('Failed to load active models', error as Error);
+      this.logger.error("Failed to load active models", error as Error);
     }
   }
 
@@ -291,34 +330,38 @@ export class ModelService {
   private async initializeABTests(): Promise<void> {
     try {
       // Example A/B test: cart_recovery model v1.2.0 vs v1.3.0
-      this.abTestConfig.set('cart_recovery', {
+      this.abTestConfig.set("cart_recovery", {
         enabled: true,
-        versionA: '1.2.0',
-        versionB: '1.3.0',
+        versionA: "1.2.0",
+        versionB: "1.3.0",
         trafficSplit: 0.5, // 50/50 split
-        startDate: '2024-01-01',
-        endDate: '2024-12-31',
-        metrics: ['conversion_rate', 'revenue_impact', 'model_accuracy'],
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+        metrics: ["conversion_rate", "revenue_impact", "model_accuracy"],
       });
 
-      this.logger.info('A/B test configurations initialized', {
+      this.logger.info("A/B test configurations initialized", {
         testsActive: this.abTestConfig.size,
       });
     } catch (error) {
-      this.logger.error('Failed to initialize A/B tests', error as Error);
+      this.logger.error("Failed to initialize A/B tests", error as Error);
     }
   }
 
   /**
    * Determine model version for A/B testing
    */
-  private getABTestVersion(modelName: string, cartId: string, abConfig: any): string {
+  private getABTestVersion(
+    modelName: string,
+    cartId: string,
+    abConfig: any
+  ): string {
     // Use consistent hashing based on cartId for stable A/B assignment
     const hash = this.hashString(cartId);
     const bucket = hash % 100;
-    
+
     const splitPoint = Math.floor(abConfig.trafficSplit * 100);
-    
+
     if (bucket < splitPoint) {
       return abConfig.versionA;
     } else {
@@ -333,7 +376,7 @@ export class ModelService {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
       const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
+      hash = (hash << 5) - hash + char;
       hash = hash & hash; // Convert to 32bit integer
     }
     return Math.abs(hash);
@@ -348,29 +391,30 @@ export class ModelService {
       this.activeModelVersions.set(modelName, version);
 
       // Clear cached models to force reload
-      const keysToRemove = Array.from(this.modelRegistry.keys())
-        .filter(key => key.startsWith(`${modelName}:`));
-      
-      keysToRemove.forEach(key => this.modelRegistry.delete(key));
+      const keysToRemove = Array.from(this.modelRegistry.keys()).filter((key) =>
+        key.startsWith(`${modelName}:`)
+      );
 
-      this.logger.info('Model version updated', {
+      keysToRemove.forEach((key) => this.modelRegistry.delete(key));
+
+      this.logger.info("Model version updated", {
         modelName,
         oldVersion,
         newVersion: version,
         clearedCacheKeys: keysToRemove.length,
       });
 
-      await this.metrics.recordCounter('model_version_update');
+      await this.metrics.recordCounter("model_version_update");
 
       await this.recordModelEvent({
-        type: 'model_version_updated',
+        type: "model_version_updated",
         modelName,
         version,
         previousVersion: oldVersion,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      this.logger.error('Failed to update model version', error as Error, {
+      this.logger.error("Failed to update model version", error as Error, {
         modelName,
         version,
       });
@@ -381,14 +425,18 @@ export class ModelService {
   /**
    * Get model metadata
    */
-  async getModelMetadata(modelName: string, version?: string): Promise<ModelMetadata> {
+  async getModelMetadata(
+    modelName: string,
+    version?: string
+  ): Promise<ModelMetadata> {
     try {
-      const targetVersion = version || this.activeModelVersions.get(modelName) || 'latest';
+      const targetVersion =
+        version || this.activeModelVersions.get(modelName) || "latest";
       const model = await this.getModel(modelName);
-      
+
       return model.metadata;
     } catch (error) {
-      this.logger.error('Failed to get model metadata', error as Error, {
+      this.logger.error("Failed to get model metadata", error as Error, {
         modelName,
         version,
       });
@@ -402,7 +450,7 @@ export class ModelService {
   async recordModelPerformance(
     modelName: string,
     version: string,
-    performance: Omit<ModelPerformance, 'timestamp'>
+    performance: Omit<ModelPerformance, "timestamp">
   ): Promise<void> {
     try {
       const fullPerformance: ModelPerformance = {
@@ -424,26 +472,38 @@ export class ModelService {
       }
 
       // Record metrics
-      await this.metrics.recordGauge(`model_accuracy_${modelName}`, performance.accuracy);
-      await this.metrics.recordGauge(`model_precision_${modelName}`, performance.precision);
-      await this.metrics.recordGauge(`model_recall_${modelName}`, performance.recall);
-      await this.metrics.recordGauge(`model_f1_score_${modelName}`, performance.f1Score);
+      await this.metrics.recordGauge(
+        `model_accuracy_${modelName}`,
+        performance.accuracy
+      );
+      await this.metrics.recordGauge(
+        `model_precision_${modelName}`,
+        performance.precision
+      );
+      await this.metrics.recordGauge(
+        `model_recall_${modelName}`,
+        performance.recall
+      );
+      await this.metrics.recordGauge(
+        `model_f1_score_${modelName}`,
+        performance.f1Score
+      );
 
-      this.logger.debug('Model performance recorded', {
+      this.logger.debug("Model performance recorded", {
         modelName,
         version,
         performance: fullPerformance,
       });
 
       await this.recordModelEvent({
-        type: 'model_performance_recorded',
+        type: "model_performance_recorded",
         modelName,
         version,
         performance: fullPerformance,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      this.logger.error('Failed to record model performance', error as Error, {
+      this.logger.error("Failed to record model performance", error as Error, {
         modelName,
         version,
       });
@@ -453,14 +513,18 @@ export class ModelService {
   /**
    * Get model performance history
    */
-  async getModelPerformance(modelName: string, version?: string): Promise<ModelPerformance[]> {
+  async getModelPerformance(
+    modelName: string,
+    version?: string
+  ): Promise<ModelPerformance[]> {
     try {
-      const targetVersion = version || this.activeModelVersions.get(modelName) || 'latest';
+      const targetVersion =
+        version || this.activeModelVersions.get(modelName) || "latest";
       const key = `${modelName}:${targetVersion}`;
-      
+
       return this.modelPerformance.get(key) || [];
     } catch (error) {
-      this.logger.error('Failed to get model performance', error as Error, {
+      this.logger.error("Failed to get model performance", error as Error, {
         modelName,
         version,
       });
@@ -501,17 +565,19 @@ export class ModelService {
   async getHealthStatus(): Promise<any> {
     try {
       return {
-        status: 'healthy',
+        status: "healthy",
         modelsLoaded: this.modelRegistry.size,
         activeVersions: this.activeModelVersions.size,
         abTestsActive: this.abTestConfig.size,
-        performanceRecords: Array.from(this.modelPerformance.values())
-          .reduce((sum, records) => sum + records.length, 0),
+        performanceRecords: Array.from(this.modelPerformance.values()).reduce(
+          (sum, records) => sum + records.length,
+          0
+        ),
       };
     } catch (error) {
       return {
-        status: 'unhealthy',
-        error: error instanceof Error ? error.message : 'Unknown error',
+        status: "unhealthy",
+        error: error instanceof Error ? error.message : "Unknown error",
       };
     }
   }
@@ -523,24 +589,27 @@ export class ModelService {
     try {
       if (modelName) {
         // Clear specific model
-        const keysToRemove = Array.from(this.modelRegistry.keys())
-          .filter(key => key.startsWith(`${modelName}:`));
-        
-        keysToRemove.forEach(key => this.modelRegistry.delete(key));
+        const keysToRemove = Array.from(this.modelRegistry.keys()).filter(
+          (key) => key.startsWith(`${modelName}:`)
+        );
 
-        this.logger.info('Model cache cleared', {
+        keysToRemove.forEach((key) => this.modelRegistry.delete(key));
+
+        this.logger.info("Model cache cleared", {
           modelName,
           keysRemoved: keysToRemove.length,
         });
       } else {
         // Clear all models
         this.modelRegistry.clear();
-        this.logger.info('All model cache cleared');
+        this.logger.info("All model cache cleared");
       }
 
-      await this.metrics.recordCounter('model_cache_cleared');
+      await this.metrics.recordCounter("model_cache_cleared");
     } catch (error) {
-      this.logger.error('Failed to clear model cache', error as Error, { modelName });
+      this.logger.error("Failed to clear model cache", error as Error, {
+        modelName,
+      });
     }
   }
 
@@ -551,11 +620,13 @@ export class ModelService {
     try {
       // Record event in metrics
       await this.metrics.recordCounter(`model_event_${event.type}`);
-      
+
       // Could also send to event pipeline or audit log
-      this.logger.debug('Model event recorded', event);
+      this.logger.debug("Model event recorded", event);
     } catch (error) {
-      this.logger.error('Failed to record model event', error as Error, { event });
+      this.logger.error("Failed to record model event", error as Error, {
+        event,
+      });
     }
   }
 }

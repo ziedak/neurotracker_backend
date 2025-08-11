@@ -157,14 +157,12 @@ export class AIEngineContainer {
 
     // Model Service - singleton (manages ML models and versioning)
     this._registry.registerSingleton("modelService", () => {
-      const postgres =
-        this._registry.resolve<PostgreSQLClient>("postgresClient");
       const cacheService = this._registry.resolve<CacheService>("cacheService");
       const logger = this._registry.resolve<Logger>("logger");
       const metrics =
         this._registry.resolve<MetricsCollector>("metricsCollector");
 
-      return new ModelService(postgres, cacheService, logger, metrics);
+      return new ModelService(cacheService, logger, metrics);
     });
 
     // Prediction Service - singleton (core prediction orchestration)
@@ -194,15 +192,19 @@ export class AIEngineContainer {
     // Authentication Middleware - singleton
     this._registry.registerSingleton("authMiddleware", () => {
       const logger = this._registry.resolve<Logger>("logger");
+      const metrics =
+        this._registry.resolve<MetricsCollector>("metricsCollector");
 
-      return new AuthMiddleware(logger);
+      return new AuthMiddleware(logger, metrics);
     });
 
     // Validation Middleware - singleton
     this._registry.registerSingleton("validationMiddleware", () => {
       const logger = this._registry.resolve<Logger>("logger");
+      const metrics =
+        this._registry.resolve<MetricsCollector>("metricsCollector");
 
-      return new ValidationMiddleware(logger);
+      return new ValidationMiddleware(logger, metrics);
     });
 
     // Rate Limit Middleware - singleton
@@ -217,14 +219,11 @@ export class AIEngineContainer {
 
     // Audit Middleware - singleton
     this._registry.registerSingleton("auditMiddleware", () => {
-      const redis = this._registry.resolve<RedisClient>("redisClient");
-      const clickhouse =
-        this._registry.resolve<ClickHouseClient>("clickhouseClient");
       const logger = this._registry.resolve<Logger>("logger");
       const metrics =
         this._registry.resolve<MetricsCollector>("metricsCollector");
 
-      return new AuditMiddleware(redis, clickhouse, logger, metrics);
+      return new AuditMiddleware(logger, metrics);
     });
   }
 

@@ -12,7 +12,6 @@ const serverConfig: Partial<ServerConfig> = {
   name: "ai-engine",
   version: "1.0.0",
   port: getNumberEnv("AI_ENGINE_PORT", 3003), // Fixed port conflict
-  host: getEnv("AI_ENGINE_HOST", "0.0.0.0"),
   cors: {
     origin: getEnv("CORS_ORIGIN", "*"),
     credentials: true,
@@ -20,25 +19,14 @@ const serverConfig: Partial<ServerConfig> = {
   swagger: {
     enabled: getEnv("NODE_ENV") !== "production",
     path: "/swagger",
-    documentation: {
-      info: {
-        title: "AI Engine Service",
-        version: "1.0.0",
-        description:
-          "High-performance ML prediction service for cart recovery and recommendation tasks",
-      },
-      tags: [
-        { name: "predictions", description: "Prediction endpoints" },
-        { name: "batch", description: "Batch processing endpoints" },
-        { name: "features", description: "Feature computation endpoints" },
-        { name: "models", description: "Model management endpoints" },
-        { name: "health", description: "Health check and monitoring" },
-      ],
-    },
+    title: "AI Engine Service",
+    version: "1.0.0",
+    description:
+      "High-performance ML prediction service for cart recovery and recommendation tasks",
   },
-  rateLimit: {
+  rateLimiting: {
     enabled: true,
-    max: getNumberEnv("RATE_LIMIT_MAX", 1000),
+    requests: getNumberEnv("RATE_LIMIT_MAX", 1000),
     windowMs: getNumberEnv("RATE_LIMIT_WINDOW_MS", 60000),
   },
 };
