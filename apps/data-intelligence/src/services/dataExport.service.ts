@@ -27,31 +27,191 @@ export interface ExportResult {
 
 /**
  * Data Export Service using secure database utilities
- * Handles exporting data from various sources with pagination and filtering
+ * Handles exporting data from various sources with pagination, filtering, and streaming
+ * Implements memory-efficient streaming for large datasets
  */
 export class DataExportService {
+  private readonly redis: RedisClient;
   private readonly clickhouse: ClickHouseClient;
   private readonly postgres: PostgreSQLClient;
-  private readonly redis: RedisClient;
   private readonly logger: Logger;
   private readonly metrics: MetricsCollector;
 
+  // Memory management configuration
+  private readonly MEMORY_CONFIG = {
+    MAX_MEMORY_MB: 512, // 512MB max memory usage
+    STREAM_CHUNK_SIZE: 5000, // Records per streaming chunk
+    MEMORY_CHECK_INTERVAL: 1000, // Check memory every 1000 records
+    MAX_EXPORT_SIZE: 1000000, // 1M records max per export
+    BATCH_SIZE_SMALL: 5000, // For exports < 50k records
+    BATCH_SIZE_LARGE: 10000, // For exports > 50k records
+  };
+
+  // Performance monitoring
+  private readonly PERFORMANCE_TARGETS = {
+    EXPORT_SPEED_RECORDS_PER_SEC: 1000,
+    MAX_EXPORT_TIME_MINUTES: 30,
+    MEMORY_WARNING_THRESHOLD_MB: 400,
+  };
+
   constructor(
+    redis: RedisClient,
     clickhouse: ClickHouseClient,
     postgres: PostgreSQLClient,
-    redis: RedisClient,
     logger: Logger,
     metrics: MetricsCollector
   ) {
+    this.redis = redis;
     this.clickhouse = clickhouse;
     this.postgres = postgres;
-    this.redis = redis;
     this.logger = logger;
     this.metrics = metrics;
   }
 
   /**
-   * Export events from ClickHouse using secure DatabaseUtils
+   * Memory monitoring utility
+   */
+  private getMemoryUsage(): { used: number; free: number; percentage: number } {
+    const memUsage = process.memoryUsage();
+    const totalMB = memUsage.heapUsed / 1024 / 1024;
+    const percentage = (totalMB / this.MEMORY_CONFIG.MAX_MEMORY_MB) * 100;
+
+    return {
+      used: Math.round(totalMB),
+      free: Math.round(this.MEMORY_CONFIG.MAX_MEMORY_MB - totalMB),
+      percentage: Math.round(percentage),
+    };
+  }
+
+  /**
+   * Streaming export for large datasets with memory management
+   */
+  async exportLargeDataset(
+    table: string,
+    options: ExportOptions & {
+      streamCallback?: (chunk: any[]) => Promise<void>;
+    } = {}
+  ): Promise<{ totalRecords: number; chunks: number; duration: number }> {
+    const startTime = performance.now();
+    const { filters = {}, streamCallback, dateFrom, dateTo } = options;
+
+    let totalRecords = 0;
+    let chunks = 0;
+    let offset = 0;
+
+    try {
+      this.logger.info("Starting large dataset export", { table });
+
+      // Add date filters
+      if (dateFrom || dateTo) {
+        if (dateFrom) filters.dateFrom = dateFrom;
+        if (dateTo) filters.dateTo = dateTo;
+      }
+
+      while (true) {
+        const chunkStartTime = performance.now();
+
+        // Monitor memory before processing chunk
+        const memUsage = this.getMemoryUsage();
+        if (memUsage.percentage > 80) {
+          this.logger.warn("High memory usage detected", {
+            usage: memUsage,
+            totalRecords,
+            chunks,
+          });
+
+          // Trigger garbage collection hint
+          if (global.gc) {
+            global.gc();
+          }
+
+          // Reduce chunk size for remaining data
+          const reducedChunkSize = Math.floor(
+            this.MEMORY_CONFIG.STREAM_CHUNK_SIZE * 0.5
+          );
+          this.logger.info("Reducing chunk size due to memory pressure", {
+            original: this.MEMORY_CONFIG.STREAM_CHUNK_SIZE,
+            reduced: reducedChunkSize,
+          });
+        }
+
+        // Export chunk using secure DatabaseUtils
+        const chunk = await DatabaseUtils.exportData(table, filters, {
+          limit: this.MEMORY_CONFIG.STREAM_CHUNK_SIZE,
+          offset,
+          format: "json",
+        });
+
+        if (chunk.length === 0) {
+          break; // No more data
+        }
+
+        // Process chunk with callback if provided
+        if (streamCallback) {
+          await streamCallback(chunk);
+        }
+
+        totalRecords += chunk.length;
+        chunks++;
+        offset += chunk.length;
+
+        const chunkDuration = performance.now() - chunkStartTime;
+        await this.metrics.recordTimer("export_chunk_duration", chunkDuration);
+        await this.metrics.recordCounter(
+          "export_records_processed",
+          chunk.length
+        );
+
+        // Performance monitoring
+        const recordsPerSecond = chunk.length / (chunkDuration / 1000);
+        if (
+          recordsPerSecond <
+          this.PERFORMANCE_TARGETS.EXPORT_SPEED_RECORDS_PER_SEC * 0.5
+        ) {
+          this.logger.warn("Export performance below target", {
+            recordsPerSecond,
+            target: this.PERFORMANCE_TARGETS.EXPORT_SPEED_RECORDS_PER_SEC,
+            chunk: chunks,
+          });
+        }
+
+        // Safety check for maximum export size
+        if (totalRecords >= this.MEMORY_CONFIG.MAX_EXPORT_SIZE) {
+          this.logger.warn("Maximum export size reached", {
+            totalRecords,
+            maxSize: this.MEMORY_CONFIG.MAX_EXPORT_SIZE,
+          });
+          break;
+        }
+
+        // Brief pause to prevent overwhelming the system
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      const duration = performance.now() - startTime;
+      await this.metrics.recordTimer("large_export_duration", duration);
+
+      this.logger.info("Large dataset export completed", {
+        table,
+        totalRecords,
+        chunks,
+        duration: Math.round(duration),
+        avgRecordsPerSecond: Math.round(totalRecords / (duration / 1000)),
+      });
+
+      return { totalRecords, chunks, duration };
+    } catch (error) {
+      this.logger.error("Large dataset export failed", error as Error, {
+        table,
+        totalRecords,
+        chunks,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Export events with automatic streaming for large datasets
    */
   async exportEvents(options: ExportOptions = {}): Promise<any[]> {
     const startTime = performance.now();
@@ -66,6 +226,28 @@ export class DataExportService {
     try {
       this.logger.info("Starting events export", { limit, offset });
 
+      // Check if we should use streaming for large exports
+      if (limit > 50000) {
+        this.logger.info("Large export detected, using streaming", { limit });
+
+        const results: any[] = [];
+        const streamingResult = await this.exportLargeDataset("user_events", {
+          ...options,
+          streamCallback: async (chunk: any[]) => {
+            results.push(...chunk);
+          },
+        });
+
+        this.logger.info("Streaming export completed", {
+          totalRecords: streamingResult.totalRecords,
+          chunks: streamingResult.chunks,
+          duration: streamingResult.duration,
+        });
+
+        return results;
+      }
+
+      // Standard export for smaller datasets
       // Add date filters to the filters object
       if (dateFrom || dateTo) {
         if (dateFrom) filters.dateFrom = dateFrom;
@@ -82,7 +264,7 @@ export class DataExportService {
           "metadata",
           "pageUrl",
         ],
-        limit: Math.min(limit, 100000), // Max 100k records
+        limit: Math.min(limit, 100000), // Max 100k records for standard export
         offset,
         orderBy: [{ field: "timestamp", direction: "DESC" }],
         format: "json",

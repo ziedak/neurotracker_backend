@@ -50,8 +50,70 @@ export class BusinessIntelligenceService {
     this.metrics = metrics;
   }
 
+  // Enhanced caching configuration for performance optimization
+  private readonly CACHE_CONFIG = {
+    REPORT_TTL: 3600, // 1 hour for reports
+    DASHBOARD_TTL: 300, // 5 minutes for dashboard data
+    CUSTOM_REPORT_TTL: 1800, // 30 minutes for custom reports
+    PERFORMANCE_TTL: 600, // 10 minutes for performance metrics
+    CACHE_PREFIX: "bi:",
+    CACHE_VERSION: "v1:",
+  };
+
+  // Performance monitoring targets
+  private readonly PERFORMANCE_TARGETS = {
+    REPORT_GENERATION_MAX_MS: 5000,
+    CACHE_HIT_RATIO_TARGET: 0.85,
+    QUERY_TIMEOUT_MS: 30000,
+  };
+
   /**
-   * Generate comprehensive report based on type using secure DatabaseUtils
+   * Enhanced caching utility with performance monitoring
+   */
+  private async getCachedData<T>(
+    key: string,
+    ttl: number,
+    generator: () => Promise<T>
+  ): Promise<T> {
+    const cacheKey = `${this.CACHE_CONFIG.CACHE_PREFIX}${this.CACHE_CONFIG.CACHE_VERSION}${key}`;
+    const startTime = performance.now();
+
+    try {
+      // Get Redis instance from injected client
+      const redisInstance = RedisClient.getInstance();
+
+      // Try cache first
+      const cached = await redisInstance.get(cacheKey);
+      if (cached) {
+        await this.metrics.recordCounter("bi_cache_hit");
+        this.logger.debug("Cache hit", { key: cacheKey });
+        return JSON.parse(cached);
+      }
+
+      // Cache miss - generate data
+      await this.metrics.recordCounter("bi_cache_miss");
+      this.logger.debug("Cache miss", { key: cacheKey });
+
+      const data = await generator();
+
+      // Cache the result
+      await redisInstance.setex(cacheKey, ttl, JSON.stringify(data));
+
+      const duration = performance.now() - startTime;
+      await this.metrics.recordTimer("bi_cache_generation_time", duration);
+
+      return data;
+    } catch (error) {
+      this.logger.error("Cache operation failed", error as Error, {
+        key: cacheKey,
+      });
+      // Fallback to direct generation
+      return await generator();
+    }
+  }
+
+  /**
+   * Generate comprehensive report based on type using enhanced caching
    */
   async generateReport(request: ReportRequest): Promise<ReportResult> {
     const startTime = performance.now();
@@ -62,14 +124,28 @@ export class BusinessIntelligenceService {
     try {
       this.logger.info("Generating report", { reportId, type: request.type });
 
-      // Use secure DatabaseUtils for report generation
-      const data = await DatabaseUtils.generateReport(
-        request.type as any,
-        request.filters || {},
-        {
-          dateFrom: request.dateFrom,
-          dateTo: request.dateTo,
-          groupBy: request.aggregation,
+      // Create cache key based on request parameters
+      const cacheKey = `report:${request.type}:${JSON.stringify({
+        filters: request.filters,
+        dateFrom: request.dateFrom,
+        dateTo: request.dateTo,
+        aggregation: request.aggregation,
+      })}`;
+
+      // Use enhanced caching for report generation
+      const data = await this.getCachedData(
+        cacheKey,
+        this.CACHE_CONFIG.REPORT_TTL,
+        async () => {
+          return await DatabaseUtils.generateReport(
+            request.type as any,
+            request.filters || {},
+            {
+              dateFrom: request.dateFrom,
+              dateTo: request.dateTo,
+              groupBy: request.aggregation,
+            }
+          );
         }
       );
 
@@ -81,7 +157,7 @@ export class BusinessIntelligenceService {
         generatedAt: new Date().toISOString(),
       };
 
-      // Cache the report for future retrieval
+      // Store specific report result for direct retrieval
       await this.cacheReport(reportId, result);
 
       const duration = performance.now() - startTime;
@@ -91,6 +167,15 @@ export class BusinessIntelligenceService {
       await this.metrics.recordCounter("reports_generated", 1, {
         type: request.type,
       });
+
+      // Performance monitoring
+      if (duration > this.PERFORMANCE_TARGETS.REPORT_GENERATION_MAX_MS) {
+        this.logger.warn("Report generation exceeded target time", {
+          reportId,
+          duration,
+          target: this.PERFORMANCE_TARGETS.REPORT_GENERATION_MAX_MS,
+        });
+      }
 
       this.logger.info("Report generated successfully", {
         reportId,
@@ -191,55 +276,68 @@ export class BusinessIntelligenceService {
   }
 
   /**
-   * Get dashboard metrics with secure aggregations
+   * Get dashboard metrics with enhanced caching and secure aggregations
    */
   async getDashboardMetrics(
     dateFrom?: string,
     dateTo?: string
   ): Promise<Record<string, any>> {
     try {
-      const filters: Record<string, any> = {};
+      // Create cache key based on date range
+      const cacheKey = `dashboard:metrics:${dateFrom || "all"}:${
+        dateTo || "all"
+      }`;
 
-      // Use secure aggregation queries
-      const [userMetrics, cartMetrics, eventMetrics] = await Promise.all([
-        DatabaseUtils.getAnalyticsData(
-          "users",
-          [{ field: "id", function: "COUNT", alias: "total_users" }],
-          filters,
-          { dateFrom, dateTo }
-        ),
+      // Use enhanced caching for dashboard data
+      return await this.getCachedData(
+        cacheKey,
+        this.CACHE_CONFIG.DASHBOARD_TTL,
+        async () => {
+          const filters: Record<string, any> = {};
 
-        DatabaseUtils.getAnalyticsData(
-          "carts",
-          [
-            { field: "id", function: "COUNT", alias: "total_carts" },
-            { field: "total", function: "SUM", alias: "total_revenue" },
-            { field: "total", function: "AVG", alias: "avg_cart_value" },
-          ],
-          filters,
-          { dateFrom, dateTo }
-        ),
+          // Use secure aggregation queries
+          const [userMetrics, cartMetrics, eventMetrics] = await Promise.all([
+            DatabaseUtils.getAnalyticsData(
+              "users",
+              [{ field: "id", function: "COUNT", alias: "total_users" }],
+              filters,
+              { dateFrom, dateTo }
+            ),
 
-        DatabaseUtils.getAnalyticsData(
-          "user_events",
-          [
-            { field: "id", function: "COUNT", alias: "total_events" },
-            { field: "userId", function: "COUNT", alias: "unique_users" },
-          ],
-          filters,
-          { dateFrom, dateTo, groupBy: ["eventType"] }
-        ),
-      ]);
+            DatabaseUtils.getAnalyticsData(
+              "carts",
+              [
+                { field: "id", function: "COUNT", alias: "total_carts" },
+                { field: "total", function: "SUM", alias: "total_revenue" },
+                { field: "total", function: "AVG", alias: "avg_cart_value" },
+              ],
+              filters,
+              { dateFrom, dateTo }
+            ),
 
-      return {
-        users: userMetrics[0] || { total_users: 0 },
-        carts: cartMetrics[0] || {
-          total_carts: 0,
-          total_revenue: 0,
-          avg_cart_value: 0,
-        },
-        events: eventMetrics || [],
-      };
+            DatabaseUtils.getAnalyticsData(
+              "user_events",
+              [
+                { field: "id", function: "COUNT", alias: "total_events" },
+                { field: "userId", function: "COUNT", alias: "unique_users" },
+              ],
+              filters,
+              { dateFrom, dateTo, groupBy: ["eventType"] }
+            ),
+          ]);
+
+          return {
+            users: userMetrics[0] || { total_users: 0 },
+            carts: cartMetrics[0] || {
+              total_carts: 0,
+              total_revenue: 0,
+              avg_cart_value: 0,
+            },
+            events: eventMetrics || [],
+            generatedAt: new Date().toISOString(),
+          };
+        }
+      );
     } catch (error) {
       this.logger.error("Dashboard metrics generation failed", error as Error);
       throw error;

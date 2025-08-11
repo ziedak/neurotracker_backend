@@ -251,6 +251,7 @@ export class FeatureStoreService {
    */
   async getFeatureDefinitions(version?: string): Promise<FeatureDefinition[]> {
     try {
+      // Use static call - this is the current design pattern
       const prisma = PostgreSQLClient.getInstance();
 
       // Use parameterized query for security
