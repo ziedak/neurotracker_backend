@@ -1,0 +1,77 @@
+{
+  "name": "intervention-engine",
+  "version": "1.0.0",
+  "description": "Real-time intervention delivery service with WebSocket support, multi-channel notifications, and tracking capabilities",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "npx tsc --noEmit --skipLibCheck",
+    "build:bundles": "bun build src/index.ts --outdir=dist --target=bun",
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix"
+  },
+  "keywords": [
+    "intervention",
+    "websocket",
+    "real-time",
+    "notifications",
+    "cart-recovery",
+    "microservice"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "ioredis": "^5.3.2",
+    "zod": "^3.22.0",
+    "@libs/elysia-server": "workspace:*",
+    "@libs/monitoring": "workspace:*",
+    "@libs/auth": "workspace:*",
+    "@libs/database": "workspace:*",
+    "@libs/messaging": "workspace:*",
+    "@libs/utils": "workspace:*",
+    "@libs/config": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^24.2.1",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.50.0",
+    "jest": "^29.5.0",
+    "nodemon": "^3.1.10",
+    "supertest": "^7.1.4",
+    "ts-jest": "^29.1.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "roots": [
+      "<rootDir>/src"
+    ],
+    "testMatch": [
+      "**/__tests__/**/*.ts",
+      "**/?(*.)+(spec|test).ts"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.ts",
+      "!src/**/*.d.ts",
+      "!src/**/*.test.ts",
+      "!src/**/*.spec.ts"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "branches": 80,
+        "functions": 80,
+        "lines": 80,
+        "statements": 80
+      }
+    }
+  }
+}

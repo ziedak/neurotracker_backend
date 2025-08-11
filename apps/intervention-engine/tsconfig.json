@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "../../dist/apps/intervention-engine",
+    "rootDir": "src"
+  },
+  "references": [
+    { "path": "../../libs/models" },
+    { "path": "../../libs/utils" },
+    { "path": "../../libs/config" },
+    { "path": "../../libs/messaging" },
+    { "path": "../../libs/elysia-server" },
+    { "path": "../../libs/database" },
+    { "path": "../../libs/monitoring" },
+    { "path": "../../libs/auth" }
+  ],
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
+}
