@@ -1,8 +1,8 @@
-import { RedisClient } from '@libs/database';
-import { Logger, MetricsCollector } from '@libs/monitoring';
-import { CacheEntry, CacheStats } from '../types';
-import { performance } from 'perf_hooks';
-import Redis from 'ioredis';
+import { RedisClient } from "@libs/database";
+import { Logger, MetricsCollector } from "@libs/monitoring";
+import { CacheEntry, CacheStats } from "../types";
+import { performance } from "perf_hooks";
+import Redis from "ioredis";
 
 /**
  * Cache Service for AI Engine
@@ -25,23 +25,19 @@ export class CacheService {
 
   // Cache key prefixes
   private readonly KEY_PREFIXES = {
-    PREDICTION: 'ai:prediction',
-    FEATURE: 'ai:feature',
-    MODEL: 'ai:model',
-    BATCH: 'ai:batch',
-    STATS: 'ai:stats',
+    PREDICTION: "ai:prediction",
+    FEATURE: "ai:feature",
+    MODEL: "ai:model",
+    BATCH: "ai:batch",
+    STATS: "ai:stats",
   };
 
-  constructor(
-    redis: Redis,
-    logger: Logger,
-    metrics: MetricsCollector
-  ) {
+  constructor(redis: Redis, logger: Logger, metrics: MetricsCollector) {
     this.redis = redis;
     this.logger = logger;
     this.metrics = metrics;
 
-    this.logger.info('Cache Service initialized');
+    this.logger.info("Cache Service initialized");
   }
 
   /**
@@ -49,10 +45,14 @@ export class CacheService {
    */
   async getPrediction(
     cartId: string,
-    modelVersion: string = 'default'
+    modelVersion: string = "default"
   ): Promise<any | null> {
     const startTime = performance.now();
-    const key = this.buildKey(this.KEY_PREFIXES.PREDICTION, cartId, modelVersion);
+    const key = this.buildKey(
+      this.KEY_PREFIXES.PREDICTION,
+      cartId,
+      modelVersion
+    );
 
     try {
       const cached = await this.redis.get(key);
@@ -60,10 +60,10 @@ export class CacheService {
 
       if (cached) {
         const data = JSON.parse(cached);
-        this.metrics.recordTimer('cache_get_duration', duration);
-        this.metrics.recordCounter('cache_hit_prediction');
+        this.metrics.recordTimer("cache_get_duration", duration);
+        this.metrics.recordCounter("cache_hit_prediction");
 
-        this.logger.debug('Cache hit for prediction', {
+        this.logger.debug("Cache hit for prediction", {
           cartId,
           modelVersion,
           duration: Math.round(duration),
@@ -74,10 +74,10 @@ export class CacheService {
 
         return data;
       } else {
-        this.metrics.recordTimer('cache_get_duration', duration);
-        this.metrics.recordCounter('cache_miss_prediction');
+        this.metrics.recordTimer("cache_get_duration", duration);
+        this.metrics.recordCounter("cache_miss_prediction");
 
-        this.logger.debug('Cache miss for prediction', {
+        this.logger.debug("Cache miss for prediction", {
           cartId,
           modelVersion,
           duration: Math.round(duration),
@@ -87,10 +87,10 @@ export class CacheService {
       }
     } catch (error) {
       const duration = performance.now() - startTime;
-      this.metrics.recordTimer('cache_get_duration', duration);
-      this.metrics.recordCounter('cache_error');
+      this.metrics.recordTimer("cache_get_duration", duration);
+      this.metrics.recordCounter("cache_error");
 
-      this.logger.error('Cache get error', {
+      this.logger.error("Cache get error", {
         key,
         error: error.message,
         duration: Math.round(duration),
@@ -110,7 +110,11 @@ export class CacheService {
     customTTL?: number
   ): Promise<void> {
     const startTime = performance.now();
-    const key = this.buildKey(this.KEY_PREFIXES.PREDICTION, cartId, modelVersion);
+    const key = this.buildKey(
+      this.KEY_PREFIXES.PREDICTION,
+      cartId,
+      modelVersion
+    );
     const ttl = customTTL || this.CACHE_CONFIG.PREDICTION_TTL;
 
     try {
@@ -123,12 +127,12 @@ export class CacheService {
       };
 
       await this.redis.setex(key, ttl, JSON.stringify(cacheEntry));
-      
-      const duration = performance.now() - startTime;
-      this.metrics.recordTimer('cache_set_duration', duration);
-      this.metrics.recordCounter('cache_set_prediction');
 
-      this.logger.debug('Prediction cached', {
+      const duration = performance.now() - startTime;
+      this.metrics.recordTimer("cache_set_duration", duration);
+      this.metrics.recordCounter("cache_set_prediction");
+
+      this.logger.debug("Prediction cached", {
         cartId,
         modelVersion,
         ttl,
@@ -136,10 +140,10 @@ export class CacheService {
       });
     } catch (error) {
       const duration = performance.now() - startTime;
-      this.metrics.recordTimer('cache_set_duration', duration);
-      this.metrics.recordCounter('cache_error');
+      this.metrics.recordTimer("cache_set_duration", duration);
+      this.metrics.recordCounter("cache_error");
 
-      this.logger.error('Cache set error', {
+      this.logger.error("Cache set error", {
         key,
         error: error.message,
         duration: Math.round(duration),
@@ -160,10 +164,10 @@ export class CacheService {
 
       if (cached) {
         const data = JSON.parse(cached);
-        this.metrics.recordTimer('cache_get_duration', duration);
-        this.metrics.recordCounter('cache_hit_feature');
+        this.metrics.recordTimer("cache_get_duration", duration);
+        this.metrics.recordCounter("cache_hit_feature");
 
-        this.logger.debug('Cache hit for features', {
+        this.logger.debug("Cache hit for features", {
           cartId,
           duration: Math.round(duration),
         });
@@ -171,10 +175,10 @@ export class CacheService {
         await this.incrementHitCount(key);
         return data;
       } else {
-        this.metrics.recordTimer('cache_get_duration', duration);
-        this.metrics.recordCounter('cache_miss_feature');
+        this.metrics.recordTimer("cache_get_duration", duration);
+        this.metrics.recordCounter("cache_miss_feature");
 
-        this.logger.debug('Cache miss for features', {
+        this.logger.debug("Cache miss for features", {
           cartId,
           duration: Math.round(duration),
         });
@@ -183,10 +187,10 @@ export class CacheService {
       }
     } catch (error) {
       const duration = performance.now() - startTime;
-      this.metrics.recordTimer('cache_get_duration', duration);
-      this.metrics.recordCounter('cache_error');
+      this.metrics.recordTimer("cache_get_duration", duration);
+      this.metrics.recordCounter("cache_error");
 
-      this.logger.error('Cache get error for features', {
+      this.logger.error("Cache get error for features", {
         key,
         error: error.message,
         duration: Math.round(duration),
@@ -213,27 +217,27 @@ export class CacheService {
         data: features,
         timestamp: Date.now(),
         ttl,
-        version: '1.0.0',
+        version: "1.0.0",
         hits: 0,
       };
 
       await this.redis.setex(key, ttl, JSON.stringify(cacheEntry));
-      
-      const duration = performance.now() - startTime;
-      this.metrics.recordTimer('cache_set_duration', duration);
-      this.metrics.recordCounter('cache_set_feature');
 
-      this.logger.debug('Features cached', {
+      const duration = performance.now() - startTime;
+      this.metrics.recordTimer("cache_set_duration", duration);
+      this.metrics.recordCounter("cache_set_feature");
+
+      this.logger.debug("Features cached", {
         cartId,
         ttl,
         duration: Math.round(duration),
       });
     } catch (error) {
       const duration = performance.now() - startTime;
-      this.metrics.recordTimer('cache_set_duration', duration);
-      this.metrics.recordCounter('cache_error');
+      this.metrics.recordTimer("cache_set_duration", duration);
+      this.metrics.recordCounter("cache_error");
 
-      this.logger.error('Cache set error for features', {
+      this.logger.error("Cache set error for features", {
         key,
         error: error.message,
         duration: Math.round(duration),
@@ -245,21 +249,25 @@ export class CacheService {
    * Get model metadata from cache
    */
   async getModelMetadata(modelVersion: string): Promise<any | null> {
-    const key = this.buildKey(this.KEY_PREFIXES.MODEL, 'metadata', modelVersion);
+    const key = this.buildKey(
+      this.KEY_PREFIXES.MODEL,
+      "metadata",
+      modelVersion
+    );
 
     try {
       const cached = await this.redis.get(key);
-      
+
       if (cached) {
-        this.metrics.recordCounter('cache_hit_model');
+        this.metrics.recordCounter("cache_hit_model");
         return JSON.parse(cached);
       } else {
-        this.metrics.recordCounter('cache_miss_model');
+        this.metrics.recordCounter("cache_miss_model");
         return null;
       }
     } catch (error) {
-      this.metrics.recordCounter('cache_error');
-      this.logger.error('Cache get error for model metadata', {
+      this.metrics.recordCounter("cache_error");
+      this.logger.error("Cache get error for model metadata", {
         modelVersion,
         error: error.message,
       });
@@ -275,7 +283,11 @@ export class CacheService {
     metadata: any,
     customTTL?: number
   ): Promise<void> {
-    const key = this.buildKey(this.KEY_PREFIXES.MODEL, 'metadata', modelVersion);
+    const key = this.buildKey(
+      this.KEY_PREFIXES.MODEL,
+      "metadata",
+      modelVersion
+    );
     const ttl = customTTL || this.CACHE_CONFIG.MODEL_METADATA_TTL;
 
     try {
@@ -288,15 +300,15 @@ export class CacheService {
       };
 
       await this.redis.setex(key, ttl, JSON.stringify(cacheEntry));
-      this.metrics.recordCounter('cache_set_model');
+      this.metrics.recordCounter("cache_set_model");
 
-      this.logger.debug('Model metadata cached', {
+      this.logger.debug("Model metadata cached", {
         modelVersion,
         ttl,
       });
     } catch (error) {
-      this.metrics.recordCounter('cache_error');
-      this.logger.error('Cache set error for model metadata', {
+      this.metrics.recordCounter("cache_error");
+      this.logger.error("Cache set error for model metadata", {
         modelVersion,
         error: error.message,
       });
@@ -308,21 +320,21 @@ export class CacheService {
    */
   async invalidatePredictions(cartId: string): Promise<void> {
     try {
-      const pattern = this.buildKey(this.KEY_PREFIXES.PREDICTION, cartId, '*');
+      const pattern = this.buildKey(this.KEY_PREFIXES.PREDICTION, cartId, "*");
       const keys = await this.redis.keys(pattern);
 
       if (keys.length > 0) {
         await this.redis.del(...keys);
-        this.metrics.recordCounter('cache_invalidation');
+        this.metrics.recordCounter("cache_invalidation");
 
-        this.logger.info('Prediction cache invalidated', {
+        this.logger.info("Prediction cache invalidated", {
           cartId,
           keysRemoved: keys.length,
         });
       }
     } catch (error) {
-      this.metrics.recordCounter('cache_error');
-      this.logger.error('Cache invalidation error', {
+      this.metrics.recordCounter("cache_error");
+      this.logger.error("Cache invalidation error", {
         cartId,
         error: error.message,
       });
@@ -333,7 +345,11 @@ export class CacheService {
    * Warm cache with batch predictions
    */
   async warmCache(
-    predictions: Array<{ cartId: string; modelVersion: string; prediction: any }>
+    predictions: Array<{
+      cartId: string;
+      modelVersion: string;
+      prediction: any;
+    }>
   ): Promise<void> {
     const startTime = performance.now();
 
@@ -354,25 +370,29 @@ export class CacheService {
           hits: 0,
         };
 
-        pipeline.setex(key, this.CACHE_CONFIG.PREDICTION_TTL, JSON.stringify(cacheEntry));
+        pipeline.setex(
+          key,
+          this.CACHE_CONFIG.PREDICTION_TTL,
+          JSON.stringify(cacheEntry)
+        );
       }
 
       await pipeline.exec();
 
       const duration = performance.now() - startTime;
-      this.metrics.recordTimer('cache_warm_duration', duration);
-      this.metrics.recordCounter('cache_warm_completed');
+      this.metrics.recordTimer("cache_warm_duration", duration);
+      this.metrics.recordCounter("cache_warm_completed");
 
-      this.logger.info('Cache warmed successfully', {
+      this.logger.info("Cache warmed successfully", {
         itemsWarmed: predictions.length,
         duration: Math.round(duration),
       });
     } catch (error) {
       const duration = performance.now() - startTime;
-      this.metrics.recordTimer('cache_warm_duration', duration);
-      this.metrics.recordCounter('cache_error');
+      this.metrics.recordTimer("cache_warm_duration", duration);
+      this.metrics.recordCounter("cache_error");
 
-      this.logger.error('Cache warming failed', {
+      this.logger.error("Cache warming failed", {
         itemCount: predictions.length,
         error: error.message,
         duration: Math.round(duration),
@@ -385,14 +405,15 @@ export class CacheService {
    */
   async getCacheStats(): Promise<CacheStats> {
     try {
-      const info = await this.redis.info('memory');
+      const info = await this.redis.info("memory");
       const dbSize = await this.redis.dbsize();
 
       // Parse memory info
-      const memoryLines = info.split('\r\n');
-      const usedMemory = memoryLines
-        .find(line => line.startsWith('used_memory:'))
-        ?.split(':')[1] || '0';
+      const memoryLines = info.split("\r\n");
+      const usedMemory =
+        memoryLines
+          .find((line) => line.startsWith("used_memory:"))
+          ?.split(":")[1] || "0";
 
       // Get hit/miss counters from metrics (simplified example)
       const stats: CacheStats = {
@@ -405,7 +426,7 @@ export class CacheService {
 
       return stats;
     } catch (error) {
-      this.logger.error('Failed to get cache stats', error);
+      this.logger.error("Failed to get cache stats", error);
       return {
         hits: 0,
         misses: 0,
@@ -421,8 +442,10 @@ export class CacheService {
    */
   async clearCache(): Promise<void> {
     try {
-      const patterns = Object.values(this.KEY_PREFIXES).map(prefix => `${prefix}:*`);
-      
+      const patterns = Object.values(this.KEY_PREFIXES).map(
+        (prefix) => `${prefix}:*`
+      );
+
       for (const pattern of patterns) {
         const keys = await this.redis.keys(pattern);
         if (keys.length > 0) {
@@ -430,11 +453,11 @@ export class CacheService {
         }
       }
 
-      this.metrics.recordCounter('cache_clear');
-      this.logger.info('AI Engine cache cleared');
+      this.metrics.recordCounter("cache_clear");
+      this.logger.info("AI Engine cache cleared");
     } catch (error) {
-      this.metrics.recordCounter('cache_error');
-      this.logger.error('Cache clear failed', error);
+      this.metrics.recordCounter("cache_error");
+      this.logger.error("Cache clear failed", error);
     }
   }
 
@@ -442,16 +465,20 @@ export class CacheService {
    * Build cache key with proper formatting
    */
   private buildKey(...parts: string[]): string {
-    const key = parts.join(':');
-    
+    const key = parts.join(":");
+
     // Ensure key doesn't exceed Redis key length limits
     if (key.length > this.CACHE_CONFIG.MAX_KEY_LENGTH) {
       // Hash long keys to ensure they fit
-      const crypto = require('crypto');
-      const hash = crypto.createHash('sha256').update(key).digest('hex').substring(0, 16);
+      const crypto = require("crypto");
+      const hash = crypto
+        .createHash("sha256")
+        .update(key)
+        .digest("hex")
+        .substring(0, 16);
       return `${parts[0]}:${hash}`;
     }
-    
+
     return key;
   }
 
@@ -475,7 +502,10 @@ export class CacheService {
       );
     } catch (error) {
       // Silent fail for hit count updates
-      this.logger.debug('Failed to increment hit count', { key, error: error.message });
+      this.logger.debug("Failed to increment hit count", {
+        key,
+        error: error.message,
+      });
     }
   }
 }

@@ -1,5 +1,9 @@
 import { ServiceRegistry, IServiceRegistry } from "@libs/utils";
-import { RedisClient, ClickHouseClient, PostgreSQLClient } from "@libs/database";
+import {
+  RedisClient,
+  ClickHouseClient,
+  PostgreSQLClient,
+} from "@libs/database";
 import { Logger, MetricsCollector, HealthChecker } from "@libs/monitoring";
 import { ModelService } from "./services/model.service";
 import { FeatureService } from "./services/feature.service";
@@ -71,10 +75,7 @@ export class AIEngineContainer {
    */
   private registerInfrastructure(): void {
     // Logger - singleton
-    this._registry.registerSingleton(
-      "logger",
-      () => new Logger("ai-engine")
-    );
+    this._registry.registerSingleton("logger", () => new Logger("ai-engine"));
 
     // Metrics collector - singleton (using getInstance pattern)
     this._registry.registerSingleton("metricsCollector", () =>
@@ -114,7 +115,8 @@ export class AIEngineContainer {
     // Data Intelligence Service Client
     this._registry.registerSingleton("dataIntelligenceClient", () => {
       const logger = this._registry.resolve<Logger>("logger");
-      const metrics = this._registry.resolve<MetricsCollector>("metricsCollector");
+      const metrics =
+        this._registry.resolve<MetricsCollector>("metricsCollector");
 
       return new DataIntelligenceClient(logger, metrics);
     });
@@ -128,17 +130,22 @@ export class AIEngineContainer {
     this._registry.registerSingleton("cacheService", () => {
       const redisInstance = RedisClient.getInstance();
       const logger = this._registry.resolve<Logger>("logger");
-      const metrics = this._registry.resolve<MetricsCollector>("metricsCollector");
+      const metrics =
+        this._registry.resolve<MetricsCollector>("metricsCollector");
 
       return new CacheService(redisInstance, logger, metrics);
     });
 
     // Feature Service - singleton (integrates with data-intelligence)
     this._registry.registerSingleton("featureService", () => {
-      const dataIntelligenceClient = this._registry.resolve<DataIntelligenceClient>("dataIntelligenceClient");
+      const dataIntelligenceClient =
+        this._registry.resolve<DataIntelligenceClient>(
+          "dataIntelligenceClient"
+        );
       const cacheService = this._registry.resolve<CacheService>("cacheService");
       const logger = this._registry.resolve<Logger>("logger");
-      const metrics = this._registry.resolve<MetricsCollector>("metricsCollector");
+      const metrics =
+        this._registry.resolve<MetricsCollector>("metricsCollector");
 
       return new FeatureService(
         dataIntelligenceClient,
@@ -150,26 +157,25 @@ export class AIEngineContainer {
 
     // Model Service - singleton (manages ML models and versioning)
     this._registry.registerSingleton("modelService", () => {
-      const postgres = this._registry.resolve<PostgreSQLClient>("postgresClient");
+      const postgres =
+        this._registry.resolve<PostgreSQLClient>("postgresClient");
       const cacheService = this._registry.resolve<CacheService>("cacheService");
       const logger = this._registry.resolve<Logger>("logger");
-      const metrics = this._registry.resolve<MetricsCollector>("metricsCollector");
+      const metrics =
+        this._registry.resolve<MetricsCollector>("metricsCollector");
 
-      return new ModelService(
-        postgres,
-        cacheService,
-        logger,
-        metrics
-      );
+      return new ModelService(postgres, cacheService, logger, metrics);
     });
 
     // Prediction Service - singleton (core prediction orchestration)
     this._registry.registerSingleton("predictionService", () => {
       const modelService = this._registry.resolve<ModelService>("modelService");
-      const featureService = this._registry.resolve<FeatureService>("featureService");
+      const featureService =
+        this._registry.resolve<FeatureService>("featureService");
       const cacheService = this._registry.resolve<CacheService>("cacheService");
       const logger = this._registry.resolve<Logger>("logger");
-      const metrics = this._registry.resolve<MetricsCollector>("metricsCollector");
+      const metrics =
+        this._registry.resolve<MetricsCollector>("metricsCollector");
 
       return new PredictionService(
         modelService,
@@ -203,7 +209,8 @@ export class AIEngineContainer {
     this._registry.registerSingleton("rateLimitMiddleware", () => {
       const redis = this._registry.resolve<RedisClient>("redisClient");
       const logger = this._registry.resolve<Logger>("logger");
-      const metrics = this._registry.resolve<MetricsCollector>("metricsCollector");
+      const metrics =
+        this._registry.resolve<MetricsCollector>("metricsCollector");
 
       return new RateLimitMiddleware(redis, logger, metrics);
     });
@@ -211,9 +218,11 @@ export class AIEngineContainer {
     // Audit Middleware - singleton
     this._registry.registerSingleton("auditMiddleware", () => {
       const redis = this._registry.resolve<RedisClient>("redisClient");
-      const clickhouse = this._registry.resolve<ClickHouseClient>("clickhouseClient");
+      const clickhouse =
+        this._registry.resolve<ClickHouseClient>("clickhouseClient");
       const logger = this._registry.resolve<Logger>("logger");
-      const metrics = this._registry.resolve<MetricsCollector>("metricsCollector");
+      const metrics =
+        this._registry.resolve<MetricsCollector>("metricsCollector");
 
       return new AuditMiddleware(redis, clickhouse, logger, metrics);
     });
@@ -274,14 +283,16 @@ export class AIEngineContainer {
   public async validateServices(): Promise<void> {
     try {
       const healthChecker = this.getService<HealthChecker>("healthChecker");
-      
+
       // Check database connections
       await this.connectDatabases();
-      
+
       // Check external service connections
-      const dataIntelligenceClient = this.getService<DataIntelligenceClient>("dataIntelligenceClient");
+      const dataIntelligenceClient = this.getService<DataIntelligenceClient>(
+        "dataIntelligenceClient"
+      );
       await dataIntelligenceClient.healthCheck();
-      
+
       // Validate models
       await this.initializeModels();
 
