@@ -2,6 +2,8 @@ import {
   ClickHouseClient,
   PostgreSQLClient,
   RedisClient,
+  DatabaseUtils,
+  ClickHouseQueryBuilder,
 } from "@libs/database";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { performance } from "perf_hooks";
@@ -49,7 +51,7 @@ export class BusinessIntelligenceService {
   }
 
   /**
-   * Generate comprehensive report based on type
+   * Generate comprehensive report based on type using secure DatabaseUtils
    */
   async generateReport(request: ReportRequest): Promise<ReportResult> {
     const startTime = performance.now();
@@ -60,27 +62,16 @@ export class BusinessIntelligenceService {
     try {
       this.logger.info("Generating report", { reportId, type: request.type });
 
-      let data: any;
-
-      switch (request.type) {
-        case "overview":
-          data = await this.generateOverviewReport(request);
-          break;
-        case "conversion":
-          data = await this.generateConversionReport(request);
-          break;
-        case "revenue":
-          data = await this.generateRevenueReport(request);
-          break;
-        case "performance":
-          data = await this.generatePerformanceReport(request);
-          break;
-        case "custom":
-          data = await this.generateCustomReport(request);
-          break;
-        default:
-          throw new Error(`Unsupported report type: ${request.type}`);
-      }
+      // Use secure DatabaseUtils for report generation
+      const data = await DatabaseUtils.generateReport(
+        request.type as any,
+        request.filters || {},
+        {
+          dateFrom: request.dateFrom,
+          dateTo: request.dateTo,
+          groupBy: request.aggregation,
+        }
+      );
 
       const result: ReportResult = {
         reportId,
@@ -152,50 +143,107 @@ export class BusinessIntelligenceService {
   }
 
   /**
-   * Generate overview analytics report
+   * Generate custom report with secure query building
    */
-  private async generateOverviewReport(request: ReportRequest): Promise<any> {
-    const { dateFrom, dateTo } = request;
+  async generateCustomReport(
+    table: string,
+    aggregations: Array<{
+      field: string;
+      function: "COUNT" | "SUM" | "AVG" | "MIN" | "MAX";
+      alias?: string;
+    }>,
+    filters: Record<string, any> = {},
+    options: {
+      dateFrom?: string;
+      dateTo?: string;
+      groupBy?: string[];
+      limit?: number;
+    } = {}
+  ): Promise<any[]> {
+    try {
+      this.logger.info("Generating custom report", {
+        table,
+        aggregations: aggregations.length,
+      });
 
-    let whereClause = "1=1";
-    const params: any = {};
+      // Use secure DatabaseUtils for custom analytics
+      const data = await DatabaseUtils.getAnalyticsData(
+        table,
+        aggregations,
+        filters,
+        {
+          groupBy: options.groupBy,
+          dateFrom: options.dateFrom,
+          dateTo: options.dateTo,
+          limit: options.limit || 10000,
+        }
+      );
 
-    if (dateFrom) {
-      whereClause += " AND timestamp >= {dateFrom:String}";
-      params.dateFrom = dateFrom;
+      await this.metrics.recordCounter("custom_reports_generated");
+
+      return data;
+    } catch (error) {
+      this.logger.error("Custom report generation failed", error as Error, {
+        table,
+      });
+      throw error;
     }
+  }
 
-    if (dateTo) {
-      whereClause += " AND timestamp <= {dateTo:String}";
-      params.dateTo = dateTo;
-    }
+  /**
+   * Get dashboard metrics with secure aggregations
+   */
+  async getDashboardMetrics(
+    dateFrom?: string,
+    dateTo?: string
+  ): Promise<Record<string, any>> {
+    try {
+      const filters: Record<string, any> = {};
 
-    const queries = {
-      totalEvents: `SELECT count(*) as count FROM events WHERE ${whereClause}`,
-      totalRevenue: `SELECT sum(revenue) as total FROM events WHERE ${whereClause} AND revenue > 0`,
-      uniqueUsers: `SELECT uniq(userId) as count FROM events WHERE ${whereClause}`,
-      conversionRate: `
-        SELECT 
-          countIf(eventType = 'purchase') * 100.0 / count(*) as rate 
-        FROM events 
-        WHERE ${whereClause}
-      `,
-    };
+      // Use secure aggregation queries
+      const [userMetrics, cartMetrics, eventMetrics] = await Promise.all([
+        DatabaseUtils.getAnalyticsData(
+          "users",
+          [{ field: "id", function: "COUNT", alias: "total_users" }],
+          filters,
+          { dateFrom, dateTo }
+        ),
 
-    const [totalEvents, totalRevenue, uniqueUsers, conversionRate] =
-      await Promise.all([
-        ClickHouseClient.execute(queries.totalEvents, params),
-        ClickHouseClient.execute(queries.totalRevenue, params),
-        ClickHouseClient.execute(queries.uniqueUsers, params),
-        ClickHouseClient.execute(queries.conversionRate, params),
+        DatabaseUtils.getAnalyticsData(
+          "carts",
+          [
+            { field: "id", function: "COUNT", alias: "total_carts" },
+            { field: "total", function: "SUM", alias: "total_revenue" },
+            { field: "total", function: "AVG", alias: "avg_cart_value" },
+          ],
+          filters,
+          { dateFrom, dateTo }
+        ),
+
+        DatabaseUtils.getAnalyticsData(
+          "user_events",
+          [
+            { field: "id", function: "COUNT", alias: "total_events" },
+            { field: "userId", function: "COUNT", alias: "unique_users" },
+          ],
+          filters,
+          { dateFrom, dateTo, groupBy: ["eventType"] }
+        ),
       ]);
 
-    return {
-      totalEvents: totalEvents[0]?.count || 0,
-      totalRevenue: totalRevenue[0]?.total || 0,
-      uniqueUsers: uniqueUsers[0]?.count || 0,
-      conversionRate: conversionRate[0]?.rate || 0,
-    };
+      return {
+        users: userMetrics[0] || { total_users: 0 },
+        carts: cartMetrics[0] || {
+          total_carts: 0,
+          total_revenue: 0,
+          avg_cart_value: 0,
+        },
+        events: eventMetrics || [],
+      };
+    } catch (error) {
+      this.logger.error("Dashboard metrics generation failed", error as Error);
+      throw error;
+    }
   }
 
   /**
@@ -325,18 +373,6 @@ export class BusinessIntelligenceService {
 
     const results = await ClickHouseClient.execute(query, params);
     return { models: results };
-  }
-
-  /**
-   * Generate custom report based on filters
-   */
-  private async generateCustomReport(request: ReportRequest): Promise<any> {
-    // This would implement custom query building based on request.filters
-    // For now, return a placeholder
-    return {
-      message: "Custom report generation not yet implemented",
-      filters: request.filters,
-    };
   }
 
   /**

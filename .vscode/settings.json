@@ -1,0 +1,20 @@
+{
+  "dbcode.connections": [
+    {
+      "connectionId": "4cOqp0azoFvvoLMbkFKs8",
+      "name": "pg",
+      "driver": "postgres",
+      "color": "#00A6FF",
+      "connectionType": "host",
+      "host": "127.0.0.1",
+      "port": 5432,
+      "ssl": false,
+      "username": "postgres",
+      "password": "",
+      "savePassword": "secretStorage",
+      "database": "neurotracker",
+      "readOnly": false,
+      "connectionTimeout": 30
+    }
+  ]
+}

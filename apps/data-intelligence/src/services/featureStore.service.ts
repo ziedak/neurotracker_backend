@@ -2,6 +2,8 @@ import {
   RedisClient,
   ClickHouseClient,
   PostgreSQLClient,
+  DatabaseUtils,
+  ClickHouseQueryBuilder,
 } from "@libs/database";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { performance } from "perf_hooks";
@@ -41,6 +43,7 @@ export interface FeatureQuery {
 /**
  * Enhanced Feature Store Service with enterprise-grade capabilities
  * Implements caching, versioning, monitoring, and performance optimization
+ * Uses secure database utilities to prevent SQL injection
  */
 export class FeatureStoreService {
   private readonly redis: RedisClient;
@@ -70,40 +73,35 @@ export class FeatureStoreService {
 
   /**
    * Get features for a cart with intelligent caching strategy
+   * Uses secure DatabaseUtils to prevent SQL injection
    */
   async getFeatures(
     cartId: string,
     query?: FeatureQuery
   ): Promise<Record<string, any>> {
     const startTime = performance.now();
-    const cacheKey = `features:${cartId}`;
 
     try {
-      // Try Redis cache first unless explicitly disabled
-      if (query?.fromCache !== false) {
-        const cached = await this.getFromCache(cacheKey);
-        if (cached) {
-          await this.metrics.recordCounter("feature_cache_hit");
-          this.logger.debug("Feature cache hit", { cartId });
-          return cached;
-        }
-      }
-
-      await this.metrics.recordCounter("feature_cache_miss");
-      this.logger.debug("Feature cache miss, fetching from database", {
-        cartId,
+      // Use secure DatabaseUtils for feature retrieval
+      const features = await DatabaseUtils.getFeatures(cartId, {
+        featureNames: query?.featureNames,
+        includeExpired: query?.includeExpired,
+        fromCache: query?.fromCache,
+        cacheKeyPrefix: "features",
       });
 
-      // Fetch from database with fallback strategy
-      const features = await this.fetchFeaturesFromDatabase(cartId, query);
-
-      // Cache the result for future requests
-      if (Object.keys(features).length > 0) {
-        await this.cacheFeatures(cacheKey, features);
-      }
+      await this.metrics.recordCounter(
+        features ? "feature_cache_hit" : "feature_cache_miss"
+      );
 
       const duration = performance.now() - startTime;
-      await this.metrics.recordTiming("feature_retrieval_duration", duration);
+      await this.metrics.recordTimer("feature_retrieval_duration", duration);
+
+      this.logger.debug("Features retrieved successfully", {
+        cartId,
+        featureCount: Object.keys(features).length,
+        duration: Math.round(duration),
+      });
 
       return features;
     } catch (error) {
@@ -115,6 +113,7 @@ export class FeatureStoreService {
 
   /**
    * Compute and store features with versioning and validation
+   * Uses secure DatabaseUtils for storage operations
    */
   async computeFeatures(
     request: FeatureComputationRequest
@@ -143,29 +142,18 @@ export class FeatureStoreService {
         }
       }
 
-      // Prepare feature objects
-      const featureObjects: Feature[] = Object.entries(features).map(
-        ([name, value]) => ({
-          cartId,
-          name,
-          value,
-          version,
-          computedAt: new Date().toISOString(),
-          ttl: this.FEATURE_CACHE_TTL,
-        })
-      );
+      // Use secure DatabaseUtils for storage
+      await DatabaseUtils.storeFeatures(cartId, features, {
+        version,
+        cacheKeyPrefix: "features",
+        cacheTTL: this.FEATURE_CACHE_TTL,
+      });
 
-      // Store in parallel for performance
-      const promises = [
-        this.storeInCache(cartId, features, version),
-        this.storeInClickHouse(featureObjects),
-        this.storeInPostgreSQL(featureObjects),
-      ];
-
-      await Promise.allSettled(promises);
+      // Also store in ClickHouse for analytics (using secure query builder)
+      await this.storeInClickHouse(cartId, features, version);
 
       const duration = performance.now() - startTime;
-      await this.metrics.recordTiming("feature_computation_duration", duration);
+      await this.metrics.recordTimer("feature_computation_duration", duration);
       await this.metrics.recordCounter(
         "features_computed",
         Object.keys(features).length
@@ -241,7 +229,7 @@ export class FeatureStoreService {
       }
 
       const duration = performance.now() - startTime;
-      await this.metrics.recordTiming(
+      await this.metrics.recordTimer(
         "batch_feature_computation_duration",
         duration
       );
@@ -259,24 +247,45 @@ export class FeatureStoreService {
   }
 
   /**
-   * Get feature definitions with versioning support
+   * Get feature definitions with versioning support using secure queries
    */
   async getFeatureDefinitions(version?: string): Promise<FeatureDefinition[]> {
     try {
       const prisma = PostgreSQLClient.getInstance();
 
-      // Query for feature definitions, optionally filtered by version
-      const query = version
-        ? `SELECT DISTINCT name, type, description, version, computation_logic, dependencies 
-           FROM feature_definitions WHERE version = $1 ORDER BY name`
-        : `SELECT DISTINCT ON (name) name, type, description, version, computation_logic, dependencies 
-           FROM feature_definitions ORDER BY name, version DESC`;
-
+      // Use parameterized query for security
       const results = version
-        ? await prisma.$queryRawUnsafe(query, version)
-        : await prisma.$queryRawUnsafe(query);
+        ? await prisma.$queryRaw<
+            Array<{
+              name: string;
+              type: string;
+              description?: string;
+              version: string;
+              computation_logic?: string;
+              dependencies?: string;
+            }>
+          >`
+            SELECT DISTINCT name, type, description, version, computation_logic, dependencies 
+            FROM feature_definitions 
+            WHERE version = ${version}
+            ORDER BY name
+          `
+        : await prisma.$queryRaw<
+            Array<{
+              name: string;
+              type: string;
+              description?: string;
+              version: string;
+              computation_logic?: string;
+              dependencies?: string;
+            }>
+          >`
+            SELECT DISTINCT ON (name) name, type, description, version, computation_logic, dependencies 
+            FROM feature_definitions 
+            ORDER BY name, version DESC
+          `;
 
-      return (results as any[]).map((row) => ({
+      return results.map((row: any) => ({
         name: row.name,
         type: row.type,
         description: row.description,
@@ -293,7 +302,7 @@ export class FeatureStoreService {
   }
 
   /**
-   * Export features with pagination and filtering
+   * Export features with pagination and filtering using secure query builder
    */
   async exportFeatures(
     options: {
@@ -319,39 +328,53 @@ export class FeatureStoreService {
     try {
       this.logger.info("Starting feature export", { format, limit, offset });
 
-      // Build dynamic query based on filters
-      let whereClause = "1=1";
-      const params: any = {};
+      // Build secure filters
+      const filters: Record<string, any> = {};
 
       if (cartIds && cartIds.length > 0) {
-        whereClause += " AND cartId IN {cartIds:Array(String)}";
-        params.cartIds = cartIds;
+        filters.cartId = cartIds;
       }
 
       if (featureNames && featureNames.length > 0) {
-        whereClause += " AND name IN {featureNames:Array(String)}";
-        params.featureNames = featureNames;
+        filters.name = featureNames;
       }
 
-      if (dateFrom) {
-        whereClause += " AND computedAt >= {dateFrom:String}";
-        params.dateFrom = dateFrom;
+      // Use secure DatabaseUtils for export
+      const results = await DatabaseUtils.exportData("features", filters, {
+        select: ["cartId", "name", "value", "createdAt", "updatedAt"],
+        limit: Math.min(limit, 100000), // Max 100k records
+        offset,
+        orderBy: [{ field: "updatedAt", direction: "DESC" }],
+        format: "json",
+      });
+
+      // Additional date filtering for ClickHouse if needed
+      if (dateFrom || dateTo) {
+        // Use ClickHouse time series query for date-based filtering
+        const { query, params } = ClickHouseQueryBuilder.buildTimeSeriesQuery(
+          "features",
+          "createdAt",
+          "day",
+          {
+            select: ["cartId", "name", "value"],
+            where: filters,
+            dateFrom,
+            dateTo,
+            allowedTables: ["features"],
+            allowedFields: [
+              "cartId",
+              "name",
+              "value",
+              "createdAt",
+              "updatedAt",
+            ],
+          }
+        );
+
+        const timeSeriesData = await ClickHouseClient.execute(query, params);
+        await this.metrics.recordCounter("feature_export_timeseries");
+        return timeSeriesData;
       }
-
-      if (dateTo) {
-        whereClause += " AND computedAt <= {dateTo:String}";
-        params.dateTo = dateTo;
-      }
-
-      const query = `
-        SELECT cartId, name, value, version, computedAt 
-        FROM features 
-        WHERE ${whereClause}
-        ORDER BY computedAt DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `;
-
-      const results = await ClickHouseClient.execute(query, params);
 
       await this.metrics.recordCounter("feature_export_requests");
       this.logger.info("Feature export completed", {
@@ -368,105 +391,33 @@ export class FeatureStoreService {
 
   // === Private Helper Methods ===
 
-  private async getFromCache(key: string): Promise<any | null> {
-    try {
-      const cached = await RedisClient.getInstance().get(key);
-      return cached ? JSON.parse(cached) : null;
-    } catch (error) {
-      this.logger.warn("Cache retrieval failed", {
-        key,
-        error: (error as Error).message,
-      });
-      return null;
-    }
-  }
-
-  private async cacheFeatures(key: string, features: any): Promise<void> {
-    try {
-      await RedisClient.getInstance().setex(
-        key,
-        this.FEATURE_CACHE_TTL,
-        JSON.stringify(features)
-      );
-    } catch (error) {
-      this.logger.warn("Cache storage failed", {
-        key,
-        error: (error as Error).message,
-      });
-    }
-  }
-
-  private async fetchFeaturesFromDatabase(
-    cartId: string,
-    query?: FeatureQuery
-  ): Promise<Record<string, any>> {
-    // Try ClickHouse first for analytical data
-    try {
-      let whereClause = `cartId = '${cartId}'`;
-
-      if (query?.featureNames?.length) {
-        whereClause += ` AND name IN (${query.featureNames
-          .map((n) => `'${n}'`)
-          .join(",")})`;
-      }
-
-      if (!query?.includeExpired) {
-        whereClause += ` AND computedAt > subtractHours(now(), 24)`;
-      }
-
-      const chQuery = `SELECT name, value FROM features WHERE ${whereClause} ORDER BY computedAt DESC`;
-      const results = await ClickHouseClient.execute(chQuery);
-
-      if (results.length > 0) {
-        const features: Record<string, any> = {};
-        results.forEach((row: any) => {
-          features[row.name] = row.value;
-        });
-        return features;
-      }
-    } catch (error) {
-      this.logger.warn("ClickHouse feature fetch failed", {
-        cartId,
-        error: (error as Error).message,
-      });
-    }
-
-    // Fallback to PostgreSQL
-    try {
-      const prisma = PostgreSQLClient.getInstance();
-      const features = await prisma.feature.findMany({
-        where: { cartId },
-        select: { name: true, value: true },
-        orderBy: { updatedAt: "desc" },
-      });
-
-      const result: Record<string, any> = {};
-      features.forEach((feature) => {
-        result[feature.name] = feature.value;
-      });
-      return result;
-    } catch (error) {
-      this.logger.warn("PostgreSQL feature fetch failed", {
-        cartId,
-        error: (error as Error).message,
-      });
-      return {};
-    }
-  }
-
   private async validateFeatures(
     features: Record<string, any>
   ): Promise<string[]> {
     const errors: string[] = [];
 
     try {
-      const definitions = await this.getFeatureDefinitions();
-      const definitionMap = new Map(definitions.map((d) => [d.name, d]));
+      // Use secure query to get feature definitions
+      const prisma = PostgreSQLClient.getInstance();
+      const definitions = await prisma.$queryRaw<
+        Array<{
+          name: string;
+          type: string;
+          description?: string;
+          version: string;
+        }>
+      >`
+        SELECT DISTINCT ON (name) name, type, description, version 
+        FROM feature_definitions 
+        ORDER BY name, version DESC
+      `;
+
+      const definitionMap = new Map(definitions.map((d: any) => [d.name, d]));
 
       Object.entries(features).forEach(([name, value]) => {
         const definition = definitionMap.get(name);
         if (definition) {
-          const expectedType = definition.type;
+          const expectedType = (definition as any).type;
           const actualType = typeof value;
 
           if (
@@ -489,61 +440,34 @@ export class FeatureStoreService {
     return errors;
   }
 
-  private async storeInCache(
+  private async storeInClickHouse(
     cartId: string,
-    features: any,
+    features: Record<string, any>,
     version: string
   ): Promise<void> {
-    const cacheKey = `features:${cartId}`;
-    const cacheData = {
-      ...features,
-      _version: version,
-      _cached_at: new Date().toISOString(),
-    };
-    await this.cacheFeatures(cacheKey, cacheData);
-  }
-
-  private async storeInClickHouse(features: Feature[]): Promise<void> {
     try {
-      await ClickHouseClient.insert("features", features);
-    } catch (error) {
-      this.logger.error("ClickHouse storage failed", error as Error);
-      throw error;
-    }
-  }
+      // Convert features to ClickHouse format
+      const featureData = Object.entries(features).map(([name, value]) => ({
+        cartId,
+        name,
+        value: JSON.stringify(value),
+        version,
+        computedAt: new Date().toISOString(),
+      }));
 
-  private async storeInPostgreSQL(features: Feature[]): Promise<void> {
-    try {
-      const prisma = PostgreSQLClient.getInstance();
-
-      // Use upsert to handle duplicates
-      const upsertPromises = features.map((feature) =>
-        prisma.feature.upsert({
-          where: {
-            cartId_name: {
-              cartId: feature.cartId,
-              name: feature.name,
-            },
-          },
-          update: {
-            value: feature.value,
-            version: feature.version,
-            updatedAt: new Date(feature.computedAt),
-          },
-          create: {
-            cartId: feature.cartId,
-            name: feature.name,
-            value: feature.value,
-            version: feature.version,
-            createdAt: new Date(feature.computedAt),
-            updatedAt: new Date(feature.computedAt),
-          },
-        })
+      // Use secure insert method
+      const { table, data } = ClickHouseQueryBuilder.buildInsertQuery(
+        "features",
+        featureData,
+        {
+          allowedTables: ["features"],
+          allowedFields: ["cartId", "name", "value", "version", "computedAt"],
+        }
       );
 
-      await Promise.all(upsertPromises);
+      await ClickHouseClient.insert(table, data);
     } catch (error) {
-      this.logger.error("PostgreSQL storage failed", error as Error);
+      this.logger.error("ClickHouse storage failed", error as Error);
       throw error;
     }
   }

@@ -34,7 +34,7 @@ export class PostgreSQLClient {
           db: {
             url: getEnv(
               "DATABASE_URL",
-              "postgresql://postgres:password@localhost:5432/cart_recovery?schema=public"
+              "postgresql://postgres:TEST@postgres:5432/neurotracker?schema=public"
             ),
           },
         },

@@ -2,6 +2,8 @@ import {
   ClickHouseClient,
   PostgreSQLClient,
   RedisClient,
+  DatabaseUtils,
+  ClickHouseQueryBuilder,
 } from "@libs/database";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { performance } from "perf_hooks";
@@ -24,7 +26,7 @@ export interface ExportResult {
 }
 
 /**
- * Data Export Service
+ * Data Export Service using secure database utilities
  * Handles exporting data from various sources with pagination and filtering
  */
 export class DataExportService {
@@ -49,36 +51,42 @@ export class DataExportService {
   }
 
   /**
-   * Export events from ClickHouse
+   * Export events from ClickHouse using secure DatabaseUtils
    */
   async exportEvents(options: ExportOptions = {}): Promise<any[]> {
     const startTime = performance.now();
-    const { limit = 10000, offset = 0, dateFrom, dateTo } = options;
+    const {
+      limit = 10000,
+      offset = 0,
+      dateFrom,
+      dateTo,
+      filters = {},
+    } = options;
 
     try {
       this.logger.info("Starting events export", { limit, offset });
 
-      let whereClause = "1=1";
-      const params: any = {};
-
-      if (dateFrom) {
-        whereClause += " AND timestamp >= {dateFrom:String}";
-        params.dateFrom = dateFrom;
+      // Add date filters to the filters object
+      if (dateFrom || dateTo) {
+        if (dateFrom) filters.dateFrom = dateFrom;
+        if (dateTo) filters.dateTo = dateTo;
       }
 
-      if (dateTo) {
-        whereClause += " AND timestamp <= {dateTo:String}";
-        params.dateTo = dateTo;
-      }
-
-      const query = `
-        SELECT * FROM events 
-        WHERE ${whereClause}
-        ORDER BY timestamp DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `;
-
-      const results = await ClickHouseClient.execute(query, params);
+      // Use secure DatabaseUtils for export
+      const results = await DatabaseUtils.exportData("user_events", filters, {
+        select: [
+          "id",
+          "userId",
+          "eventType",
+          "timestamp",
+          "metadata",
+          "pageUrl",
+        ],
+        limit: Math.min(limit, 100000), // Max 100k records
+        offset,
+        orderBy: [{ field: "timestamp", direction: "DESC" }],
+        format: "json",
+      });
 
       const duration = performance.now() - startTime;
       await this.metrics.recordTimer("events_export_duration", duration);
@@ -92,42 +100,40 @@ export class DataExportService {
       return results;
     } catch (error) {
       this.logger.error("Events export failed", error as Error);
-      await this.metrics.recordCounter("events_export_error");
       throw error;
     }
   }
 
   /**
-   * Export predictions from ClickHouse
+   * Export predictions from ClickHouse using secure DatabaseUtils
    */
   async exportPredictions(options: ExportOptions = {}): Promise<any[]> {
     const startTime = performance.now();
-    const { limit = 10000, offset = 0, dateFrom, dateTo } = options;
+    const {
+      limit = 10000,
+      offset = 0,
+      dateFrom,
+      dateTo,
+      filters = {},
+    } = options;
 
     try {
       this.logger.info("Starting predictions export", { limit, offset });
 
-      let whereClause = "1=1";
-      const params: any = {};
-
-      if (dateFrom) {
-        whereClause += " AND createdAt >= {dateFrom:String}";
-        params.dateFrom = dateFrom;
+      // Add date filters to the filters object
+      if (dateFrom || dateTo) {
+        if (dateFrom) filters.dateFrom = dateFrom;
+        if (dateTo) filters.dateTo = dateTo;
       }
 
-      if (dateTo) {
-        whereClause += " AND createdAt <= {dateTo:String}";
-        params.dateTo = dateTo;
-      }
-
-      const query = `
-        SELECT * FROM predictions 
-        WHERE ${whereClause}
-        ORDER BY createdAt DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `;
-
-      const results = await ClickHouseClient.execute(query, params);
+      // Use secure DatabaseUtils for export
+      const results = await DatabaseUtils.exportData("predictions", filters, {
+        select: ["id", "modelId", "input", "output", "confidence", "createdAt"],
+        limit: Math.min(limit, 100000), // Max 100k records
+        offset,
+        orderBy: [{ field: "createdAt", direction: "DESC" }],
+        format: "json",
+      });
 
       const duration = performance.now() - startTime;
       await this.metrics.recordTimer("predictions_export_duration", duration);
@@ -147,7 +153,7 @@ export class DataExportService {
   }
 
   /**
-   * Custom export with flexible query building
+   * Custom export with flexible query building using secure DatabaseUtils
    */
   async exportCustom(request: {
     table: string;
@@ -169,30 +175,25 @@ export class DataExportService {
     try {
       this.logger.info("Starting custom export", { table, limit, offset });
 
-      // Build SELECT clause
-      const selectClause = columns.join(", ");
+      // Parse order by clause safely
+      const orderByParts = orderBy.split(" ");
+      const orderByField = orderByParts[0] || "createdAt";
+      const orderByDirection =
+        orderByParts[1]?.toUpperCase() === "ASC" ? "ASC" : "DESC";
 
-      // Build WHERE clause from filters
-      const whereConditions: string[] = [];
-      const params: any = {};
-
-      Object.entries(filters).forEach(([key, value], index) => {
-        const paramName = `filter_${index}`;
-        whereConditions.push(`${key} = {${paramName}:String}`);
-        params[paramName] = value;
+      // Use secure DatabaseUtils for custom export
+      const results = await DatabaseUtils.exportData(table, filters, {
+        select: columns,
+        limit: Math.min(limit, 100000), // Max 100k records
+        offset,
+        orderBy: [
+          {
+            field: orderByField,
+            direction: orderByDirection as "ASC" | "DESC",
+          },
+        ],
+        format: "json",
       });
-
-      const whereClause =
-        whereConditions.length > 0 ? whereConditions.join(" AND ") : "1=1";
-
-      const query = `
-        SELECT ${selectClause} FROM ${table} 
-        WHERE ${whereClause}
-        ORDER BY ${orderBy}
-        LIMIT ${limit} OFFSET ${offset}
-      `;
-
-      const results = await ClickHouseClient.execute(query, params);
 
       const duration = performance.now() - startTime;
       await this.metrics.recordTimer("custom_export_duration", duration);

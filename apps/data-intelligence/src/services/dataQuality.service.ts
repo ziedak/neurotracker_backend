@@ -2,6 +2,8 @@ import {
   ClickHouseClient,
   PostgreSQLClient,
   RedisClient,
+  DatabaseUtils,
+  ClickHouseQueryBuilder,
 } from "@libs/database";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { performance } from "perf_hooks";
@@ -46,6 +48,7 @@ export interface AnomalyDetectionResult {
 /**
  * Data Quality & GDPR Compliance Service
  * Handles data quality monitoring, validation, and GDPR compliance
+ * Uses secure database utilities to prevent SQL injection
  */
 export class DataQualityService {
   private readonly clickhouse: ClickHouseClient;
@@ -202,7 +205,7 @@ export class DataQualityService {
   }
 
   /**
-   * Detect anomalies in data using statistical methods
+   * Detect anomalies in data using statistical methods with secure queries
    */
   async detectAnomalies(params: {
     type?: "features" | "events";
@@ -213,8 +216,33 @@ export class DataQualityService {
     try {
       this.logger.info("Detecting anomalies", { type, threshold });
 
+      // Use secure ClickHouse query builder
       let query: string;
+      let queryParams: Record<string, any>;
+
       if (type === "features") {
+        const { query: buildQuery, params } =
+          ClickHouseQueryBuilder.buildSelectQuery("features", {
+            select: [
+              "cartId",
+              "name",
+              "value",
+              "(value - avgValue) / nullIf(stddev, 0) AS zscore",
+              "timestamp",
+            ],
+            where: {
+              timestamp_from: new Date(
+                Date.now() - 7 * 24 * 60 * 60 * 1000
+              ).toISOString(),
+              zscore_threshold: { operator: ">", value: threshold },
+            },
+            orderBy: [{ field: "zscore", direction: "DESC" }],
+            limit: 1000,
+            allowedTables: ["features"],
+            allowedFields: ["cartId", "name", "value", "timestamp"],
+          });
+
+        // Build subquery with window functions securely
         query = `
           SELECT 
             cartId, 
@@ -231,13 +259,20 @@ export class DataQualityService {
               stddevPop(value) OVER (PARTITION BY name) AS stddev,
               timestamp
             FROM features
-            WHERE timestamp >= subtractDays(now(), 7)
+            WHERE timestamp >= {dateFrom:DateTime}
               AND isFinite(value)
           ) 
-          WHERE abs(zscore) > ${threshold}
+          WHERE abs(zscore) > {threshold:Float64}
           ORDER BY abs(zscore) DESC
           LIMIT 1000
         `;
+
+        queryParams = {
+          dateFrom: new Date(
+            Date.now() - 7 * 24 * 60 * 60 * 1000
+          ).toISOString(),
+          threshold: Number(threshold),
+        };
       } else {
         query = `
           SELECT 
@@ -253,16 +288,23 @@ export class DataQualityService {
               stddevPop(value) OVER (PARTITION BY eventType) AS stddev,
               timestamp
             FROM events
-            WHERE timestamp >= subtractDays(now(), 7)
+            WHERE timestamp >= {dateFrom:DateTime}
               AND isFinite(value)
           ) 
-          WHERE abs(zscore) > ${threshold}
+          WHERE abs(zscore) > {threshold:Float64}
           ORDER BY abs(zscore) DESC
           LIMIT 1000
         `;
+
+        queryParams = {
+          dateFrom: new Date(
+            Date.now() - 7 * 24 * 60 * 60 * 1000
+          ).toISOString(),
+          threshold: Number(threshold),
+        };
       }
 
-      const results = await ClickHouseClient.execute(query);
+      const results = await ClickHouseClient.execute(query, queryParams);
 
       const anomalies = results.map((row: any) => ({
         type: type === "features" ? `${row.cartId}:${row.name}` : row.eventType,
@@ -340,9 +382,19 @@ export class DataQualityService {
       // Delete from PostgreSQL
       const prisma = PostgreSQLClient.getInstance();
       await prisma.$transaction(async (tx) => {
+        // First delete features for carts belonging to this user
+        const userCarts = await tx.cart.findMany({
+          where: { userId },
+          select: { id: true },
+        });
+        const cartIds = userCarts.map((cart) => cart.id);
+
+        if (cartIds.length > 0) {
+          await tx.feature.deleteMany({ where: { cartId: { in: cartIds } } });
+        }
+
+        // Delete user and related data (cascades will handle carts, sessions, events)
         await tx.user.deleteMany({ where: { id: userId } });
-        await tx.feature.deleteMany({ where: { userId } });
-        // Add other user-related table deletions as needed
       });
 
       // Delete from ClickHouse (if supported by your schema)
@@ -424,8 +476,18 @@ export class DataQualityService {
       const userData = await prisma.user.findUnique({
         where: { id: userId },
         include: {
-          features: true,
-          // Add other related data as needed
+          sessions: true,
+          events: true,
+          carts: {
+            include: {
+              items: {
+                include: {
+                  product: true,
+                },
+              },
+              features: true,
+            },
+          },
         },
       });
 
@@ -492,14 +554,22 @@ export class DataQualityService {
 
   private async checkDataCompleteness(): Promise<QualityCheck> {
     try {
-      const result = await ClickHouseClient.execute(`
+      // Use secure parameterized query
+      const oneDayAgo = new Date(
+        Date.now() - 24 * 60 * 60 * 1000
+      ).toISOString();
+
+      const result = await ClickHouseClient.execute(
+        `
         SELECT 
           count(*) as total,
           countIf(isNull(userId)) as nullUsers,
           countIf(isNull(timestamp)) as nullTimestamps
         FROM events 
-        WHERE timestamp >= subtractDays(now(), 1)
-      `);
+        WHERE timestamp >= {dateFrom:DateTime}
+      `,
+        { dateFrom: oneDayAgo }
+      );
 
       const data = result[0];
       const completeness =
@@ -534,8 +604,9 @@ export class DataQualityService {
       `);
 
       const latestTimestamp = new Date(result[0].latestTimestamp);
+      const now = new Date();
       const hoursSinceLatest =
-        (Date.now() - latestTimestamp.getTime()) / (1000 * 60 * 60);
+        (now.getTime() - latestTimestamp.getTime()) / (1000 * 60 * 60);
 
       return {
         name: "Data Freshness",
@@ -560,27 +631,37 @@ export class DataQualityService {
 
   private async checkDataConsistency(): Promise<QualityCheck> {
     try {
-      const result = await ClickHouseClient.execute(`
-        SELECT 
-          uniq(userId) as uniqueUsers,
-          count(*) as totalEvents
-        FROM events 
-        WHERE timestamp >= subtractDays(now(), 1)
-      `);
+      // Check cross-system consistency using secure DatabaseUtils
+      const results = await DatabaseUtils.performReconciliation(
+        "carts",
+        "features",
+        [
+          {
+            sourceField: "id",
+            targetField: "cartId",
+            operation: "count",
+            tolerance: 5, // 5% tolerance
+          },
+        ]
+      );
 
-      const data = result[0];
-      const eventsPerUser = data.totalEvents / data.uniqueUsers;
+      const consistencyResult = results[0];
+      const isConsistent = consistencyResult.status === "passed";
 
       return {
-        name: "Data Consistency",
-        status:
-          eventsPerUser > 1 && eventsPerUser < 1000 ? "passed" : "warning",
-        actualValue: eventsPerUser,
-        message: `${Math.round(eventsPerUser)} events per user on average`,
+        name: "Cross-System Consistency",
+        status: isConsistent ? "passed" : "failed",
+        threshold: 95,
+        actualValue: isConsistent
+          ? 100
+          : 100 - (consistencyResult.details?.percentageDiff || 0),
+        message: isConsistent
+          ? "Data is consistent across systems"
+          : `Inconsistency detected: ${consistencyResult.details?.percentageDiff}% difference`,
       };
     } catch (error) {
       return {
-        name: "Data Consistency",
+        name: "Cross-System Consistency",
         status: "failed",
         message: "Check failed: " + (error as Error).message,
       };
@@ -588,13 +669,41 @@ export class DataQualityService {
   }
 
   private async checkDataAccuracy(): Promise<QualityCheck> {
-    // This is a placeholder for data accuracy checks
-    // In practice, this would validate against known good data or business rules
-    return {
-      name: "Data Accuracy",
-      status: "passed",
-      message: "Accuracy checks passed",
-    };
+    try {
+      // Use secure query to check data accuracy
+      const result = await ClickHouseClient.execute(
+        `
+        SELECT 
+          count(*) as total,
+          countIf(value < 0 OR value > 1000000) as outliers
+        FROM features 
+        WHERE timestamp >= {dateFrom:DateTime}
+      `,
+        {
+          dateFrom: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+        }
+      );
+
+      const data = result[0];
+      const accuracy = 1 - data.outliers / data.total;
+
+      return {
+        name: "Data Accuracy",
+        status:
+          accuracy > 0.98 ? "passed" : accuracy > 0.95 ? "warning" : "failed",
+        threshold: 0.98,
+        actualValue: accuracy,
+        message: `${Math.round(
+          accuracy * 100
+        )}% of data within expected ranges`,
+      };
+    } catch (error) {
+      return {
+        name: "Data Accuracy",
+        status: "failed",
+        message: "Check failed: " + (error as Error).message,
+      };
+    }
   }
 
   private async checkTableCompleteness(
@@ -629,24 +738,103 @@ export class DataQualityService {
     table: string,
     threshold: number
   ): Promise<QualityCheck> {
-    // Placeholder implementation
-    return {
-      name: `${table} Uniqueness`,
-      status: "passed",
-      message: "Uniqueness check passed",
-    };
+    try {
+      // Use secure DatabaseUtils for quality checks
+      const results = await DatabaseUtils.performQualityChecks(table, [
+        {
+          type: "uniqueness",
+          field: "id", // Most tables should have unique IDs
+        },
+      ]);
+
+      const uniquenessResult = results.find((r) =>
+        r.check.includes("uniqueness")
+      );
+
+      if (uniquenessResult && uniquenessResult.status === "passed") {
+        return {
+          name: `${table} Uniqueness`,
+          status: "passed",
+          message: "All records have unique identifiers",
+          actualValue: uniquenessResult.details?.unique_count,
+          threshold,
+        };
+      } else {
+        return {
+          name: `${table} Uniqueness`,
+          status: "failed",
+          message:
+            uniquenessResult?.details?.error ||
+            "Uniqueness constraint violation detected",
+          actualValue: uniquenessResult?.details?.unique_count,
+          threshold,
+        };
+      }
+    } catch (error) {
+      this.logger.error("Table uniqueness check failed", error as Error, {
+        table,
+      });
+      return {
+        name: `${table} Uniqueness`,
+        status: "failed",
+        message: "Check failed: " + (error as Error).message,
+      };
+    }
   }
 
   private async checkTableValidity(
     table: string,
     threshold: number
   ): Promise<QualityCheck> {
-    // Placeholder implementation
-    return {
-      name: `${table} Validity`,
-      status: "passed",
-      message: "Validity check passed",
-    };
+    try {
+      // Perform different validity checks based on table type
+      const checks = [];
+
+      if (table === "users") {
+        checks.push({
+          type: "validity" as const,
+          field: "email",
+        });
+      }
+
+      // Add completeness check for all tables
+      checks.push({
+        type: "completeness" as const,
+        field: "id",
+      });
+
+      const results = await DatabaseUtils.performQualityChecks(table, checks);
+
+      const failedChecks = results.filter((r) => r.status === "failed");
+
+      if (failedChecks.length === 0) {
+        return {
+          name: `${table} Validity`,
+          status: "passed",
+          message: "All validity checks passed",
+          actualValue: 100,
+          threshold,
+        };
+      } else {
+        return {
+          name: `${table} Validity`,
+          status: "failed",
+          message: `${failedChecks.length} validity check(s) failed`,
+          actualValue:
+            ((results.length - failedChecks.length) / results.length) * 100,
+          threshold,
+        };
+      }
+    } catch (error) {
+      this.logger.error("Table validity check failed", error as Error, {
+        table,
+      });
+      return {
+        name: `${table} Validity`,
+        status: "failed",
+        message: "Check failed: " + (error as Error).message,
+      };
+    }
   }
 
   private async storeGDPRRequest(request: GDPRRequest): Promise<void> {

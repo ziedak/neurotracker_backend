@@ -1,13 +1,22 @@
 import { createElysiaServer } from "@libs/elysia-server";
 import { DEFAULT_SERVER_CONFIG } from "@libs/elysia-server";
 import { setupFeatureRoutes } from "./routes";
+import { DataIntelligenceContainer } from "./container";
 const request = require("supertest");
 
 describe("Analytics Endpoints", () => {
   let server: any;
   let app: any;
+  let container: DataIntelligenceContainer;
 
-  beforeAll(() => {
+  beforeAll(async () => {
+    // Initialize the container
+    container = new DataIntelligenceContainer();
+    await container.initialize();
+
+    // Create a route setup function that matches the expected signature
+    const routeSetup = (app: any) => setupFeatureRoutes(app, container);
+
     server = createElysiaServer(
       {
         ...DEFAULT_SERVER_CONFIG,
@@ -15,9 +24,15 @@ describe("Analytics Endpoints", () => {
         port: 0,
         websocket: { enabled: false },
       },
-      setupFeatureRoutes
+      routeSetup
     );
     app = server.build();
+  });
+
+  afterAll(async () => {
+    if (container) {
+      await container.dispose();
+    }
   });
 
   it("GET /v1/analytics/overview returns overview metrics", async () => {

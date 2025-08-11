@@ -124,6 +124,7 @@ model Feature {
   // Relations
   cart      Cart?    @relation(fields: [cartId], references: [id], onDelete: Cascade)
 
+  @@unique([cartId, name], name: "cartId_name")
   @@map("features")
 }
 
