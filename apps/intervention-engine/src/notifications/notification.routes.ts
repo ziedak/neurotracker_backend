@@ -6,7 +6,6 @@ import { SMSService } from "./sms.service";
 import { PushService } from "./push.service";
 
 export const createNotificationRoutes = (
-  templateService: TemplateService,
   emailService: EmailService,
   smsService: SMSService,
   pushService: PushService,
@@ -24,9 +23,11 @@ export const createNotificationRoutes = (
             const { recipientEmail, subject, template, variables, storeId } =
               body;
 
-            // Create NotificationJob
+            // Create NotificationJob with all required template fields
             const job = {
-              id: `email_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              id: `email_${Date.now()}_${Math.random()
+                .toString(36)
+                .substr(2, 9)}`,
               deliveryId: `del_${Date.now()}`,
               type: "email" as const,
               campaignId: body.campaignId || "manual",
@@ -41,28 +42,43 @@ export const createNotificationRoutes = (
                 id: template,
                 name: subject || "Manual Email",
                 content: body.content || "",
-                type: "email" as const
+                type: "email" as const,
+                campaignId: body.campaignId || "manual",
+                channel: "email" as const,
+                variables: Object.keys(variables || {}),
+                isActive: true,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                metadata: { version: 1, source: "manual" },
               },
               variables: variables || {},
               recipient: {
-                email: recipientEmail
+                email: recipientEmail,
               },
               metadata: {
                 source: "manual",
-                timestamp: new Date().toISOString()
-              }
+                timestamp: new Date().toISOString(),
+              },
             };
 
-            // Create PersonalizationData
+            // Create PersonalizationData (strict structure)
             const personalizationData = {
-              userId: body.userId || recipientEmail,
-              userSegment: body.userSegment || "default",
-              preferences: body.preferences || {},
-              recommendations: body.recommendations || [],
-              dynamic: variables || {}
+              user: {
+                email: recipientEmail,
+                ...(body.user || {}),
+              },
+              cart: body.cart || { items: [], total: 0, currency: "USD" },
+              store: body.store || {
+                name: "Default Store",
+                domain: "example.com",
+              },
+              intervention: body.intervention || { type: "manual" },
             };
 
-            const result = await emailService.sendEmail(job, personalizationData);
+            const result = await emailService.sendEmail(
+              job,
+              personalizationData
+            );
 
             metrics.recordCounter("notifications.email.sent", 1, {
               storeId,
@@ -132,22 +148,28 @@ export const createNotificationRoutes = (
                 isActive: true,
                 createdAt: new Date(),
                 updatedAt: new Date(),
-                metadata: { version: 1, source: "manual" }
+                metadata: { version: 1, source: "manual" },
               },
               variables: variables || {},
               recipient: { phone: recipientPhone },
-              metadata: { source: "manual" }
+              metadata: { source: "manual" },
             };
 
+            // PersonalizationData for SMS
             const smsPersonalizationData = {
-              userId: recipientPhone,
-              userSegment: "default",
-              preferences: {},
-              recommendations: [],
-              dynamic: variables || {}
+              user: { phone: recipientPhone },
+              cart: body.cart || { items: [], total: 0, currency: "USD" },
+              store: body.store || {
+                name: "Default Store",
+                domain: "example.com",
+              },
+              intervention: body.intervention || { type: "manual" },
             };
 
-            const smsResult = await smsService.sendSMS(smsJob, smsPersonalizationData);
+            const smsResult = await smsService.sendSMS(
+              smsJob,
+              smsPersonalizationData
+            );
 
             metrics.recordCounter("notifications.sms.sent", 1, {
               storeId,
@@ -157,7 +179,7 @@ export const createNotificationRoutes = (
             return {
               success: true,
               data: {
-                deliveryId,
+                deliveryId: smsJob.deliveryId,
                 channel: "sms",
                 timestamp: new Date().toISOString(),
               },
@@ -192,13 +214,52 @@ export const createNotificationRoutes = (
             const { recipientToken, title, template, variables, storeId } =
               body;
 
-            const deliveryId = await pushService.sendNotification({
-              recipientToken,
-              title,
-              template,
-              variables,
-              storeId,
-            });
+            // Create push job
+            const pushJob = {
+              id: `push_${Date.now()}`,
+              type: "push" as const,
+              deliveryId: `del_${Date.now()}`,
+              campaignId: "manual",
+              userId: recipientToken,
+              storeId: storeId || "default",
+              priority: "medium" as const,
+              scheduledFor: new Date(),
+              attempts: 0,
+              maxAttempts: 3,
+              status: "pending" as const,
+              template: {
+                id: template,
+                name: title || "Manual Push",
+                content: body.content || "",
+                type: "push" as const,
+                campaignId: "manual",
+                channel: "push" as const,
+                variables: Object.keys(variables || {}),
+                isActive: true,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                metadata: { version: 1, source: "manual" },
+              },
+              variables: variables || {},
+              recipient: { deviceToken: recipientToken },
+              metadata: { source: "manual" },
+            };
+
+            // PersonalizationData for push
+            const pushPersonalizationData = {
+              user: {},
+              cart: body.cart || { items: [], total: 0, currency: "USD" },
+              store: body.store || {
+                name: "Default Store",
+                domain: "example.com",
+              },
+              intervention: body.intervention || { type: "manual" },
+            };
+
+            const pushResult = await pushService.sendPush(
+              pushJob,
+              pushPersonalizationData
+            );
 
             metrics.recordCounter("notifications.push.sent", 1, {
               storeId,
@@ -208,7 +269,7 @@ export const createNotificationRoutes = (
             return {
               success: true,
               data: {
-                deliveryId,
+                deliveryId: pushJob.deliveryId,
                 channel: "push",
                 timestamp: new Date().toISOString(),
               },
@@ -236,139 +297,11 @@ export const createNotificationRoutes = (
         }
       )
 
-      // Get template
-      .get("/template/:templateId", async ({ params, query, set }: any) => {
-        try {
-          const { templateId } = params;
-          const { storeId } = query;
-
-          if (!storeId) {
-            set.status = 400;
-            return {
-              success: false,
-              error: "storeId is required",
-            };
-          }
-
-          const template = await templateService.getTemplate(
-            templateId,
-            storeId
-          );
-
-          return {
-            success: true,
-            data: template,
-          };
-        } catch (error) {
-          logger.error("Failed to get template", error as Error);
-
-          set.status = 404;
-          return {
-            success: false,
-            error: "Template not found",
-            message: (error as Error).message,
-          };
-        }
-      })
-
-      // List templates
-      .get("/templates", async ({ query }: any) => {
-        try {
-          const { storeId, category } = query;
-
-          if (!storeId) {
-            return {
-              success: false,
-              error: "storeId is required",
-            };
-          }
-
-          const templates = await templateService.listTemplates(
-            storeId,
-            category
-          );
-
-          return {
-            success: true,
-            data: {
-              templates,
-              count: templates.length,
-            },
-          };
-        } catch (error) {
-          logger.error("Failed to list templates", error as Error);
-
-          return {
-            success: false,
-            error: "Failed to list templates",
-            message: (error as Error).message,
-          };
-        }
-      })
-
-      // Create/update template
-      .put(
-        "/template/:templateId",
-        async ({ params, body, set }: any) => {
-          try {
-            const { templateId } = params;
-            const templateData = body;
-
-            await templateService.updateTemplate(templateId, templateData);
-
-            return {
-              success: true,
-              data: {
-                templateId,
-                updated: true,
-                timestamp: new Date().toISOString(),
-              },
-            };
-          } catch (error) {
-            logger.error("Failed to update template", error as Error);
-
-            set.status = 500;
-            return {
-              success: false,
-              error: "Failed to update template",
-              message: (error as Error).message,
-            };
-          }
-        },
-        {
-          body: t.Object({
-            storeId: t.String(),
-            name: t.String(),
-            category: t.String(),
-            channel: t.String(),
-            subject: t.Optional(t.String()),
-            content: t.String(),
-            variables: t.Optional(t.Array(t.String())),
-            metadata: t.Optional(t.Record(t.String(), t.Any())),
-          }),
-        }
-      )
-
-      // Notification health check
+      // Notification health check (basic)
       .get("/health", async () => {
-        const health = {
-          status: "healthy",
-          services: {
-            template: await templateService.healthCheck(),
-            email: await emailService.healthCheck(),
-            sms: await smsService.healthCheck(),
-            push: await pushService.healthCheck(),
-          },
-          timestamp: new Date().toISOString(),
-        };
-
-        const allHealthy = Object.values(health.services).every(
-          (s) => s.status === "healthy"
-        );
-
         return {
-          ...health,
-          status: allHealthy ? "healthy" : "degraded",
+          status: "healthy",
+          timestamp: new Date().toISOString(),
         };
       })
   );

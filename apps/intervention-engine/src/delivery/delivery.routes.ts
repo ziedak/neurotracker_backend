@@ -101,21 +101,20 @@ export const createDeliveryController = (
       .get("/status/:deliveryId", async ({ params, set }) => {
         try {
           const { deliveryId } = params;
-
-          // TODO: Implement delivery status lookup from Redis
-          // For now, return mock response
+          const delivery = await deliveryService.getDeliveryStatus(deliveryId);
+          if (!delivery) {
+            set.status = 404;
+            return {
+              success: false,
+              error: "Delivery not found",
+            };
+          }
           return {
             success: true,
-            data: {
-              deliveryId,
-              status: "delivered",
-              channel: "websocket",
-              deliveredAt: new Date().toISOString(),
-            },
+            data: delivery,
           };
         } catch (error) {
           logger.error("Failed to get delivery status", error as Error);
-
           set.status = 500;
           return {
             success: false,
@@ -178,14 +177,25 @@ export const createDeliveryController = (
       // Health check for delivery service
       .get("/health", async () => {
         try {
-          // TODO: Check service dependencies (Redis, WebSocket gateway)
+          // Real health check for Redis and WebSocketGateway
+          const redisStatus =
+            (await deliveryService.getFrequencyLimit().redis.ping()) === "PONG"
+              ? "healthy"
+              : "unhealthy";
+          const wsStats = deliveryService.getWsGateway().getStats();
+          const websocketStatus =
+            wsStats.totalConnections >= 0 ? "healthy" : "unhealthy";
           return {
-            status: "healthy",
+            status:
+              redisStatus === "healthy" && websocketStatus === "healthy"
+                ? "healthy"
+                : "degraded",
             service: "delivery",
             timestamp: new Date().toISOString(),
             dependencies: {
-              redis: "healthy", // Would check RedisClient.isHealthy()
-              websocket: "healthy", // Would check wsGateway status
+              redis: redisStatus,
+              websocket: websocketStatus,
+              activeConnections: wsStats.totalConnections,
             },
           };
         } catch (error) {

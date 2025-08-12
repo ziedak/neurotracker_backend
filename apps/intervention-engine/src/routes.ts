@@ -1,7 +1,7 @@
 import { Elysia } from "@libs/elysia-server";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { container } from "./container";
-import { createDeliveryController } from "./delivery/delivery.controller";
+import { createDeliveryController } from "./delivery/delivery.routes";
 import { createTrackingController } from "./tracking/tracking.controller";
 import { createAnalyticsController } from "./tracking/analytics.controller";
 import { DeliveryService } from "./delivery/delivery.service";

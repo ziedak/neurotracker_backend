@@ -191,6 +191,73 @@ importers:
         specifier: ^5.9.2
         version: 5.9.2
 
+  apps/intervention-engine:
+    dependencies:
+      '@libs/auth':
+        specifier: workspace:*
+        version: link:../../libs/auth
+      '@libs/config':
+        specifier: workspace:*
+        version: link:../../libs/config
+      '@libs/database':
+        specifier: workspace:*
+        version: link:../../libs/database
+      '@libs/elysia-server':
+        specifier: workspace:*
+        version: link:../../libs/elysia-server
+      '@libs/messaging':
+        specifier: workspace:*
+        version: link:../../libs/messaging
+      '@libs/monitoring':
+        specifier: workspace:*
+        version: link:../../libs/monitoring
+      '@libs/utils':
+        specifier: workspace:*
+        version: link:../../libs/utils
+      axios:
+        specifier: ^1.6.0
+        version: 1.11.0
+      ioredis:
+        specifier: ^5.7.0
+        version: 5.7.0
+      zod:
+        specifier: ^3.22.0
+        version: 3.25.76
+    devDependencies:
+      '@types/jest':
+        specifier: ^29.5.0
+        version: 29.5.14
+      '@types/node':
+        specifier: ^24.2.1
+        version: 24.2.1
+      '@typescript-eslint/eslint-plugin':
+        specifier: ^6.0.0
+        version: 6.21.0(@typescript-eslint/parser@6.21.0(eslint@8.57.1)(typescript@5.9.2))(eslint@8.57.1)(typescript@5.9.2)
+      '@typescript-eslint/parser':
+        specifier: ^6.0.0
+        version: 6.21.0(eslint@8.57.1)(typescript@5.9.2)
+      eslint:
+        specifier: ^8.50.0
+        version: 8.57.1
+      jest:
+        specifier: ^29.5.0
+        version: 29.7.0(@types/node@24.2.1)(ts-node@10.9.2(@types/node@24.2.1)(typescript@5.9.2))
+      nodemon:
+        specifier: ^3.1.10
+        version: 3.1.10
+      supertest:
+        specifier: ^7.1.4
+        version: 7.1.4
+      ts-jest:
+        specifier: ^29.1.0
+        version: 29.4.1(@babel/core@7.28.0)(@jest/transform@29.7.0)(@jest/types@29.6.3)(babel-jest@29.7.0(@babel/core@7.28.0))(jest-util@29.7.0)(jest@29.7.0(@types/node@24.2.1)(ts-node@10.9.2(@types/node@24.2.1)(typescript@5.9.2)))(typescript@5.9.2)
+      tsx:
+        specifier: ^4.20.3
+        version: 4.20.3
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.2
+
   apps/prediction:
     dependencies:
       '@elysiajs/node':

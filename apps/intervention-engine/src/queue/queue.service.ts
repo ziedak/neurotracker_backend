@@ -403,7 +403,7 @@ export class RedisQueueService implements QueueService {
       await this.redis.srem("jobs:active", job.id);
       await this.redis.zadd("jobs:failed", Date.now(), job.id);
 
-      this.logger.error("Job failed permanently", {
+      this.logger.error("Job failed permanently", new Error(error), {
         jobId: job.id,
         type: job.type,
         attempts: job.attempts,

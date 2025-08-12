@@ -1,5 +1,13 @@
-import { RedisClient } from "@libs/database";
+// Factory for campaign construction and validation
+
+import { LRUCache } from "@libs/utils";
+import { getEnv, getNumberEnv } from "@libs/config";
 import { Logger, MetricsCollector } from "@libs/monitoring";
+import { CampaignRepository } from "./campaign.repository";
+import { CampaignIndexRepository } from "./campaign-index.repository";
+import { ILifecycleService, LifecycleService } from "./lifecycle.service";
+import { IExecutionService, ExecutionService } from "./execution.service";
+import { IMetricsService, MetricsService } from "./metrics.service";
 import {
   Campaign,
   CampaignCreateRequest,
@@ -10,6 +18,7 @@ import {
   CampaignMetrics,
   TriggerCondition,
 } from "./types";
+import { CampaignFactoryService } from "./CampaignFactoryService";
 
 export interface CampaignsService {
   createCampaign(
@@ -60,7 +69,7 @@ export interface CampaignsService {
     storeId: string,
     metrics: Partial<CampaignMetrics>
   ): Promise<void>;
-
+  //TODO: CampaignStatus
   // A/B Testing
   assignVariant(campaignId: string, userId: string): Promise<string>;
   getVariantPerformance(
@@ -71,83 +80,115 @@ export interface CampaignsService {
 
 export class RedisCampaignsService implements CampaignsService {
   private redis: any;
-  
+  private campaignCache: LRUCache<string, Campaign>;
+  private listCache: LRUCache<string, { campaigns: Campaign[]; total: number }>;
+  private repository: CampaignRepository;
+  private indexRepository: CampaignIndexRepository;
+  private lifecycleService: ILifecycleService;
+  private executionService: IExecutionService;
+  private metricsService: IMetricsService;
+  private logger: Logger;
+  private metrics: MetricsCollector;
+  // Centralized Redis key builder
+  private static keys = {
+    store: (storeId: string) =>
+      getEnv("CAMPAIGN_STORE_KEY", `campaigns:store:${storeId}`),
+    index: (storeId: string) =>
+      getEnv("CAMPAIGN_INDEX_KEY", `campaigns:index:${storeId}`),
+    type: (storeId: string, type: string) =>
+      getEnv("CAMPAIGN_TYPE_KEY", `campaigns:type:${storeId}:${type}`),
+    active: (storeId: string) =>
+      getEnv("CAMPAIGN_ACTIVE_KEY", `campaigns:active:${storeId}`),
+    executions: (campaignId: string) =>
+      getEnv("CAMPAIGN_EXECUTIONS_KEY", `campaign:executions:${campaignId}`),
+    metrics: (storeId: string) =>
+      getEnv("CAMPAIGN_METRICS_KEY", `campaign:metrics:${storeId}`),
+    metricsVariant: (campaignId: string) =>
+      getEnv(
+        "CAMPAIGN_METRICS_VARIANT_KEY",
+        `campaign:metrics:variant:${campaignId}:*`
+      ),
+    variants: (campaignId: string) =>
+      getEnv("CAMPAIGN_VARIANTS_KEY", `campaign:variants:${campaignId}`),
+  };
+  // Magic values as constants
+  public static DEFAULT_COST_PER_CHANNEL = {
+    email: getNumberEnv("CAMPAIGN_COST_EMAIL", 0.01),
+    sms: getNumberEnv("CAMPAIGN_COST_SMS", 0.05),
+    push: getNumberEnv("CAMPAIGN_COST_PUSH", 0.002),
+    websocket: getNumberEnv("CAMPAIGN_COST_WEBSOCKET", 0),
+    popup: getNumberEnv("CAMPAIGN_COST_POPUP", 0),
+  };
+
   constructor(
     redis: any,
-    private logger: Logger,
-    private metrics: MetricsCollector
+    repository: CampaignRepository,
+    indexRepository: CampaignIndexRepository,
+    logger: Logger,
+    metrics: MetricsCollector,
+    lifecycleService?: ILifecycleService,
+    executionService?: IExecutionService,
+    metricsService?: IMetricsService
   ) {
-    this.redis = redis || RedisClient.getInstance();
+    this.redis = redis;
+    this.repository = repository;
+    this.indexRepository = indexRepository;
+    this.lifecycleService =
+      lifecycleService ?? new LifecycleService(redis, logger);
+    this.executionService =
+      executionService ?? new ExecutionService(redis, logger);
+    this.metricsService = metricsService ?? new MetricsService(redis, logger);
+    this.logger = logger;
+    this.metrics = metrics;
+    this.campaignCache = new LRUCache<string, Campaign>({
+      max: 500,
+      ttl: 1000 * 60,
+    });
+    this.listCache = new LRUCache<
+      string,
+      { campaigns: Campaign[]; total: number }
+    >({
+      max: 100,
+      ttl: 1000 * 30,
+    });
   }
 
+  /**
+   * Create a new campaign with validation
+   */
   async createCampaign(
     storeId: string,
     request: CampaignCreateRequest,
     createdBy: string
   ): Promise<Campaign> {
     try {
-      const campaignId = `campaign_${Date.now()}_${Math.random()
-        .toString(36)
-        .substr(2, 9)}`;
-      const now = new Date();
-
-      const campaign: Campaign = {
-        id: campaignId,
+      // Delegate campaign construction to factory
+      const campaign = CampaignFactoryService.create(
         storeId,
-        name: request.name,
-        description: request.description,
-        type: request.type,
-        status: "draft",
-        triggerConditions: request.triggerConditions,
-        channels: request.channels,
-        schedule: request.schedule,
-        targeting: request.targeting,
-        content: request.content,
-        abTest: request.abTest,
-        budget: request.budget
-          ? {
-              ...request.budget,
-              spentAmount: 0,
-              remainingBudget: request.budget.totalBudget || 0,
-            }
-          : undefined,
-        createdAt: now,
-        updatedAt: now,
-        createdBy,
-      };
-
-      // Store campaign in Redis
-      await this.redis.hset(
-        `campaigns:store:${storeId}`,
-        campaignId,
-        JSON.stringify(campaign)
+        request,
+        createdBy
       );
-
-      // Add to campaign index for faster queries
-      await this.redis.zadd(
-        `campaigns:index:${storeId}`,
-        now.getTime(),
-        campaignId
+      await this.repository.setCampaign(campaign.id, campaign);
+      await this.indexRepository.addToIndex(
+        storeId,
+        campaign.id,
+        campaign.createdAt.getTime()
       );
-
-      // Add to type index
-      await this.redis.sadd(
-        `campaigns:type:${storeId}:${request.type}`,
-        campaignId
+      await this.indexRepository.addToTypeIndex(
+        storeId,
+        campaign.type,
+        campaign.id
       );
-
       this.logger.info("Campaign created", {
-        campaignId,
+        campaignId: campaign.id,
         storeId,
-        name: request.name,
-        type: request.type,
+        name: campaign.name,
+        type: campaign.type,
       });
-
       this.metrics.recordCounter("campaigns.created", 1, {
         storeId,
-        type: request.type,
+        type: campaign.type,
       });
-
       return campaign;
     } catch (error) {
       this.logger.error("Failed to create campaign", error as Error);
@@ -155,6 +196,9 @@ export class RedisCampaignsService implements CampaignsService {
     }
   }
 
+  /**
+   * Update an existing campaign with validation
+   */
   async updateCampaign(
     campaignId: string,
     storeId: string,
@@ -166,44 +210,25 @@ export class RedisCampaignsService implements CampaignsService {
         throw new Error(`Campaign ${campaignId} not found`);
       }
 
-      const updated: Campaign = {
-        ...existing,
-        ...request,
-        budget: request.budget ? {
-          totalBudget: request.budget.totalBudget ?? existing.budget?.totalBudget,
-          dailyBudget: request.budget.dailyBudget ?? existing.budget?.dailyBudget,
-          currency: request.budget.currency ?? existing.budget?.currency ?? "USD",
-          costPerChannel: request.budget.costPerChannel ?? existing.budget?.costPerChannel ?? {
-            email: 0.01,
-            sms: 0.05,
-            push: 0.002,
-            websocket: 0,
-            popup: 0
-          },
-          spentAmount: request.budget.spentAmount ?? existing.budget?.spentAmount ?? 0,
-          remainingBudget: request.budget.remainingBudget ?? existing.budget?.remainingBudget ?? 0
-        } : existing.budget,
-        updatedAt: new Date(),
-      };
-
-      // Store updated campaign
-      await this.redis.hset(
-        `campaigns:store:${storeId}`,
+      // Delegate campaign update to factory
+      const updated = CampaignFactoryService.update(existing, request);
+      await this.repository.setCampaign(campaignId, updated);
+      await this.indexRepository.updateIndex(
+        storeId,
         campaignId,
-        JSON.stringify(updated)
+        updated.updatedAt.getTime()
       );
-
+      this.campaignCache.delete(`${storeId}:${campaignId}`);
+      this.listCache.clear();
       this.logger.info("Campaign updated", {
         campaignId,
         storeId,
         changes: Object.keys(request),
       });
-
       this.metrics.recordCounter("campaigns.updated", 1, {
         storeId,
         type: updated.type,
       });
-
       return updated;
     } catch (error) {
       this.logger.error("Failed to update campaign", error as Error);
@@ -211,76 +236,41 @@ export class RedisCampaignsService implements CampaignsService {
     }
   }
 
+  /**
+   * Get a campaign by ID
+   */
   async getCampaign(
     campaignId: string,
     storeId: string
   ): Promise<Campaign | null> {
     try {
-      const data = await this.redis.hget(
-        `campaigns:store:${storeId}`,
-        campaignId
-      );
-
-      if (!data) return null;
-
-      return JSON.parse(data) as Campaign;
+      const cacheKey = `${storeId}:${campaignId}`;
+      const cached = this.campaignCache.get(cacheKey);
+      if (cached) return cached;
+      const campaign = await this.repository.getCampaign(campaignId);
+      if (!campaign) return null;
+      this.campaignCache.set(cacheKey, campaign);
+      return campaign;
     } catch (error) {
       this.logger.error("Failed to get campaign", error as Error);
       throw error;
     }
   }
 
+  /**
+   * List campaigns with filtering and pagination
+   */
   async listCampaigns(
     storeId: string,
     filter?: CampaignListFilter
   ): Promise<{ campaigns: Campaign[]; total: number }> {
     try {
-      let campaignIds: string[];
-
-      if (filter?.type && filter.type.length > 0) {
-        // Get campaigns by type
-        const typeKeys = filter.type.map(
-          (type) => `campaigns:type:${storeId}:${type}`
-        );
-        campaignIds = await this.redis.sunion(...typeKeys);
-      } else {
-        // Get all campaigns for store
-        campaignIds = await this.redis.zrevrange(
-          `campaigns:index:${storeId}`,
-          0,
-          -1
-        );
-      }
-
-      // Apply pagination
-      const offset = filter?.offset || 0;
-      const limit = filter?.limit || 50;
-      const paginatedIds = campaignIds.slice(offset, offset + limit);
-
-      // Fetch campaign data
-      const campaigns: Campaign[] = [];
-      if (paginatedIds.length > 0) {
-        const campaignData = await this.redis.hmget(
-          `campaigns:store:${storeId}`,
-          ...paginatedIds
-        );
-
-        for (const data of campaignData) {
-          if (data) {
-            const campaign = JSON.parse(data) as Campaign;
-
-            // Apply filters
-            if (this.matchesFilter(campaign, filter)) {
-              campaigns.push(campaign);
-            }
-          }
-        }
-      }
-
-      return {
-        campaigns,
-        total: campaignIds.length,
-      };
+      const cacheKey = JSON.stringify({ storeId, filter });
+      const cached = this.listCache.get(cacheKey);
+      if (cached) return cached;
+      const result = await this.repository.listCampaigns();
+      this.listCache.set(cacheKey, result);
+      return result;
     } catch (error) {
       this.logger.error("Failed to list campaigns", error as Error);
       throw error;
@@ -292,21 +282,13 @@ export class RedisCampaignsService implements CampaignsService {
       const campaign = await this.getCampaign(campaignId, storeId);
       if (!campaign) return false;
 
-      // Remove from all indexes
-      await Promise.all([
-        this.redis.hdel(`campaigns:store:${storeId}`, campaignId),
-        this.redis.zrem(`campaigns:index:${storeId}`, campaignId),
-        this.redis.srem(
-          `campaigns:type:${storeId}:${campaign.type}`,
-          campaignId
-        ),
-        this.redis.del(`campaign:executions:${campaignId}`),
-        this.redis.del(`campaign:metrics:${campaignId}`),
-      ]);
-
+      // Delegate deletion to repository and indexRepository
+      await this.repository.deleteCampaign(campaignId);
+      await this.indexRepository.removeFromIndex(storeId, campaignId);
+      this.campaignCache.delete(`${storeId}:${campaignId}`);
+      this.listCache.clear();
       this.logger.info("Campaign deleted", { campaignId, storeId });
       this.metrics.recordCounter("campaigns.deleted", 1, { storeId });
-
       return true;
     } catch (error) {
       this.logger.error("Failed to delete campaign", error as Error);
@@ -319,16 +301,9 @@ export class RedisCampaignsService implements CampaignsService {
     storeId: string
   ): Promise<boolean> {
     try {
-      const campaign = await this.updateCampaign(campaignId, storeId, {
-        status: "active",
-      });
-
-      // Add to active campaigns set
-      await this.redis.sadd(`campaigns:active:${storeId}`, campaignId);
-
-      this.logger.info("Campaign activated", { campaignId, storeId });
+      await this.updateCampaign(campaignId, storeId, { status: "active" });
+      await this.lifecycleService.activateCampaign(storeId, campaignId);
       this.metrics.recordCounter("campaigns.activated", 1, { storeId });
-
       return true;
     } catch (error) {
       this.logger.error("Failed to activate campaign", error as Error);
@@ -338,16 +313,9 @@ export class RedisCampaignsService implements CampaignsService {
 
   async pauseCampaign(campaignId: string, storeId: string): Promise<boolean> {
     try {
-      await this.updateCampaign(campaignId, storeId, {
-        status: "paused",
-      });
-
-      // Remove from active campaigns set
-      await this.redis.srem(`campaigns:active:${storeId}`, campaignId);
-
-      this.logger.info("Campaign paused", { campaignId, storeId });
+      await this.updateCampaign(campaignId, storeId, { status: "paused" });
+      await this.lifecycleService.pauseCampaign(storeId, campaignId);
       this.metrics.recordCounter("campaigns.paused", 1, { storeId });
-
       return true;
     } catch (error) {
       this.logger.error("Failed to pause campaign", error as Error);
@@ -357,16 +325,9 @@ export class RedisCampaignsService implements CampaignsService {
 
   async stopCampaign(campaignId: string, storeId: string): Promise<boolean> {
     try {
-      await this.updateCampaign(campaignId, storeId, {
-        status: "completed",
-      });
-
-      // Remove from active campaigns set
-      await this.redis.srem(`campaigns:active:${storeId}`, campaignId);
-
-      this.logger.info("Campaign stopped", { campaignId, storeId });
+      await this.updateCampaign(campaignId, storeId, { status: "completed" });
+      await this.lifecycleService.stopCampaign(storeId, campaignId);
       this.metrics.recordCounter("campaigns.stopped", 1, { storeId });
-
       return true;
     } catch (error) {
       this.logger.error("Failed to stop campaign", error as Error);
@@ -412,60 +373,21 @@ export class RedisCampaignsService implements CampaignsService {
     context: any
   ): Promise<CampaignExecution> {
     try {
-      const executionId = `exec_${Date.now()}_${Math.random()
-        .toString(36)
-        .substr(2, 9)}`;
-      const now = new Date();
-
       // Assign A/B test variant if needed
       const variant = campaign.abTest?.enabled
         ? await this.assignVariant(campaign.id, userId)
         : undefined;
-
-      const execution: CampaignExecution = {
-        id: executionId,
-        campaignId: campaign.id,
+      // Pass variant to executionService if needed
+      const execution = await this.executionService.executeCampaign(
+        campaign,
         userId,
-        storeId: campaign.storeId,
-        variant,
-        channels: campaign.channels,
-        status: "pending",
-        scheduledAt: now,
-        results: [],
-        metadata: context,
-      };
-
-      // Store execution
-      await this.redis.hset(
-        `campaign:executions:${campaign.id}`,
-        executionId,
-        JSON.stringify(execution)
+        context,
+        variant
       );
-
-      // Add to execution queue
-      await this.redis.lpush(
-        `queue:campaign:executions`,
-        JSON.stringify({
-          executionId,
-          campaignId: campaign.id,
-          storeId: campaign.storeId,
-          priority: this.calculatePriority(campaign),
-          scheduledAt: now.getTime(),
-        })
-      );
-
-      this.logger.info("Campaign execution created", {
-        executionId,
-        campaignId: campaign.id,
-        userId,
-        variant,
-      });
-
       this.metrics.recordCounter("campaigns.executions.created", 1, {
         storeId: campaign.storeId,
         campaignType: campaign.type,
       });
-
       return execution;
     } catch (error) {
       this.logger.error("Failed to execute campaign", error as Error);
@@ -478,13 +400,7 @@ export class RedisCampaignsService implements CampaignsService {
     storeId: string
   ): Promise<CampaignExecution[]> {
     try {
-      const executions = await this.redis.hgetall(
-        `campaign:executions:${campaignId}`
-      );
-
-      return Object.values(executions).map(
-        (data) => JSON.parse(String(data)) as CampaignExecution
-      );
+      return await this.executionService.getCampaignExecutions(campaignId);
     } catch (error) {
       this.logger.error("Failed to get campaign executions", error as Error);
       throw error;
@@ -496,37 +412,7 @@ export class RedisCampaignsService implements CampaignsService {
     storeId: string
   ): Promise<CampaignMetrics> {
     try {
-      const data = await this.redis.hget(
-        `campaign:metrics:${storeId}`,
-        campaignId
-      );
-
-      if (!data) {
-        // Return default metrics
-        return {
-          campaignId,
-          impressions: 0,
-          opens: 0,
-          clicks: 0,
-          conversions: 0,
-          revenue: 0,
-          cost: 0,
-          roi: 0,
-          conversionRate: 0,
-          clickThroughRate: 0,
-          openRate: 0,
-          channelBreakdown: {
-            email: { impressions: 0, opens: 0, clicks: 0, conversions: 0, revenue: 0, cost: 0 },
-            sms: { impressions: 0, opens: 0, clicks: 0, conversions: 0, revenue: 0, cost: 0 },
-            push: { impressions: 0, opens: 0, clicks: 0, conversions: 0, revenue: 0, cost: 0 },
-            websocket: { impressions: 0, opens: 0, clicks: 0, conversions: 0, revenue: 0, cost: 0 },
-            popup: { impressions: 0, opens: 0, clicks: 0, conversions: 0, revenue: 0, cost: 0 }
-          },
-          lastUpdated: new Date(),
-        };
-      }
-
-      return JSON.parse(data) as CampaignMetrics;
+      return await this.metricsService.getCampaignMetrics(campaignId, storeId);
     } catch (error) {
       this.logger.error("Failed to get campaign metrics", error as Error);
       throw error;
@@ -539,30 +425,10 @@ export class RedisCampaignsService implements CampaignsService {
     metrics: Partial<CampaignMetrics>
   ): Promise<void> {
     try {
-      const existing = await this.getCampaignMetrics(campaignId, storeId);
-
-      const updated: CampaignMetrics = {
-        ...existing,
-        ...metrics,
-        lastUpdated: new Date(),
-      };
-
-      // Recalculate derived metrics
-      if (updated.impressions > 0) {
-        updated.openRate = (updated.opens / updated.impressions) * 100;
-        updated.clickThroughRate = (updated.clicks / updated.impressions) * 100;
-        updated.conversionRate =
-          (updated.conversions / updated.impressions) * 100;
-      }
-
-      if (updated.cost > 0) {
-        updated.roi = ((updated.revenue - updated.cost) / updated.cost) * 100;
-      }
-
-      await this.redis.hset(
-        `campaign:metrics:${storeId}`,
+      await this.metricsService.updateCampaignMetrics(
         campaignId,
-        JSON.stringify(updated)
+        storeId,
+        metrics
       );
     } catch (error) {
       this.logger.error("Failed to update campaign metrics", error as Error);
@@ -572,52 +438,13 @@ export class RedisCampaignsService implements CampaignsService {
 
   async assignVariant(campaignId: string, userId: string): Promise<string> {
     try {
-      // Check if user already has an assigned variant
-      const existing = await this.redis.hget(
-        `campaign:variants:${campaignId}`,
-        userId
-      );
-      if (existing) return existing;
-
-      const campaign = await this.redis.hget(`campaigns:store:*`, campaignId);
-      if (!campaign) throw new Error("Campaign not found");
-
-      const campaignData = JSON.parse(campaign) as Campaign;
-      const abTest = campaignData.abTest;
-
-      if (!abTest?.enabled || !abTest.variants.length) {
-        return "control";
-      }
-
-      // Assign variant based on traffic split
-      const random = Math.random() * 100;
-      let cumulative = 0;
-
-      for (let i = 0; i < abTest.variants.length; i++) {
-        cumulative += abTest.trafficSplit[i];
-        if (random <= cumulative) {
-          const variantId = abTest.variants[i].id;
-
-          // Store assignment
-          await this.redis.hset(
-            `campaign:variants:${campaignId}`,
-            userId,
-            variantId
-          );
-
-          return variantId;
-        }
-      }
-
-      // Fallback to first variant
-      const fallbackVariant = abTest.variants[0].id;
-      await this.redis.hset(
-        `campaign:variants:${campaignId}`,
+      const campaign = await this.getCampaign(campaignId, "");
+      if (!campaign) return "control";
+      return await this.metricsService.assignVariant(
+        campaignId,
         userId,
-        fallbackVariant
+        campaign
       );
-
-      return fallbackVariant;
     } catch (error) {
       this.logger.error("Failed to assign variant", error as Error);
       return "control";
@@ -629,59 +456,37 @@ export class RedisCampaignsService implements CampaignsService {
     storeId: string
   ): Promise<Record<string, CampaignMetrics>> {
     try {
-      const variantKeys = await this.redis.keys(
-        `campaign:metrics:variant:${campaignId}:*`
-      );
-      const performance: Record<string, CampaignMetrics> = {};
-
-      for (const key of variantKeys) {
-        const variantId = key.split(":").pop()!;
-        const data = await this.redis.get(key);
-
-        if (data) {
-          performance[variantId] = JSON.parse(data) as CampaignMetrics;
-        }
-      }
-
-      return performance;
+      return await this.metricsService.getVariantPerformance(campaignId);
     } catch (error) {
       this.logger.error("Failed to get variant performance", error as Error);
       throw error;
     }
   }
 
-  private matchesFilter(
+  // Fast filter for campaigns (static for performance)
+  private static fastMatchesFilter(
     campaign: Campaign,
     filter?: CampaignListFilter
   ): boolean {
     if (!filter) return true;
-
-    if (filter.status && !filter.status.includes(campaign.status)) {
-      return false;
-    }
-
-    if (filter.type && !filter.type.includes(campaign.type)) {
-      return false;
-    }
-
+    if (filter.status && !filter.status.includes(campaign.status)) return false;
+    if (filter.type && !filter.type.includes(campaign.type)) return false;
     if (filter.search) {
       const searchLower = filter.search.toLowerCase();
       if (
         !campaign.name.toLowerCase().includes(searchLower) &&
-        !campaign.description?.toLowerCase().includes(searchLower)
+        !(
+          campaign.description &&
+          campaign.description.toLowerCase().includes(searchLower)
+        )
       ) {
         return false;
       }
     }
-
-    if (filter.createdAfter && campaign.createdAt < filter.createdAfter) {
+    if (filter.createdAfter && campaign.createdAt < filter.createdAfter)
       return false;
-    }
-
-    if (filter.createdBefore && campaign.createdAt > filter.createdBefore) {
+    if (filter.createdBefore && campaign.createdAt > filter.createdBefore)
       return false;
-    }
-
     return true;
   }
 

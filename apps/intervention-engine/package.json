@@ -25,16 +25,16 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "axios": "^1.6.0",
-    "ioredis": "^5.3.2",
-    "zod": "^3.22.0",
-    "@libs/elysia-server": "workspace:*",
-    "@libs/monitoring": "workspace:*",
     "@libs/auth": "workspace:*",
+    "@libs/config": "workspace:*",
     "@libs/database": "workspace:*",
+    "@libs/elysia-server": "workspace:*",
     "@libs/messaging": "workspace:*",
+    "@libs/monitoring": "workspace:*",
     "@libs/utils": "workspace:*",
-    "@libs/config": "workspace:*"
+    "axios": "^1.6.0",
+    "ioredis": "^5.7.0",
+    "zod": "^3.22.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",

@@ -1,10 +1,6 @@
 import { RedisClient } from "@libs/database";
 import { Logger } from "@libs/monitoring";
-import {
-  InterventionMetrics,
-  UserJourney,
-  ConversionEvent,
-} from "./types";
+import { InterventionMetrics, UserJourney, ConversionEvent } from "./types";
 
 export interface AnalyticsService {
   calculateConversionRate(
@@ -80,7 +76,7 @@ export interface ABTestVariant {
 
 export class RedisAnalyticsService implements AnalyticsService {
   private redis: any;
-  
+
   constructor(redis: any, private logger: Logger) {
     this.redis = redis || RedisClient.getInstance();
   }

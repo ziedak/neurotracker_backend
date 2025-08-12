@@ -2,7 +2,7 @@ import { createElysiaServer } from "@libs/elysia-server";
 import { container } from "./container";
 import { WebSocketGateway } from "./delivery/websocket.gateway";
 import { DeliveryService } from "./delivery/delivery.service";
-import { createDeliveryController } from "./delivery/delivery.controller";
+import { createDeliveryController } from "./delivery/delivery.routes";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 
 const PORT = parseInt(process.env.PORT || "3006");
