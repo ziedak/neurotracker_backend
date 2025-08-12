@@ -145,6 +145,32 @@ export class InterventionEngineContainer {
       () => new AnalyticsService(redisClient, logger)
     );
 
+    // Campaign management services
+    this._registry.registerSingleton("campaignsService", async () => {
+      const { RedisCampaignsService } = await import(
+        "./campaigns/campaigns.service"
+      );
+      const metricsCollector =
+        this._registry.resolve<MetricsCollector>("metricsCollector");
+      return new RedisCampaignsService(redisClient, logger, metricsCollector);
+    });
+
+    this._registry.registerSingleton("queueService", async () => {
+      const { QueueService } = await import("./queue/queue.service");
+      const metricsCollector =
+        this._registry.resolve<MetricsCollector>("metricsCollector");
+      return new QueueService(logger, metricsCollector);
+    });
+
+    this._registry.registerSingleton("personalizationService", async () => {
+      const { PersonalizationService } = await import(
+        "./personalization/personalization.service"
+      );
+      const metricsCollector =
+        this._registry.resolve<MetricsCollector>("metricsCollector");
+      return new PersonalizationService(logger, metricsCollector);
+    });
+
     // Note: DeliveryService and WebSocketGateway will be registered when routes are set up
     // as they have circular dependency requirements that need to be resolved in main.ts
   }
