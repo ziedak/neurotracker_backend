@@ -223,7 +223,7 @@ export class TemplateService {
    */
   private renderCartItems(content: string, items: any[]): string {
     const eachMatch = content.match(
-      /\{\{#each cart\.items\}\}(.*?)\{\{\/#each\}\}/s
+      /\{\{#each cart\.items\}\}(.*?)\{\{\/#each\}\}/gs
     );
     if (!eachMatch) return content;
 

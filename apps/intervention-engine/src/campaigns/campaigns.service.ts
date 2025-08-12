@@ -1,4 +1,4 @@
-import Redis from "ioredis";
+import { RedisClient } from "@libs/database";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import {
   Campaign,
@@ -70,11 +70,15 @@ export interface CampaignsService {
 }
 
 export class RedisCampaignsService implements CampaignsService {
+  private redis: any;
+  
   constructor(
-    private redis: Redis,
+    redis: any,
     private logger: Logger,
     private metrics: MetricsCollector
-  ) {}
+  ) {
+    this.redis = redis || RedisClient.getInstance();
+  }
 
   async createCampaign(
     storeId: string,
@@ -165,6 +169,20 @@ export class RedisCampaignsService implements CampaignsService {
       const updated: Campaign = {
         ...existing,
         ...request,
+        budget: request.budget ? {
+          totalBudget: request.budget.totalBudget ?? existing.budget?.totalBudget,
+          dailyBudget: request.budget.dailyBudget ?? existing.budget?.dailyBudget,
+          currency: request.budget.currency ?? existing.budget?.currency ?? "USD",
+          costPerChannel: request.budget.costPerChannel ?? existing.budget?.costPerChannel ?? {
+            email: 0.01,
+            sms: 0.05,
+            push: 0.002,
+            websocket: 0,
+            popup: 0
+          },
+          spentAmount: request.budget.spentAmount ?? existing.budget?.spentAmount ?? 0,
+          remainingBudget: request.budget.remainingBudget ?? existing.budget?.remainingBudget ?? 0
+        } : existing.budget,
         updatedAt: new Date(),
       };
 
@@ -465,7 +483,7 @@ export class RedisCampaignsService implements CampaignsService {
       );
 
       return Object.values(executions).map(
-        (data) => JSON.parse(data) as CampaignExecution
+        (data) => JSON.parse(String(data)) as CampaignExecution
       );
     } catch (error) {
       this.logger.error("Failed to get campaign executions", error as Error);
@@ -497,7 +515,13 @@ export class RedisCampaignsService implements CampaignsService {
           conversionRate: 0,
           clickThroughRate: 0,
           openRate: 0,
-          channelBreakdown: {},
+          channelBreakdown: {
+            email: { impressions: 0, opens: 0, clicks: 0, conversions: 0, revenue: 0, cost: 0 },
+            sms: { impressions: 0, opens: 0, clicks: 0, conversions: 0, revenue: 0, cost: 0 },
+            push: { impressions: 0, opens: 0, clicks: 0, conversions: 0, revenue: 0, cost: 0 },
+            websocket: { impressions: 0, opens: 0, clicks: 0, conversions: 0, revenue: 0, cost: 0 },
+            popup: { impressions: 0, opens: 0, clicks: 0, conversions: 0, revenue: 0, cost: 0 }
+          },
           lastUpdated: new Date(),
         };
       }
@@ -708,4 +732,4 @@ export class RedisCampaignsService implements CampaignsService {
   }
 }
 
-export { RedisCampaignsService as CampaignsService };
+// Service implementation complete

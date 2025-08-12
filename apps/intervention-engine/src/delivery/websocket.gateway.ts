@@ -207,9 +207,10 @@ export class WebSocketGateway {
 
     try {
       const fullMessage: InterventionMessage = {
-        ...message,
-        timestamp: message.timestamp || new Date().toISOString(),
-      } as InterventionMessage;
+        type: message.type || "connection_status",
+        payload: message.payload || {},
+        timestamp: new Date().toISOString(),
+      };
 
       connection.ws.send(JSON.stringify(fullMessage));
       this.metrics.recordCounter("websocket.messages.sent", 1, {

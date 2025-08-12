@@ -7,7 +7,7 @@ import { EmailService } from "./notifications/email.service";
 import { SMSService } from "./notifications/sms.service";
 import { PushService } from "./notifications/push.service";
 import { TrackingService } from "./tracking/tracking.service";
-import { AnalyticsService } from "./tracking/analytics.service";
+import { RedisAnalyticsService } from "./tracking/analytics.service";
 
 /**
  * Intervention Engine Container
@@ -142,7 +142,7 @@ export class InterventionEngineContainer {
     // Analytics service - handles advanced metrics
     this._registry.registerSingleton(
       "analyticsService",
-      () => new AnalyticsService(redisClient, logger)
+      () => new RedisAnalyticsService(redisClient, logger)
     );
 
     // Campaign management services

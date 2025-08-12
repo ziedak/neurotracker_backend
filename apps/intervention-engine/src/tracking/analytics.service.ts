@@ -1,8 +1,7 @@
-import Redis from "ioredis";
+import { RedisClient } from "@libs/database";
 import { Logger } from "@libs/monitoring";
 import {
   InterventionMetrics,
-  CampaignAnalytics,
   UserJourney,
   ConversionEvent,
 } from "./types";
@@ -80,7 +79,11 @@ export interface ABTestVariant {
 }
 
 export class RedisAnalyticsService implements AnalyticsService {
-  constructor(private redis: Redis, private logger: Logger) {}
+  private redis: any;
+  
+  constructor(redis: any, private logger: Logger) {
+    this.redis = redis || RedisClient.getInstance();
+  }
 
   async calculateConversionRate(
     campaignId: string,
@@ -484,4 +487,4 @@ export class RedisAnalyticsService implements AnalyticsService {
   }
 }
 
-export { RedisAnalyticsService as AnalyticsService };
+// Service implementation complete

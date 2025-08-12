@@ -584,9 +584,10 @@ export class PersonalizationService implements IPersonalizationService {
       };
 
       // Return channel with highest score
-      return Object.entries(scores).reduce((best, [channel, score]) =>
-        score > scores[best as keyof typeof scores] ? channel : best
-      );
+      return Object.entries(scores).reduce((best: string, [channel, score]: [string, number]) => {
+        const bestScore = scores[best as keyof typeof scores] || 0;
+        return score > bestScore ? channel : best;
+      }, "email");
     } catch (error) {
       this.logger.error("Failed to get best channel", error as Error);
       return "email"; // fallback
@@ -913,4 +914,4 @@ export class PersonalizationService implements IPersonalizationService {
   }
 }
 
-export { PersonalizationService };
+// Service implementation complete

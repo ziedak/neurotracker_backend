@@ -1,11 +1,16 @@
 import { createElysiaServer } from "@libs/elysia-server";
-import { InterventionEngineContainer as container } from "./container";
+import { container } from "./container";
 import { WebSocketGateway } from "./delivery/websocket.gateway";
 import { DeliveryService } from "./delivery/delivery.service";
 import { createDeliveryController } from "./delivery/delivery.controller";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 
 const PORT = parseInt(process.env.PORT || "3006");
+
+// Campaigns management with A/B testing
+// Personalization engine with user segmentation
+// Queue processing with Redis-based job handling
+// WebSocket real-time delivery using proper Elysia patterns
 
 // Initialize services
 let wsGateway: WebSocketGateway;

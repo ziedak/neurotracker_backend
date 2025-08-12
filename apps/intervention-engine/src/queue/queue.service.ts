@@ -407,7 +407,7 @@ export class RedisQueueService implements QueueService {
         jobId: job.id,
         type: job.type,
         attempts: job.attempts,
-        error,
+        error: error,
       });
 
       this.metrics.recordCounter("queue.jobs.failed", 1, {

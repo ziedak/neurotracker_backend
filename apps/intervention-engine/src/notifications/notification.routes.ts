@@ -24,13 +24,45 @@ export const createNotificationRoutes = (
             const { recipientEmail, subject, template, variables, storeId } =
               body;
 
-            const deliveryId = await emailService.sendEmail({
-              to: recipientEmail,
-              subject,
-              templateId: template,
-              variables,
+            // Create NotificationJob
+            const job = {
+              id: `email_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              deliveryId: `del_${Date.now()}`,
+              type: "email" as const,
+              campaignId: body.campaignId || "manual",
+              userId: body.userId || recipientEmail,
               storeId,
-            });
+              priority: "medium" as const,
+              scheduledFor: new Date(),
+              attempts: 0,
+              maxAttempts: 3,
+              status: "pending" as const,
+              template: {
+                id: template,
+                name: subject || "Manual Email",
+                content: body.content || "",
+                type: "email" as const
+              },
+              variables: variables || {},
+              recipient: {
+                email: recipientEmail
+              },
+              metadata: {
+                source: "manual",
+                timestamp: new Date().toISOString()
+              }
+            };
+
+            // Create PersonalizationData
+            const personalizationData = {
+              userId: body.userId || recipientEmail,
+              userSegment: body.userSegment || "default",
+              preferences: body.preferences || {},
+              recommendations: body.recommendations || [],
+              dynamic: variables || {}
+            };
+
+            const result = await emailService.sendEmail(job, personalizationData);
 
             metrics.recordCounter("notifications.email.sent", 1, {
               storeId,
@@ -40,7 +72,8 @@ export const createNotificationRoutes = (
             return {
               success: true,
               data: {
-                deliveryId,
+                deliveryId: job.deliveryId,
+                messageId: result.messageId,
                 channel: "email",
                 timestamp: new Date().toISOString(),
               },
@@ -75,12 +108,46 @@ export const createNotificationRoutes = (
           try {
             const { recipientPhone, template, variables, storeId } = body;
 
-            const deliveryId = await smsService.sendNotification({
-              recipientPhone,
-              template,
-              variables,
-              storeId,
-            });
+            // Create SMS job
+            const smsJob = {
+              id: `sms_${Date.now()}`,
+              type: "sms" as const,
+              deliveryId: `del_${Date.now()}`,
+              campaignId: "manual",
+              userId: recipientPhone,
+              storeId: storeId || "default",
+              priority: "medium" as const,
+              scheduledFor: new Date(),
+              attempts: 0,
+              maxAttempts: 3,
+              status: "pending" as const,
+              template: {
+                id: template,
+                name: "Manual SMS",
+                content: body.message || "",
+                type: "sms" as const,
+                campaignId: "manual",
+                channel: "sms" as const,
+                variables: Object.keys(variables || {}),
+                isActive: true,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                metadata: { version: 1, source: "manual" }
+              },
+              variables: variables || {},
+              recipient: { phone: recipientPhone },
+              metadata: { source: "manual" }
+            };
+
+            const smsPersonalizationData = {
+              userId: recipientPhone,
+              userSegment: "default",
+              preferences: {},
+              recommendations: [],
+              dynamic: variables || {}
+            };
+
+            const smsResult = await smsService.sendSMS(smsJob, smsPersonalizationData);
 
             metrics.recordCounter("notifications.sms.sent", 1, {
               storeId,

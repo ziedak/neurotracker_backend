@@ -3,6 +3,8 @@
  * Comprehensive type system for ML models, predictions, and features
  */
 
+import { CircuitBreakerConfig } from "@libs/utils";
+
 export interface Prediction {
   cartId: string;
   modelName: string;
@@ -270,12 +272,6 @@ export interface FeatureServiceConfig {
   timeout: number;
   retries: number;
   circuitBreaker: CircuitBreakerConfig;
-}
-
-export interface CircuitBreakerConfig {
-  threshold: number;
-  timeout: number;
-  resetTimeout: number;
 }
 
 export interface CacheConfig {
