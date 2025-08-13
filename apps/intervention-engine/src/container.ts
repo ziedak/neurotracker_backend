@@ -7,7 +7,7 @@ import { EmailService } from "./notifications/email.service";
 import { SMSService } from "./notifications/sms.service";
 import { PushService } from "./notifications/push.service";
 import { TrackingService } from "./tracking/tracking.service";
-import { RedisAnalyticsService } from "./tracking/analytics.service";
+import { RedisAnalyticsService } from "./analytics/analytics.service";
 
 /**
  * Intervention Engine Container

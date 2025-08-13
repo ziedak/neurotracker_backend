@@ -404,8 +404,8 @@ export const createAnalyticsController = (
       // Export analytics data (CSV format)
       .get("/export", async ({ query, set }: any) => {
         try {
-          const { storeId, type, startDate, endDate } = query;
-
+          const { storeId, type, startDate, endDate, campaignId, testId } =
+            query;
           if (!storeId || !type) {
             set.status = 400;
             return {
@@ -413,38 +413,72 @@ export const createAnalyticsController = (
               error: "storeId and type are required",
             };
           }
-
           const start = startDate
             ? new Date(startDate)
             : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
           const end = endDate ? new Date(endDate) : new Date();
-
           let csvData = "";
-
           switch (type) {
-            case "channels":
+            case "channels": {
               const channelData = await analyticsService.getChannelPerformance(
                 storeId,
                 { start, end }
               );
               csvData = formatChannelDataToCsv(channelData);
               break;
-
+            }
+            case "funnel": {
+              if (!campaignId) {
+                set.status = 400;
+                return {
+                  success: false,
+                  error: "campaignId is required for funnel export",
+                };
+              }
+              const funnelSteps = await analyticsService.getFunnelAnalysis(
+                campaignId,
+                storeId
+              );
+              csvData = formatFunnelDataToCsv(funnelSteps);
+              break;
+            }
+            case "cohorts": {
+              const cohortAnalysis = await analyticsService.getCohortAnalysis(
+                storeId,
+                { start, end }
+              );
+              csvData = formatCohortDataToCsv(cohortAnalysis);
+              break;
+            }
+            case "abtest": {
+              if (!testId) {
+                set.status = 400;
+                return {
+                  success: false,
+                  error: "testId is required for abtest export",
+                };
+              }
+              const abTestResults = await analyticsService.getABTestResults(
+                testId,
+                storeId
+              );
+              csvData = formatAbTestDataToCsv(abTestResults);
+              break;
+            }
             default:
               set.status = 400;
               return {
                 success: false,
-                error: "Invalid export type. Supported: channels",
+                error:
+                  "Invalid export type. Supported: channels, funnel, cohorts, abtest",
               };
           }
-
           set.headers["Content-Type"] = "text/csv";
           set.headers[
             "Content-Disposition"
           ] = `attachment; filename="analytics-${type}-${storeId}-${
             start.toISOString().split("T")[0]
           }.csv"`;
-
           return csvData;
         } catch (error) {
           logger.error("Failed to export analytics data", error as Error);
@@ -506,7 +540,73 @@ export const createAnalyticsController = (
       ch.conversionRate.toFixed(2),
       ch.costPerConversion.toFixed(2),
     ]);
+    return [headers, ...rows].map((row) => row.join(",")).join("\n");
+  }
 
+  // Helper method to format funnel data as CSV
+  function formatFunnelDataToCsv(funnelSteps: any[]): string {
+    const headers = [
+      "Step",
+      "Users",
+      "Conversion Rate (%)",
+      "Dropoff Rate (%)",
+    ];
+    const rows = funnelSteps.map((step) => [
+      step.step,
+      step.users,
+      step.conversionRate.toFixed(2),
+      step.dropoffRate.toFixed(2),
+    ]);
+    return [headers, ...rows].map((row) => row.join(",")).join("\n");
+  }
+
+  // Helper method to format cohort data as CSV
+  function formatCohortDataToCsv(cohortAnalysis: any): string {
+    const headers = [
+      "Cohort Period",
+      "User Count",
+      "Total Revenue",
+      "Average Revenue",
+      "Retention Week 1 (%)",
+      "Retention Week 2 (%)",
+      "Retention Week 3 (%)",
+      "Retention Week 4 (%)",
+      "Average Order Value",
+    ];
+    const rows = cohortAnalysis.cohorts.map((cohort: any, idx: number) => [
+      cohort.cohortPeriod,
+      cohort.userCount,
+      cohort.totalRevenue.toFixed(2),
+      cohort.averageRevenue.toFixed(2),
+      cohortAnalysis.retentionRates[idx]?.[0]?.toFixed(2) ?? "0.00",
+      cohortAnalysis.retentionRates[idx]?.[1]?.toFixed(2) ?? "0.00",
+      cohortAnalysis.retentionRates[idx]?.[2]?.toFixed(2) ?? "0.00",
+      cohortAnalysis.retentionRates[idx]?.[3]?.toFixed(2) ?? "0.00",
+      cohortAnalysis.averageOrderValue[idx]?.toFixed(2) ?? "0.00",
+    ]);
+    return [headers, ...rows].map((row) => row.join(",")).join("\n");
+  }
+
+  // Helper method to format AB test data as CSV
+  function formatAbTestDataToCsv(abTestResults: any): string {
+    const headers = [
+      "Variant ID",
+      "Name",
+      "Users",
+      "Conversions",
+      "Conversion Rate (%)",
+      "Revenue",
+      "Average Order Value",
+    ];
+    const rows = abTestResults.variants.map((variant: any) => [
+      variant.variantId,
+      variant.name,
+      variant.users,
+      variant.conversions,
+      variant.conversionRate.toFixed(2),
+      variant.revenue.toFixed(2),
+      variant.averageOrderValue.toFixed(2),
+    ]);
     return [headers, ...rows].map((row) => row.join(",")).join("\n");
   }
 };

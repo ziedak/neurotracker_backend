@@ -11,6 +11,10 @@ export interface QueueJob {
   completedAt?: Date;
   failedAt?: Date;
   error?: string;
+  pausedAt?: Date;
+  cancelledAt?: Date;
+  cancelReason?: string;
+  createdAt?: Date;
   metadata: Record<string, any>;
 }
 
