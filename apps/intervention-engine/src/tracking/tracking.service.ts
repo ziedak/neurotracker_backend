@@ -9,6 +9,56 @@ import {
 } from "./types";
 
 export class TrackingService {
+  // Strict input validation for events
+  private validateEvent(event: any) {
+    if (!event.userId || typeof event.userId !== "string")
+      throw new Error("Event userId required");
+    if (!event.type || typeof event.type !== "string")
+      throw new Error("Event type required");
+    if (!event.campaignId || typeof event.campaignId !== "string")
+      throw new Error("Event campaignId required");
+    if (!event.channel || typeof event.channel !== "string")
+      throw new Error("Event channel required");
+    // Add more field/range checks as needed
+  }
+
+  // Strict input validation for conversions
+  private validateConversion(conversion: any) {
+    if (!conversion.userId || typeof conversion.userId !== "string")
+      throw new Error("Conversion userId required");
+    if (!conversion.orderId || typeof conversion.orderId !== "string")
+      throw new Error("Conversion orderId required");
+    if (typeof conversion.orderValue !== "number" || conversion.orderValue < 0)
+      throw new Error("Conversion orderValue invalid");
+    // Add more field/range checks as needed
+  }
+
+  // Integration test hooks (to be covered in test suite)
+  public async __test__resetAll() {
+    const eventKeys = await this.redis.keys("event:*");
+    const conversionKeys = await this.redis.keys("conversion:*");
+    for (const key of [...eventKeys, ...conversionKeys]) {
+      await this.redis.del(key);
+    }
+  }
+  // Add exponential-backoff for Redis error handling
+  private async redisSetWithRetry(...args: any[]) {
+    const backOff = require("exponential-backoff").backOff;
+    await backOff(() => this.redis.setex(...args), {
+      numOfAttempts: 3,
+      startingDelay: 100,
+      timeMultiple: 2,
+    });
+  }
+
+  private async redisGetWithRetry(key: string) {
+    const backOff = require("exponential-backoff").backOff;
+    return await backOff(() => this.redis.get(key), {
+      numOfAttempts: 3,
+      startingDelay: 100,
+      timeMultiple: 2,
+    });
+  }
   private redis: any;
   private defaultAttributionModel: AttributionModel = {
     type: "last_touch",
@@ -25,6 +75,7 @@ export class TrackingService {
   async trackEvent(
     event: Omit<TrackingEvent, "id" | "timestamp">
   ): Promise<string> {
+    this.validateEvent(event);
     const trackingEvent: TrackingEvent = {
       ...event,
       id: this.generateEventId(),
@@ -84,6 +135,7 @@ export class TrackingService {
   async trackConversion(
     conversion: Omit<ConversionEvent, "id" | "attribution" | "timeToConversion">
   ): Promise<string> {
+    this.validateConversion(conversion);
     try {
       // Get user journey to calculate attribution
       const userJourney = await this.getUserJourney(
