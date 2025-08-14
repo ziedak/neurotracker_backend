@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "npx tsc --noEmit --skipLibCheck",
-    "build:bundles": "bun build src/index.ts --outdir=dist --target=bun",
+    "build:bundles": "bun build src/index.ts --outdir=../../dist --target=bun",
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
     "test": "jest",
@@ -24,14 +24,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "axios": "^1.6.0",
-    "ioredis": "^5.3.2",
-    "lru-cache": "^10.0.0",
-    "zod": "^3.22.0",
+    "@libs/auth": "workspace:*",
+    "@libs/database": "workspace:*",
     "@libs/elysia-server": "workspace:*",
     "@libs/monitoring": "workspace:*",
-    "@libs/auth": "workspace:*",
-    "@libs/database": "workspace:*"
+    "zod": "^3.22.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",

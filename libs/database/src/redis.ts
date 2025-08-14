@@ -47,9 +47,15 @@ export class RedisClient {
   }
 
   static async connect(): Promise<void> {
-    if (!RedisClient.isConnected) {
-      await RedisClient.getInstance().connect();
+    // Prevent duplicate connection attempts
+    if (
+      RedisClient.isConnected ||
+      (RedisClient.instance && RedisClient.instance.status === "connecting")
+    ) {
+      // Already connected or connecting, do nothing
+      return;
     }
+    await RedisClient.getInstance().connect();
   }
 
   static async disconnect(): Promise<void> {

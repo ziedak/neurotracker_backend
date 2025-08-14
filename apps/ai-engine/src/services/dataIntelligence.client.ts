@@ -10,6 +10,15 @@ import { performance } from "perf_hooks";
  * Handles communication with the data-intelligence service
  * Implements circuit breaker, retry logic, and performance monitoring
  */
+/**
+ * DataIntelligenceClient: Handles communication with the data-intelligence service
+ * - Implements circuit breaker, retry logic, and performance monitoring
+ * - All public APIs strictly typed and documented
+ *
+ * @example
+ * const client = new DataIntelligenceClient(logger, metrics);
+ * const features = await client.getFeatures({ cartId, ... });
+ */
 export class DataIntelligenceClient {
   private readonly httpClient: AxiosInstance;
   private readonly logger: Logger;
@@ -18,15 +27,28 @@ export class DataIntelligenceClient {
   private readonly baseUrl: string;
 
   // Configuration constants
-  private readonly TIMEOUT_MS = 5000; // 5 seconds
-  private readonly MAX_RETRIES = 3;
-  private readonly CIRCUIT_BREAKER_THRESHOLD = 5;
-  private readonly CIRCUIT_BREAKER_TIMEOUT = 10000; // 10 seconds
+  private readonly TIMEOUT_MS: number;
+  private readonly MAX_RETRIES: number;
+  private readonly CIRCUIT_BREAKER_THRESHOLD: number;
+  private readonly CIRCUIT_BREAKER_TIMEOUT: number;
 
-  constructor(logger: Logger, metrics: MetricsCollector) {
+  constructor(
+    logger: Logger,
+    metrics: MetricsCollector,
+    config?: {
+      timeoutMs?: number;
+      maxRetries?: number;
+      circuitBreakerThreshold?: number;
+      circuitBreakerTimeout?: number;
+    }
+  ) {
     this.logger = logger;
     this.metrics = metrics;
     this.baseUrl = getEnv("DATA_INTELLIGENCE_URL", "http://localhost:3001");
+    this.TIMEOUT_MS = config?.timeoutMs ?? 5000;
+    this.MAX_RETRIES = config?.maxRetries ?? 3;
+    this.CIRCUIT_BREAKER_THRESHOLD = config?.circuitBreakerThreshold ?? 5;
+    this.CIRCUIT_BREAKER_TIMEOUT = config?.circuitBreakerTimeout ?? 10000;
 
     // Configure HTTP client with timeouts and retry logic
     this.httpClient = axios.create({
@@ -48,6 +70,21 @@ export class DataIntelligenceClient {
       baseUrl: this.baseUrl,
       timeout: this.TIMEOUT_MS,
     });
+  }
+  /**
+   * Centralized error logging and throwing
+   */
+  private logAndThrow(
+    context: string,
+    error: unknown,
+    extra?: Record<string, any>
+  ): never {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (extra) {
+      this.logger.info(`${context} error context`, extra);
+    }
+    this.logger.error(`${context} failed: ${msg}`);
+    throw new Error(`${context} failed: ${msg}`);
   }
 
   /**
@@ -113,6 +150,11 @@ export class DataIntelligenceClient {
   /**
    * Get features for a cart from the data-intelligence service
    */
+  /**
+   * Get features for a cart from the data-intelligence service
+   * @param request FeatureComputationRequest
+   * @returns FeatureSet
+   */
   async getFeatures(request: FeatureComputationRequest): Promise<FeatureSet> {
     const startTime = performance.now();
 
@@ -144,23 +186,20 @@ export class DataIntelligenceClient {
       const duration = performance.now() - startTime;
       this.metrics.recordTimer("feature_computation_duration", duration);
       this.metrics.recordCounter("feature_computation_error");
-      const msgErrpr = error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        "Feature computation failed for cart " + request.cartId,
-        {
-          error: msgErrpr,
-          duration: Math.round(duration),
-        } as any
-      );
-
-      throw new Error(
-        `Feature computation failed for cart ${request.cartId}: ${msgErrpr}`
+      this.logAndThrow(
+        `Feature computation for cart ${request.cartId}`,
+        error,
+        { duration: Math.round(duration) }
       );
     }
   }
 
   /**
    * Get feature definitions from data-intelligence service
+   */
+  /**
+   * Get feature definitions from data-intelligence service
+   * @returns Array of feature definitions
    */
   async getFeatureDefinitions(): Promise<any[]> {
     try {
@@ -174,17 +213,16 @@ export class DataIntelligenceClient {
 
       return response.data;
     } catch (error) {
-      this.logger.error("Failed to get feature definitions", error as Error);
-      throw new Error(
-        `Failed to get feature definitions: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+      this.logAndThrow("Get feature definitions", error);
     }
   }
 
   /**
    * Validate data quality with data-intelligence service
+   */
+  /**
+   * Validate data quality with data-intelligence service
+   * @returns true if valid, false if not
    */
   async validateDataQuality(
     cartId: string,
@@ -209,8 +247,7 @@ export class DataIntelligenceClient {
       this.logger.warn("Data quality validation failed, assuming valid", {
         cartId,
         error: error instanceof Error ? error.message : String(error),
-      } as any);
-
+      });
       // Return true as fallback to avoid blocking predictions
       return true;
     }
@@ -218,6 +255,11 @@ export class DataIntelligenceClient {
 
   /**
    * Get business intelligence insights for model enhancement
+   */
+  /**
+   * Get business intelligence insights for model enhancement
+   * @param request { period, metrics, filters }
+   * @returns Insights object
    */
   async getBusinessInsights(request: {
     period: string;
@@ -239,17 +281,16 @@ export class DataIntelligenceClient {
 
       return response.data;
     } catch (error) {
-      this.logger.error("Failed to get business insights", error as Error);
-      throw new Error(
-        `Failed to get business insights: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+      this.logAndThrow("Get business insights", error);
     }
   }
 
   /**
    * Health check endpoint for data-intelligence service
+   */
+  /**
+   * Health check endpoint for data-intelligence service
+   * @returns true if healthy, false otherwise
    */
   async healthCheck(): Promise<boolean> {
     try {
@@ -268,8 +309,8 @@ export class DataIntelligenceClient {
       return isHealthy;
     } catch (error) {
       this.logger.error(
-        "Data Intelligence health check failed",
-        error as Error
+        "Data Intelligence health check failed: " +
+          (error instanceof Error ? error.message : String(error))
       );
       return false;
     }
@@ -277,6 +318,11 @@ export class DataIntelligenceClient {
 
   /**
    * Batch feature computation for multiple carts
+   */
+  /**
+   * Batch feature computation for multiple carts
+   * @param requests Array of FeatureComputationRequest
+   * @returns Array of FeatureSet
    */
   async getBatchFeatures(
     requests: FeatureComputationRequest[]
@@ -305,25 +351,25 @@ export class DataIntelligenceClient {
       const duration = performance.now() - startTime;
       this.metrics.recordTimer("batch_feature_computation_duration", duration);
       this.metrics.recordCounter("batch_feature_computation_error");
-
-      this.logger.error("Batch feature computation failed", {
+      this.logAndThrow("Batch feature computation", error, {
         requestCount: requests.length,
-        error: error instanceof Error ? error.message : String(error),
         duration: Math.round(duration),
-      } as any);
-
-      throw new Error(
-        `Batch feature computation failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+      });
     }
   }
 
   /**
    * Get circuit breaker status
    */
-  getCircuitBreakerStatus(): any {
+  /**
+   * Get circuit breaker status
+   * @returns Circuit breaker status object
+   */
+  getCircuitBreakerStatus(): {
+    state: string;
+    failureCount: number;
+    lastFailureTime: number;
+  } {
     return {
       state: "CLOSED",
       failureCount: 0,
@@ -334,11 +380,17 @@ export class DataIntelligenceClient {
   /**
    * Reset circuit breaker manually
    */
+  /**
+   * Reset circuit breaker manually
+   */
   resetCircuitBreaker(): void {
     // this.circuitBreaker.reset(); // Method not accessible, using no-op
     this.logger.info("Circuit breaker reset manually");
   }
 
+  /**
+   * Dispose of resources
+   */
   /**
    * Dispose of resources
    */

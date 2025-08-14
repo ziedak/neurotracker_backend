@@ -246,7 +246,11 @@ export class AIEngineContainer {
    */
   public async connectDatabases(): Promise<void> {
     try {
-      await RedisClient.connect();
+      // Only connect Redis if not already connected
+      if (!RedisClient.isHealthy()) {
+        await RedisClient.connect();
+      }
+
       // ClickHouse connects automatically on first query
       await PostgreSQLClient.connect();
 
