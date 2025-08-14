@@ -100,7 +100,6 @@ export function setupRoutes(app: Elysia): Elysia {
   const validationMiddleware = ServiceCache.validationMiddleware;
   const rateLimitMiddleware = ServiceCache.rateLimitMiddleware;
   const auditMiddleware = ServiceCache.auditMiddleware;
-  container.getService<AuditMiddleware>("auditMiddleware");
 
   // Health check (enhanced)
   app.get("/ai-health", async () => {

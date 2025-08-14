@@ -1,3 +1,15 @@
+// Simple logger abstraction for production-grade logging
+class SimpleLogger {
+  info(...args: any[]) {
+    console.log(...args);
+  }
+  warn(...args: any[]) {
+    console.warn(...args);
+  }
+  error(...args: any[]) {
+    console.error(...args);
+  }
+}
 import { Elysia, t } from "elysia";
 import { ServerConfig, DEFAULT_SERVER_CONFIG } from "./config";
 import { setupCorePlugins } from "./plugins";
@@ -23,6 +35,12 @@ export interface WebSocketHandler {
   drain?: (ws: any) => void;
 }
 
+/**
+ * ElysiaServerBuilder: Centralized builder for Elysia server with HTTP and WebSocket support
+ * - Manages connection/user/room state
+ * - Handles plugin/middleware setup
+ * - Provides robust error handling and logging
+ */
 export class ElysiaServerBuilder {
   private config: ServerConfig;
   private routeSetups: RouteSetup[] = [];
@@ -30,16 +48,23 @@ export class ElysiaServerBuilder {
   private connections: Map<string, any> = new Map();
   private rooms: Map<string, Set<string>> = new Map();
   private userConnections: Map<string, Set<string>> = new Map();
+  private logger: SimpleLogger = new SimpleLogger();
 
   constructor(config: Partial<ServerConfig>) {
     this.config = { ...DEFAULT_SERVER_CONFIG, ...config } as ServerConfig;
   }
 
+  /**
+   * Add a route setup function
+   */
   addRoutes(routeSetup: RouteSetup): this {
     this.routeSetups.push(routeSetup);
     return this;
   }
 
+  /**
+   * Add a custom WebSocket handler
+   */
   addWebSocketHandler(wsHandler: WebSocketHandler): this {
     this.wsHandler = wsHandler;
     return this;
@@ -50,6 +75,9 @@ export class ElysiaServerBuilder {
     return `conn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
+  /**
+   * Send a message to a specific connection
+   */
   sendToConnection(connectionId: string, message: WebSocketMessage): boolean {
     const ws = this.connections.get(connectionId);
     if (!ws) return false;
@@ -63,7 +91,7 @@ export class ElysiaServerBuilder {
       );
       return true;
     } catch (error) {
-      console.error(`Failed to send message to ${connectionId}:`, error);
+      this.logger.error(`Failed to send message to ${connectionId}:`, error);
       return false;
     }
   }
@@ -175,21 +203,22 @@ export class ElysiaServerBuilder {
     }
   }
 
+  /**
+   * Clean up connection from all tracking maps
+   */
   private cleanupConnection(connectionId: string, ws: any): void {
-    // Remove from connections
     this.connections.delete(connectionId);
-
     // Remove from user connections
-    if ((ws.data as any).userId) {
-      const userConns = this.userConnections.get((ws.data as any).userId);
+    const userId = (ws.data as any).userId;
+    if (userId) {
+      const userConns = this.userConnections.get(userId);
       if (userConns) {
         userConns.delete(connectionId);
         if (userConns.size === 0) {
-          this.userConnections.delete((ws.data as any).userId);
+          this.userConnections.delete(userId);
         }
       }
     }
-
     // Remove from all rooms
     for (const [room, members] of this.rooms.entries()) {
       if (members.has(connectionId)) {
@@ -201,6 +230,9 @@ export class ElysiaServerBuilder {
     }
   }
 
+  /**
+   * Build the Elysia app with configured routes, middleware, and WebSocket endpoints
+   */
   build(): Elysia {
     let app = new Elysia({
       websocket: this.config.websocket?.enabled
@@ -250,8 +282,8 @@ export class ElysiaServerBuilder {
             payload: { connectionId, message: "Connected successfully" },
           });
 
-          console.log(
-            `� WebSocket connection opened: ${connectionId} (${this.connections.size} total)`
+          this.logger.info(
+            `🔌 WebSocket connection opened: ${connectionId} (${this.connections.size} total)`
           );
 
           // Call custom open handler if provided
@@ -267,7 +299,7 @@ export class ElysiaServerBuilder {
           const connectionId = (ws.data as any).connectionId;
           this.cleanupConnection(connectionId, ws);
 
-          console.log(
+          this.logger.info(
             `🔌 WebSocket connection closed: ${connectionId} (${this.connections.size} remaining)`
           );
 
@@ -298,16 +330,18 @@ export class ElysiaServerBuilder {
     const app = this.build();
 
     const server = app.listen(this.config.port, () => {
-      console.log(`🚀 ${this.config.name} running on port ${this.config.port}`);
+      this.logger.info(
+        `🚀 ${this.config.name} running on port ${this.config.port}`
+      );
       if (this.config.swagger?.enabled) {
-        console.log(
+        this.logger.info(
           `📚 Swagger docs available at: http://localhost:${this.config.port}${
             this.config.swagger.path || "/swagger"
           }`
         );
       }
       if (this.config.websocket?.enabled) {
-        console.log(
+        this.logger.info(
           `🔌 WebSocket server enabled at: ws://localhost:${this.config.port}${
             this.config.websocket.path || "/ws"
           }`
@@ -317,7 +351,7 @@ export class ElysiaServerBuilder {
 
     // Graceful shutdown
     const shutdown = () => {
-      console.log("Shutting down gracefully");
+      this.logger.info("Shutting down gracefully");
       // Cleanup all WebSocket connections
       for (const [connectionId, ws] of this.connections) {
         ws.close(1001, "Server shutting down");

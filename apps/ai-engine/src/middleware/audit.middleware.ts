@@ -42,12 +42,13 @@ export class AuditMiddleware {
   private readonly metrics: MetricsCollector;
   private readonly config: AuditConfig;
 
-  // In-memory audit trail (in production, this would go to a database)
-  private auditTrail: AuditEvent[] = [];
+  // In-memory audit trail (ring buffer)
+  private auditTrail: (AuditEvent | undefined)[];
+  private auditTrailIndex: number = 0;
 
   private readonly defaultConfig: AuditConfig = {
     enableDetailedLogging: true,
-    logRequestBodies: false, // Be careful with sensitive data
+    logRequestBodies: false,
     logResponseBodies: false,
     maxEventHistory: 10000,
     sensitiveFields: ["password", "token", "secret", "key", "authorization"],
@@ -62,7 +63,7 @@ export class AuditMiddleware {
     this.logger = logger;
     this.metrics = metrics;
     this.config = { ...this.defaultConfig, ...config };
-
+    this.auditTrail = Array.from({ length: this.config.maxEventHistory });
     this.logger.info("Audit Middleware initialized", {
       detailedLogging: this.config.enableDetailedLogging,
       maxEventHistory: this.config.maxEventHistory,
@@ -73,95 +74,67 @@ export class AuditMiddleware {
   /**
    * Pre-request audit hook
    */
-  auditPreRequest = async (context: Context): Promise<void> => {
+  public auditPreRequest = async (context: Context): Promise<void> => {
     const startTime = performance.now();
-
     try {
-      // Skip auditing for certain paths
-      if (this.shouldSkipAudit(context.path)) {
-        return;
-      }
-
-      // Generate request ID if not present
+      if (this.shouldSkipAudit(context.path)) return;
       const requestId = this.generateRequestId();
       (context as any).requestId = requestId;
       (context as any).auditStartTime = startTime;
-
-      // Log request start
       await this.logRequestStart(context, requestId, startTime);
-
-      const duration = performance.now() - startTime;
-      await this.metrics.recordTimer("audit_pre_request_duration", duration);
+      this.metrics.recordTimer(
+        "audit_pre_request_duration",
+        performance.now() - startTime
+      );
     } catch (error) {
       this.logger.error("Audit pre-request failed", error as Error, {
         path: context.path,
       });
-      // Don't throw - audit failures shouldn't break the request
     }
   };
 
   /**
    * Post-request audit hook
    */
-  auditPostRequest = async (context: Context, response: any): Promise<void> => {
+  public auditPostRequest = async (
+    context: Context,
+    response: any
+  ): Promise<void> => {
     const endTime = performance.now();
-
     try {
-      // Skip auditing for certain paths
-      if (this.shouldSkipAudit(context.path)) {
-        return;
-      }
-
+      if (this.shouldSkipAudit(context.path)) return;
       const startTime = (context as any).auditStartTime || endTime;
       const requestId = (context as any).requestId;
       const duration = endTime - startTime;
-
-      // Create comprehensive audit event
       const auditEvent = await this.createAuditEvent(context, response, {
         requestId,
         duration,
         timestamp: new Date().toISOString(),
       });
-
-      // Store audit event
-      await this.storeAuditEvent(auditEvent);
-
-      // Log request completion
+      this.storeAuditEvent(auditEvent);
       await this.logRequestCompletion(auditEvent);
-
-      // Update metrics
       await this.updateAuditMetrics(auditEvent);
-
-      const auditDuration = performance.now() - endTime;
-      await this.metrics.recordTimer(
+      this.metrics.recordTimer(
         "audit_post_request_duration",
-        auditDuration
+        performance.now() - endTime
       );
     } catch (error) {
       this.logger.error("Audit post-request failed", error as Error, {
         path: context.path,
       });
-      // Don't throw - audit failures shouldn't break the response
     }
   };
 
   /**
    * Audit error handler
    */
-  auditError = async (context: Context, error: any): Promise<void> => {
+  public auditError = async (context: Context, error: any): Promise<void> => {
     const errorTime = performance.now();
-
     try {
-      // Skip auditing for certain paths
-      if (this.shouldSkipAudit(context.path)) {
-        return;
-      }
-
+      if (this.shouldSkipAudit(context.path)) return;
       const startTime = (context as any).auditStartTime || errorTime;
       const requestId = (context as any).requestId;
       const duration = errorTime - startTime;
-
-      // Create error audit event
       const auditEvent = await this.createAuditEvent(context, null, {
         requestId,
         duration,
@@ -169,14 +142,8 @@ export class AuditMiddleware {
         error: error instanceof Error ? error.message : "Unknown error",
         success: false,
       });
-
-      // Store audit event
-      await this.storeAuditEvent(auditEvent);
-
-      // Log error
+      this.storeAuditEvent(auditEvent);
       await this.logRequestError(auditEvent, error);
-
-      // Update error metrics
       await this.updateErrorMetrics(auditEvent);
     } catch (auditError) {
       this.logger.error("Audit error handling failed", auditError as Error, {
@@ -249,15 +216,30 @@ export class AuditMiddleware {
     const authContext = (context as any).auth;
     const validatedBody = (context as any).validatedBody;
 
+    // Parallelize independent data fetches for performance
+    const [requestSize, responseSize] = await Promise.all([
+      this.getRequestSize(context),
+      Promise.resolve(this.getResponseSize(response)),
+    ]);
+
     // Determine action and resource from path and method
     const { action, resource } = this.parseActionAndResource(
       path,
       request.method
     );
 
-    // Get request and response sizes
-    const requestSize = await this.getRequestSize(context);
-    const responseSize = this.getResponseSize(response);
+    let sanitizedRequestBody: any = undefined;
+    let sanitizedResponseBody: any = undefined;
+    if (this.config.logRequestBodies && validatedBody) {
+      try {
+        sanitizedRequestBody = this.sanitizeData(validatedBody);
+      } catch {}
+    }
+    if (this.config.logResponseBodies && response) {
+      try {
+        sanitizedResponseBody = this.sanitizeData(response);
+      } catch {}
+    }
 
     const auditEvent: AuditEvent = {
       eventId: this.generateEventId(),
@@ -283,20 +265,12 @@ export class AuditMiddleware {
         (!response?.status || response.status < 400),
       error: metadata.error,
       metadata: {
-        // Add relevant request metadata
         cartId: validatedBody?.cartId,
         modelName: validatedBody?.modelName,
         batchSize: validatedBody?.requests?.length,
         forceRecompute: validatedBody?.forceRecompute,
-        // Request body (if enabled and not sensitive)
-        requestBody: this.config.logRequestBodies
-          ? this.sanitizeData(validatedBody)
-          : undefined,
-        // Response body (if enabled)
-        responseBody: this.config.logResponseBodies
-          ? this.sanitizeData(response)
-          : undefined,
-        // Additional context
+        requestBody: sanitizedRequestBody,
+        responseBody: sanitizedResponseBody,
         authMethod: authContext?.apiKey ? "api_key" : "token",
         permissions: authContext?.permissions,
       },
@@ -377,13 +351,11 @@ export class AuditMiddleware {
       if (contentLength) {
         return parseInt(contentLength, 10);
       }
-
-      // Estimate from body if available
       const body = (context as any).validatedBody;
       if (body) {
+        if (typeof body === "string") return body.length;
         return JSON.stringify(body).length;
       }
-
       return 0;
     } catch (error) {
       return 0;
@@ -396,17 +368,14 @@ export class AuditMiddleware {
   private getResponseSize(response: any): number {
     try {
       if (!response) return 0;
-
-      // If response has content-length header
       if (response.headers?.["content-length"]) {
         return parseInt(response.headers["content-length"], 10);
       }
-
-      // Estimate from response body
-      if (response.body || response.data) {
-        return JSON.stringify(response.body || response.data).length;
+      const payload = response.body || response.data;
+      if (payload) {
+        if (typeof payload === "string") return payload.length;
+        return JSON.stringify(payload).length;
       }
-
       return 0;
     } catch (error) {
       return 0;
@@ -471,51 +440,13 @@ export class AuditMiddleware {
   }
 
   /**
-   * Sanitize data by removing sensitive fields
+   * Store audit event in ring buffer
    */
-  private sanitizeData(data: any): any {
-    if (!data || typeof data !== "object") {
-      return data;
-    }
-
-    const sanitized = { ...data };
-
-    // Remove sensitive fields
-    this.config.sensitiveFields.forEach((field) => {
-      if (sanitized[field]) {
-        sanitized[field] = "[REDACTED]";
-      }
-    });
-
-    // Recursively sanitize nested objects
-    Object.keys(sanitized).forEach((key) => {
-      if (typeof sanitized[key] === "object" && sanitized[key] !== null) {
-        sanitized[key] = this.sanitizeData(sanitized[key]);
-      }
-    });
-
-    return sanitized;
-  }
-
-  /**
-   * Store audit event
-   */
-  private async storeAuditEvent(auditEvent: AuditEvent): Promise<void> {
+  private storeAuditEvent(auditEvent: AuditEvent): void {
     try {
-      // Add to in-memory trail
-      this.auditTrail.push(auditEvent);
-
-      // Maintain maximum history size
-      if (this.auditTrail.length > this.config.maxEventHistory) {
-        this.auditTrail.splice(
-          0,
-          this.auditTrail.length - this.config.maxEventHistory
-        );
-      }
-
-      // In production, also store in database, event stream, or audit service
-      // await this.auditDatabase.store(auditEvent);
-      // await this.eventPipeline.send(auditEvent);
+      this.auditTrail[this.auditTrailIndex] = auditEvent;
+      this.auditTrailIndex =
+        (this.auditTrailIndex + 1) % this.config.maxEventHistory;
     } catch (error) {
       this.logger.error("Failed to store audit event", error as Error, {
         eventId: auditEvent.eventId,
@@ -571,125 +502,159 @@ export class AuditMiddleware {
    * Update audit metrics
    */
   private async updateAuditMetrics(auditEvent: AuditEvent): Promise<void> {
-    try {
-      // Record general metrics
-      await this.metrics.recordCounter("audit_event_total");
-      await this.metrics.recordCounter(`audit_action_${auditEvent.action}`);
-      await this.metrics.recordCounter(`audit_resource_${auditEvent.resource}`);
-      await this.metrics.recordCounter(
+    const counters = [
+      this.metrics.recordCounter("audit_event_total"),
+      this.metrics.recordCounter(`audit_action_${auditEvent.action}`),
+      this.metrics.recordCounter(`audit_resource_${auditEvent.resource}`),
+      this.metrics.recordCounter(
         `audit_method_${auditEvent.method.toLowerCase()}`
+      ),
+    ];
+    if (auditEvent.success)
+      counters.push(this.metrics.recordCounter("audit_request_success"));
+    if (!auditEvent.success)
+      counters.push(this.metrics.recordCounter("audit_request_error"));
+    if (auditEvent.statusCode)
+      counters.push(
+        this.metrics.recordCounter(`audit_status_${auditEvent.statusCode}`)
       );
+    await Promise.all(counters);
+    if (auditEvent.duration)
+      await this.metrics.recordTimer(
+        "audit_request_duration",
+        auditEvent.duration
+      );
+    if (auditEvent.requestSize)
+      await this.metrics.recordHistogram(
+        "audit_request_size",
+        auditEvent.requestSize
+      );
+    if (auditEvent.responseSize)
+      await this.metrics.recordHistogram(
+        "audit_response_size",
+        auditEvent.responseSize
+      );
+  }
 
-      // Record success/failure
-      if (auditEvent.success) {
-        await this.metrics.recordCounter("audit_request_success");
+  /**
+   * Sanitize data by removing sensitive fields (optimized)
+   */
+  private sanitizeData(data: any): any {
+    if (!data || typeof data !== "object") return data;
+    if (Array.isArray(data)) return data.map((item) => this.sanitizeData(item));
+    const sanitized: Record<string, any> = {};
+    for (const key in data) {
+      if (this.config.sensitiveFields.includes(key)) {
+        sanitized[key] = "[REDACTED]";
+      } else if (typeof data[key] === "object" && data[key] !== null) {
+        sanitized[key] = this.sanitizeData(data[key]);
       } else {
-        await this.metrics.recordCounter("audit_request_error");
+        sanitized[key] = data[key];
       }
-
-      // Record status code
-      if (auditEvent.statusCode) {
-        await this.metrics.recordCounter(
-          `audit_status_${auditEvent.statusCode}`
-        );
-      }
-
-      // Record duration
-      if (auditEvent.duration) {
-        await this.metrics.recordTimer(
-          "audit_request_duration",
-          auditEvent.duration
-        );
-      }
-
-      // Record request/response sizes
-      if (auditEvent.requestSize) {
-        await this.metrics.recordHistogram(
-          "audit_request_size",
-          auditEvent.requestSize
-        );
-      }
-      if (auditEvent.responseSize) {
-        await this.metrics.recordHistogram(
-          "audit_response_size",
-          auditEvent.responseSize
-        );
-      }
-    } catch (error) {
-      this.logger.error("Failed to update audit metrics", error as Error);
     }
+    return sanitized;
   }
 
   /**
    * Update error metrics
    */
   private async updateErrorMetrics(auditEvent: AuditEvent): Promise<void> {
-    try {
-      await this.metrics.recordCounter("audit_error_total");
-      await this.metrics.recordCounter(`audit_error_${auditEvent.action}`);
-
-      if (auditEvent.duration) {
-        await this.metrics.recordTimer(
-          "audit_error_duration",
-          auditEvent.duration
-        );
-      }
-    } catch (error) {
-      this.logger.error("Failed to update error metrics", error as Error);
+    const counters = [
+      this.metrics.recordCounter("audit_error_total"),
+      this.metrics.recordCounter(`audit_error_${auditEvent.action}`),
+    ];
+    await Promise.all(counters);
+    if (auditEvent.duration) {
+      await this.metrics.recordTimer(
+        "audit_error_duration",
+        auditEvent.duration
+      );
     }
   }
 
   /**
-   * Get audit trail (last N events)
+   * Get audit trail (last N events, ordered newest to oldest)
    */
-  getAuditTrail(limit: number = 100): AuditEvent[] {
-    return this.auditTrail.slice(-limit);
+  public getAuditTrail(limit: number = 100): AuditEvent[] {
+    const events: AuditEvent[] = [];
+    let count = 0;
+    let idx =
+      (this.auditTrailIndex - 1 + this.config.maxEventHistory) %
+      this.config.maxEventHistory;
+    while (count < this.config.maxEventHistory) {
+      const event = this.auditTrail[idx];
+      if (event) events.push(event);
+      if (++count >= limit) break;
+      idx =
+        (idx - 1 + this.config.maxEventHistory) % this.config.maxEventHistory;
+    }
+    return events;
   }
 
   /**
-   * Search audit events
+   * Search audit events in ring buffer with strict typing and limit
+   * @param filters - filter criteria and optional limit
+   * @returns AuditEvent[]
    */
-  searchAuditEvents(filters: {
+  public searchAuditEvents(filters: {
     userId?: string;
     action?: string;
     resource?: string;
     startTime?: string;
     endTime?: string;
     success?: boolean;
+    limit?: number;
   }): AuditEvent[] {
-    return this.auditTrail.filter((event) => {
-      if (filters.userId && event.userId !== filters.userId) return false;
-      if (filters.action && event.action !== filters.action) return false;
-      if (filters.resource && event.resource !== filters.resource) return false;
-      if (filters.success !== undefined && event.success !== filters.success)
-        return false;
-
-      if (filters.startTime && event.timestamp < filters.startTime)
-        return false;
-      if (filters.endTime && event.timestamp > filters.endTime) return false;
-
-      return true;
-    });
+    // Directly filter from ring buffer for performance
+    const results: AuditEvent[] = [];
+    const maxLimit =
+      typeof filters.limit === "number" && filters.limit! > 0
+        ? filters.limit!
+        : 100;
+    let count = 0;
+    let idx =
+      (this.auditTrailIndex - 1 + this.config.maxEventHistory) %
+      this.config.maxEventHistory;
+    let found = 0;
+    while (count < this.config.maxEventHistory && found < maxLimit) {
+      const event = this.auditTrail[idx];
+      if (event) {
+        if (
+          (!filters.userId || event.userId === filters.userId) &&
+          (!filters.action || event.action === filters.action) &&
+          (!filters.resource || event.resource === filters.resource) &&
+          (filters.success === undefined ||
+            event.success === filters.success) &&
+          (!filters.startTime || event.timestamp >= filters.startTime) &&
+          (!filters.endTime || event.timestamp <= filters.endTime)
+        ) {
+          results.push(event);
+          found++;
+        }
+      }
+      count++;
+      idx =
+        (idx - 1 + this.config.maxEventHistory) % this.config.maxEventHistory;
+    }
+    return results;
   }
 
   /**
    * Get audit statistics
    */
-  getAuditStatistics(): any {
-    const total = this.auditTrail.length;
-    const successful = this.auditTrail.filter((e) => e.success).length;
+  public getAuditStatistics(): any {
+    const events = this.getAuditTrail(this.config.maxEventHistory);
+    const total = events.length;
+    const successful = events.filter((e) => e.success).length;
     const failed = total - successful;
-
-    const actionCounts = this.auditTrail.reduce((acc, event) => {
+    const actionCounts = events.reduce((acc, event) => {
       acc[event.action] = (acc[event.action] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
-
-    const resourceCounts = this.auditTrail.reduce((acc, event) => {
+    const resourceCounts = events.reduce((acc, event) => {
       acc[event.resource] = (acc[event.resource] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
-
     return {
       totalEvents: total,
       successfulRequests: successful,
@@ -704,10 +669,10 @@ export class AuditMiddleware {
   /**
    * Get audit middleware health status
    */
-  async getHealthStatus(): Promise<any> {
+  public async getHealthStatus(): Promise<any> {
     return {
       status: "healthy",
-      eventsTracked: this.auditTrail.length,
+      eventsTracked: this.getAuditTrail(this.config.maxEventHistory).length,
       maxEventHistory: this.config.maxEventHistory,
       config: {
         detailedLogging: this.config.enableDetailedLogging,

@@ -23,6 +23,59 @@ export interface RateLimitResult {
  * Optimized for high-throughput ML prediction workloads
  */
 export class RateLimitMiddleware {
+  /**
+   * Extract client IP from context/request headers
+   */
+  private static extractClientIp(context: any): string {
+    const req = context.request;
+    return (
+      req?.headers["x-forwarded-for"] ||
+      req?.headers["x-real-ip"] ||
+      context.ip ||
+      "unknown"
+    );
+  }
+
+  /**
+   * Set standard rate limit headers
+   */
+  private static setRateLimitHeaders(
+    set: any,
+    maxRequests: number,
+    remaining: number,
+    resetTime: Date,
+    windowMs: number
+  ): void {
+    set.headers["X-RateLimit-Limit"] = maxRequests.toString();
+    set.headers["X-RateLimit-Remaining"] = remaining.toString();
+    set.headers["X-RateLimit-Reset"] = resetTime.toISOString();
+    set.headers["X-RateLimit-Window"] = windowMs.toString();
+  }
+
+  /**
+   * Standardize error response for rate limit exceeded
+   */
+  private static rateLimitErrorResponse(
+    set: any,
+    message: string,
+    resetTime: Date,
+    maxRequests: number,
+    remaining: number
+  ): any {
+    set.status = 429;
+    set.headers["Retry-After"] = Math.ceil(
+      (resetTime.getTime() - Date.now()) / 1000
+    ).toString();
+    return {
+      error: "Rate limit exceeded",
+      message,
+      retryAfter: resetTime.toISOString(),
+      code: "RATE_LIMIT_EXCEEDED",
+      type: "ai_engine_rate_limit",
+      maxRequests,
+      remaining,
+    };
+  }
   private readonly redis: Redis;
   private readonly logger: Logger;
   private readonly metrics: MetricsCollector;
@@ -49,68 +102,53 @@ export class RateLimitMiddleware {
 
     return async (context: any, next: () => Promise<void>) => {
       const { request, set } = context;
-
       try {
         // Generate rate limit key
         const key = keyGenerator(context);
         const redisKey = `ai_rate_limit:${key}`;
-
         // Get current window
         const now = Date.now();
         const window = Math.floor(now / windowMs);
         const windowKey = `${redisKey}:${window}`;
-
         // Get current count
         const current = await this.redis.get(windowKey);
         const count = current ? parseInt(current) : 0;
-
         // Calculate reset time
         const resetTime = new Date((window + 1) * windowMs);
         const remaining = Math.max(0, maxRequests - count - 1);
-
         // Add standard headers if enabled
         if (standardHeaders) {
-          set.headers["X-RateLimit-Limit"] = maxRequests.toString();
-          set.headers["X-RateLimit-Remaining"] = remaining.toString();
-          set.headers["X-RateLimit-Reset"] = resetTime.toISOString();
-          set.headers["X-RateLimit-Window"] = windowMs.toString();
+          RateLimitMiddleware.setRateLimitHeaders(
+            set,
+            maxRequests,
+            remaining,
+            resetTime,
+            windowMs
+          );
         }
-
         // Check if limit exceeded
         if (count >= maxRequests) {
           await this.metrics.recordCounter("ai_rate_limit_exceeded");
-
-          set.status = 429;
-          set.headers["Retry-After"] = Math.ceil(
-            (resetTime.getTime() - now) / 1000
-          ).toString();
-
           this.logger.warn("AI Engine rate limit exceeded", {
             key,
             count,
             maxRequests,
             window,
-            ip:
-              request.headers["x-forwarded-for"] ||
-              request.headers["x-real-ip"] ||
-              "unknown",
+            ip: RateLimitMiddleware.extractClientIp(context),
             userAgent: request.headers["user-agent"] || "unknown",
             endpoint: request.url,
           });
-
-          return {
-            error: "Rate limit exceeded",
+          return RateLimitMiddleware.rateLimitErrorResponse(
+            set,
             message,
-            retryAfter: resetTime.toISOString(),
-            code: "RATE_LIMIT_EXCEEDED",
-            type: "ai_engine_rate_limit",
-          };
+            resetTime,
+            maxRequests,
+            remaining
+          );
         }
-
         // Execute the request
         let requestSuccessful = true;
         let statusCode = 200;
-
         try {
           await next();
           statusCode = set.status || 200;
@@ -126,11 +164,9 @@ export class RateLimitMiddleware {
             skipSuccessfulRequests,
             skipFailedRequests
           );
-
           if (shouldCount) {
             // Increment counter
             const newCount = await this.redis.incr(windowKey);
-
             // Set expiration for the key (window duration + some buffer)
             if (newCount === 1) {
               await this.redis.expire(
@@ -138,7 +174,6 @@ export class RateLimitMiddleware {
                 Math.ceil(windowMs / 1000) + 10
               );
             }
-
             // Update headers with actual count
             if (standardHeaders) {
               set.headers["X-RateLimit-Remaining"] = Math.max(
@@ -146,10 +181,8 @@ export class RateLimitMiddleware {
                 maxRequests - newCount
               ).toString();
             }
-
             // Record metrics
             await this.metrics.recordCounter("ai_rate_limit_requests");
-
             if (newCount > maxRequests * 0.8) {
               await this.metrics.recordCounter("ai_rate_limit_warning");
             }
@@ -160,11 +193,10 @@ export class RateLimitMiddleware {
           "AI Engine rate limit middleware error",
           error as Error,
           {
-            url: request.url,
-            method: request.method,
+            url: request?.url,
+            method: request?.method,
           }
         );
-
         // On error, allow the request (fail open for availability)
         await next();
       }
@@ -175,11 +207,7 @@ export class RateLimitMiddleware {
    * Default key generator (uses IP + user ID if available)
    */
   private defaultKeyGenerator(context: any): string {
-    const { request } = context;
-    const ip =
-      request.headers["x-forwarded-for"] ||
-      request.headers["x-real-ip"] ||
-      "unknown";
+    const ip = RateLimitMiddleware.extractClientIp(context);
     const userId = context.user?.id || "anonymous";
     return `${ip}:${userId}`;
   }
@@ -188,12 +216,7 @@ export class RateLimitMiddleware {
    * IP-based key generator
    */
   private ipKeyGenerator(context: any): string {
-    const { request } = context;
-    return (
-      request.headers["x-forwarded-for"] ||
-      request.headers["x-real-ip"] ||
-      "unknown"
-    );
+    return RateLimitMiddleware.extractClientIp(context);
   }
 
   /**
@@ -211,10 +234,9 @@ export class RateLimitMiddleware {
    * API key-based generator
    */
   private apiKeyGenerator(context: any): string {
-    const { request } = context;
-    const apiKey = request.headers["x-api-key"];
+    const apiKey = context.request?.headers["x-api-key"];
     if (!apiKey) {
-      return this.ipKeyGenerator(context);
+      return RateLimitMiddleware.extractClientIp(context);
     }
     return `api:${apiKey.substring(0, 10)}`;
   }
@@ -440,11 +462,7 @@ export class RateLimitMiddleware {
     };
 
     // Generate rate limit key
-    const ip =
-      context.request?.headers?.["x-forwarded-for"] ||
-      context.request?.headers?.["x-real-ip"] ||
-      context.ip ||
-      "unknown";
+    const ip = RateLimitMiddleware.extractClientIp(context);
     const key = `ai_rate_limit:${ip}`;
 
     // Check current count

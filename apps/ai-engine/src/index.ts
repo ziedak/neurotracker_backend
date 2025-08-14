@@ -2,6 +2,7 @@ import { createElysiaServer, ServerConfig } from "@libs/elysia-server";
 import { getEnv, getNumberEnv } from "@libs/config";
 import { container } from "./container";
 import { setupRoutes } from "./routes";
+import { Logger } from "@libs/monitoring";
 
 /**
  * AI Engine Service
@@ -11,7 +12,7 @@ import { setupRoutes } from "./routes";
 const serverConfig: Partial<ServerConfig> = {
   name: "ai-engine",
   version: "1.0.0",
-  port: getNumberEnv("AI_ENGINE_PORT", 3003), // Fixed port conflict
+  port: getNumberEnv("AI_ENGINE_PORT", 3003),
   cors: {
     origin: getEnv("CORS_ORIGIN", "*"),
     credentials: true,
@@ -31,66 +32,84 @@ const serverConfig: Partial<ServerConfig> = {
   },
 };
 
-async function startServer() {
+const logger = new Logger("AI Engine");
+
+/**
+ * Initialize all services and dependencies
+ */
+async function initializeServices(): Promise<void> {
+  logger.info("🤖 Starting AI Engine Service...");
+  await container.initialize();
+  await container.validateServices();
+  logger.info("✅ Services initialized successfully");
+}
+
+/**
+ * Create and start the Elysia server
+ */
+function createServer(): { app: any; httpServer: any } {
+  const server = createElysiaServer(serverConfig, setupRoutes);
+  // server.start() returns { app, server, wsServer? }
+  const started = server.start();
+  return { app: started.app, httpServer: started.server };
+}
+
+/**
+ * Graceful shutdown handler
+ */
+async function gracefulShutdown(
+  signal: string,
+  httpServer: any
+): Promise<void> {
+  logger.info(`📡 Received ${signal}, shutting down gracefully...`);
   try {
-    console.log("🤖 Starting AI Engine Service...");
+    httpServer.stop();
+    await container.dispose();
+    logger.info("✅ AI Engine Service shut down successfully");
+    process.exit(0);
+  } catch (error) {
+    logger.error("❌ Error during shutdown:", error as Error);
+    process.exit(1);
+  }
+}
 
-    // Initialize container and services
-    await container.initialize();
-    await container.validateServices();
+/**
+ * Register shutdown and error handlers
+ */
+function registerShutdownHandlers(httpServer: any): void {
+  ["SIGTERM", "SIGINT", "SIGUSR2"].forEach((signal) => {
+    process.on(signal, () => gracefulShutdown(signal, httpServer));
+  });
+  process.on("uncaughtException", (error) => {
+    logger.error("❌ Uncaught Exception:", error as Error);
+    gracefulShutdown("uncaughtException", httpServer);
+  });
+  process.on("unhandledRejection", (reason, promise) => {
+    logger.error(`❌ Unhandled Rejection at: ${promise} reason: ${reason}`);
+    gracefulShutdown("unhandledRejection", httpServer);
+  });
+}
 
-    console.log("✅ Services initialized successfully");
-
-    // Create Elysia server using the established pattern
-    const server = createElysiaServer(serverConfig, setupRoutes);
-
-    // Start the server
-    const { app, server: httpServer } = server.start();
-
-    console.log(`🚀 AI Engine Service running on port ${serverConfig.port}`);
-    console.log(
+/**
+ * Start the AI Engine server
+ * @example
+ * import startServer from "./index";
+ * startServer();
+ */
+async function startServer(): Promise<void> {
+  try {
+    await initializeServices();
+    const { app, httpServer } = createServer();
+    logger.info(`🚀 AI Engine Service running on port ${serverConfig.port}`);
+    logger.info(
       `📚 Swagger docs: http://localhost:${serverConfig.port}/swagger`
     );
-    console.log(
+    logger.info(
       `🔍 Health check: http://localhost:${serverConfig.port}/health`
     );
-
-    // Graceful shutdown handling
-    const gracefulShutdown = async (signal: string) => {
-      console.log(`📡 Received ${signal}, shutting down gracefully...`);
-
-      try {
-        // Stop accepting new requests
-        httpServer.stop();
-
-        // Dispose of container and resources
-        await container.dispose();
-
-        console.log("✅ AI Engine Service shut down successfully");
-        process.exit(0);
-      } catch (error) {
-        console.error("❌ Error during shutdown:", error);
-        process.exit(1);
-      }
-    };
-
-    // Handle various shutdown signals
-    process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-    process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-    process.on("SIGUSR2", () => gracefulShutdown("SIGUSR2")); // For nodemon
-
-    // Handle uncaught exceptions
-    process.on("uncaughtException", (error) => {
-      console.error("❌ Uncaught Exception:", error);
-      gracefulShutdown("uncaughtException");
-    });
-
-    process.on("unhandledRejection", (reason, promise) => {
-      console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
-      gracefulShutdown("unhandledRejection");
-    });
+    registerShutdownHandlers(httpServer);
   } catch (error) {
-    console.error("❌ Failed to start AI Engine Service:", error);
+    logger.error("❌ Failed to start AI Engine Service:", error as Error);
     process.exit(1);
   }
 }
