@@ -1,3 +1,13 @@
+/**
+ * Usage Example:
+ *
+ * const { query, params } = ClickHouseQueryBuilder.buildSelectQuery('events', {
+ *   select: ['id', 'timestamp'],
+ *   where: { status: 'active' },
+ *   allowedTables: ['events'],
+ *   allowedFields: ['id', 'timestamp', 'status']
+ * });
+ */
 export interface WindowFunctionQueryOptions {
   select: string[];
   where?: Record<
@@ -28,6 +38,27 @@ export interface SubqueryOptions {
  * Optimized for strict typing, maintainability, and security
  */
 export class ClickHouseQueryBuilder {
+  /**
+   * Centralized validation for allowed tables and fields
+   */
+  private static validateAllowed(
+    identifier: string,
+    allowed: readonly string[] | undefined,
+    type: "table" | "field"
+  ): void {
+    if (!this.isValidIdentifier(identifier)) {
+      throw new Error(
+        `[ClickHouseQueryBuilder] Invalid ${type} name: ${identifier}`
+      );
+    }
+    if (allowed && allowed.length > 0 && !allowed.includes(identifier)) {
+      throw new Error(
+        `[ClickHouseQueryBuilder] Unauthorized ${type}: ${identifier}. Allowed: ${allowed.join(
+          ", "
+        )}`
+      );
+    }
+  }
   /**
    * Build safe parameterized SELECT query for ClickHouse
    */
@@ -63,15 +94,8 @@ export class ClickHouseQueryBuilder {
       allowedFields = [],
     } = options;
 
-    // Validate table name
-    if (
-      !this.isValidIdentifier(table) ||
-      (allowedTables.length > 0 && !allowedTables.includes(table))
-    ) {
-      throw new Error(
-        `[ClickHouseQueryBuilder] Invalid or unauthorized table name: ${table}`
-      );
-    }
+    // Centralized table validation
+    this.validateAllowed(table, allowedTables, "table");
 
     // Validate and build SELECT clause
     const selectClause = this.buildSelectClause(select, allowedFields);
@@ -112,28 +136,14 @@ export class ClickHouseQueryBuilder {
   ): { table: string; data: Record<string, any>[] } {
     const { allowedTables = [], allowedFields = [] } = options;
 
-    // Validate table name
-    if (
-      !this.isValidIdentifier(table) ||
-      (allowedTables.length > 0 && !allowedTables.includes(table))
-    ) {
-      throw new Error(
-        `[ClickHouseQueryBuilder] Invalid or unauthorized table name: ${table}`
-      );
-    }
+    // Centralized table validation
+    this.validateAllowed(table, allowedTables, "table");
 
     // Validate and sanitize data
     const sanitizedData = data.map((row) => {
       const sanitizedRow: Record<string, any> = {};
       for (const [key, value] of Object.entries(row)) {
-        if (
-          !this.isValidIdentifier(key) ||
-          (allowedFields.length > 0 && !allowedFields.includes(key))
-        ) {
-          throw new Error(
-            `[ClickHouseQueryBuilder] Invalid or unauthorized field name: ${key}`
-          );
-        }
+        this.validateAllowed(key, allowedFields, "field");
         sanitizedRow[key] = this.sanitizeValue(value);
       }
       return sanitizedRow;
@@ -187,26 +197,12 @@ export class ClickHouseQueryBuilder {
       allowedFields = [],
     } = options;
 
-    // Validate table name
-    if (
-      !this.isValidIdentifier(table) ||
-      (allowedTables.length > 0 && !allowedTables.includes(table))
-    ) {
-      throw new Error(
-        `[ClickHouseQueryBuilder] Invalid or unauthorized table name: ${table}`
-      );
-    }
+    // Centralized table validation
+    this.validateAllowed(table, allowedTables, "table");
 
     // Build aggregation SELECT clause
     const selectParts = aggregations.map((agg) => {
-      if (
-        !this.isValidIdentifier(agg.field) ||
-        (allowedFields.length > 0 && !allowedFields.includes(agg.field))
-      ) {
-        throw new Error(
-          `[ClickHouseQueryBuilder] Invalid or unauthorized field name: ${agg.field}`
-        );
-      }
+      this.validateAllowed(agg.field, allowedFields, "field");
       const alias = agg.alias ? ` AS ${this.escapeIdentifier(agg.alias)}` : "";
       return `${agg.function}(${this.escapeIdentifier(agg.field)})${alias}`;
     });
@@ -270,23 +266,9 @@ export class ClickHouseQueryBuilder {
       allowedFields = [],
     } = options;
 
-    // Validate inputs
-    if (
-      !this.isValidIdentifier(table) ||
-      (allowedTables.length > 0 && !allowedTables.includes(table))
-    ) {
-      throw new Error(
-        `[ClickHouseQueryBuilder] Invalid or unauthorized table name: ${table}`
-      );
-    }
-    if (
-      !this.isValidIdentifier(dateField) ||
-      (allowedFields.length > 0 && !allowedFields.includes(dateField))
-    ) {
-      throw new Error(
-        `[ClickHouseQueryBuilder] Invalid or unauthorized date field: ${dateField}`
-      );
-    }
+    // Centralized table/field validation
+    this.validateAllowed(table, allowedTables, "table");
+    this.validateAllowed(dateField, allowedFields, "field");
 
     // Build time interval function
     const intervalFunction = this.getIntervalFunction(interval, dateField);
@@ -341,15 +323,8 @@ export class ClickHouseQueryBuilder {
       allowedFields = [],
     } = options;
 
-    // Validate table name
-    if (
-      !this.isValidIdentifier(table) ||
-      (allowedTables.length > 0 && !allowedTables.includes(table))
-    ) {
-      throw new Error(
-        `[ClickHouseQueryBuilder] Invalid or unauthorized table name: ${table}`
-      );
-    }
+    // Centralized table validation
+    this.validateAllowed(table, allowedTables, "table");
 
     // Validate SELECT expressions (allow window functions and computed fields)
     if (!Array.isArray(select) || select.length === 0) {
@@ -387,10 +362,14 @@ export class ClickHouseQueryBuilder {
     const { select, where = {}, orderBy = [], limit, offset } = options;
 
     if (!subquery || typeof subquery !== "string") {
-      throw new Error("Subquery must be a valid SQL string");
+      throw new Error(
+        "[ClickHouseQueryBuilder] Subquery must be a valid SQL string"
+      );
     }
     if (!Array.isArray(select) || select.length === 0) {
-      throw new Error("SELECT clause must be a non-empty array of expressions");
+      throw new Error(
+        "[ClickHouseQueryBuilder] SELECT clause must be a non-empty array of expressions"
+      );
     }
     const selectClause = select.join(", ");
     const { whereClause, params } = this.buildWhereClause(where);
@@ -413,13 +392,18 @@ export class ClickHouseQueryBuilder {
     allowedFields: readonly string[]
   ): string {
     if (select.includes("*")) return "*";
-    const validFields = select.filter(
-      (field) =>
-        this.isValidIdentifier(field) &&
-        (allowedFields.length === 0 || allowedFields.includes(field))
-    );
+    const validFields = select.filter((field) => {
+      try {
+        this.validateAllowed(field, allowedFields, "field");
+        return true;
+      } catch {
+        return false;
+      }
+    });
     if (validFields.length === 0)
-      throw new Error("No valid fields specified in SELECT clause");
+      throw new Error(
+        "[ClickHouseQueryBuilder] No valid fields specified in SELECT clause"
+      );
     return validFields.map((field) => this.escapeIdentifier(field)).join(", ");
   }
 
@@ -547,11 +531,14 @@ export class ClickHouseQueryBuilder {
     groupBy: string[],
     allowedFields: readonly string[]
   ): string {
-    const validFields = groupBy.filter(
-      (field) =>
-        this.isValidIdentifier(field) &&
-        (allowedFields.length === 0 || allowedFields.includes(field))
-    );
+    const validFields = groupBy.filter((field) => {
+      try {
+        this.validateAllowed(field, allowedFields, "field");
+        return true;
+      } catch {
+        return false;
+      }
+    });
     return validFields.length > 0
       ? validFields.map((field) => this.escapeIdentifier(field)).join(", ")
       : "";
@@ -564,12 +551,14 @@ export class ClickHouseQueryBuilder {
     orderBy: { field: string; direction: "ASC" | "DESC" }[],
     allowedFields: readonly string[]
   ): string {
-    const validOrders = orderBy.filter(
-      (order) =>
-        this.isValidIdentifier(order.field) &&
-        (allowedFields.length === 0 || allowedFields.includes(order.field)) &&
-        ["ASC", "DESC"].includes(order.direction)
-    );
+    const validOrders = orderBy.filter((order) => {
+      try {
+        this.validateAllowed(order.field, allowedFields, "field");
+        return ["ASC", "DESC"].includes(order.direction);
+      } catch {
+        return false;
+      }
+    });
     return validOrders.length > 0
       ? validOrders
           .map(
@@ -671,14 +660,33 @@ export class ClickHouseQueryBuilder {
   private static sanitizeValue(value: any): any {
     if (value === null || value === undefined) return null;
     if (typeof value === "string") {
-      // Remove dangerous patterns, but do not strip valid content
-      return value
-        .replace(/[\0\b\n\r\t\Z]/g, "")
-        .replace(/['"`]/g, "")
-        .trim();
+      // Remove dangerous patterns, enforce max length, strip control chars
+      let sanitized = value.replace(/[\0\b\n\r\t\Z]/g, "");
+      sanitized = sanitized.replace(/['"`]/g, "").trim();
+      if (sanitized.length > 1024) sanitized = sanitized.slice(0, 1024);
+      return sanitized;
     }
     if (typeof value === "number") return isNaN(value) ? 0 : value;
     if (value instanceof Date) return value.toISOString();
+    if (Array.isArray(value)) return value.map((v) => this.sanitizeValue(v));
+    if (typeof value === "object") {
+      // Only allow plain objects, no functions/classes
+      return JSON.parse(JSON.stringify(value));
+    }
     return value;
+    /**
+     * Build a secure SELECT query for ClickHouse.
+     * @param table - Table name (must be in allowedTables if provided)
+     * @param options - Query options (select, where, groupBy, orderBy, limit, offset, allowedTables, allowedFields)
+     * @returns { query, params } - Parameterized query and parameters object
+     * @throws Error if table or fields are invalid
+     * @example
+     * const { query, params } = ClickHouseQueryBuilder.buildSelectQuery('events', {
+     *   select: ['id', 'timestamp'],
+     *   where: { status: 'active' },
+     *   allowedTables: ['events'],
+     *   allowedFields: ['id', 'timestamp', 'status']
+     * });
+     */
   }
 }

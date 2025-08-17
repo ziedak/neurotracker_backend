@@ -3,9 +3,10 @@ import {
   PostgreSQLClient,
   RedisClient,
 } from "@libs/database";
-import { DatabaseUtils, ClickHouseQueryBuilder } from "@libs/database";
+import { ClickHouseQueryBuilder } from "@libs/database";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { performance } from "perf_hooks";
+// Import types explicitly for clarity
 
 export interface ReconciliationRule {
   id: string;
@@ -16,19 +17,8 @@ export interface ReconciliationRule {
   enabled: boolean;
   sourceColumns?: string[];
   targetColumns?: string[];
-  tolerance?: number;
+  tolerance?: number; // e.g., acceptable difference percentage
 }
-
-export interface ReconciliationResult {
-  ruleId: string;
-  status: "passed" | "failed" | "warning";
-  recordsChecked: number;
-  discrepancies: number;
-  executedAt: string;
-  executionTime: number;
-  details?: DiscrepancyDetail[];
-}
-
 export interface DiscrepancyDetail {
   id: string;
   column: string;
@@ -47,27 +37,133 @@ export interface RepairOperation {
   estimatedImpact: number;
 }
 
+export interface ReconciliationResult {
+  ruleId: string;
+  status: "passed" | "failed" | "warning";
+  recordsChecked: number;
+  discrepancies: number;
+  executedAt: string;
+  executionTime: number;
+  details?: DiscrepancyDetail[];
+}
 /**
  * Data Reconciliation Service
  * Handles cross-system data consistency validation and automated repair
  */
 export class DataReconciliationService {
-  private readonly redis: RedisClient;
-  private readonly clickhouse: ClickHouseClient;
-  private readonly postgres: PostgreSQLClient;
+  // --- Constants for magic values ---
+  private static readonly MAX_DISCREPANCY_DETAILS = 50;
+  // --- New public methods for reconciliation endpoints ---
+  /**
+   * Update an existing reconciliation rule
+   */
+  public async updateRule(
+    ruleId: string,
+    updates: Partial<Omit<ReconciliationRule, "id">>
+  ): Promise<ReconciliationRule | null> {
+    try {
+      // Build update data object
+      const data: Record<string, any> = {};
+      if (updates.name) data.name = updates.name;
+      if (updates.sourceTable) data.sourceTable = updates.sourceTable;
+      if (updates.targetTable) data.targetTable = updates.targetTable;
+      if (updates.joinKey) data.joinKey = updates.joinKey;
+      if (typeof updates.enabled === "boolean") data.enabled = updates.enabled;
+      if (updates.sourceColumns)
+        data.sourceColumns = JSON.stringify(updates.sourceColumns);
+      if (updates.targetColumns)
+        data.targetColumns = JSON.stringify(updates.targetColumns);
+      if (typeof updates.tolerance === "number")
+        data.tolerance = updates.tolerance;
+      if (Object.keys(data).length === 0) return await this.getRule(ruleId);
+      // Update rule in DB using Prisma ORM
+      await PostgreSQLClient.getInstance().reconciliationRule.update({
+        where: { id: ruleId },
+        data,
+      });
+      // Invalidate cache
+      const redisClient = RedisClient.getInstance();
+      await redisClient.del(`recon_rule:${ruleId}`);
+      return await this.getRule(ruleId);
+    } catch (error) {
+      this.logger.error(
+        "Failed to update reconciliation rule",
+        error as Error,
+        { ruleId }
+      );
+      return null;
+    }
+  }
+
+  /**
+   * List reconciliation execution history
+   */
+  public async getHistory(
+    page = 1,
+    pageSize = 20
+  ): Promise<{ total: number; executions: ReconciliationResult[] }> {
+    try {
+      const offset = (page - 1) * pageSize;
+      const [rows, totalRows] = await Promise.all([
+        PostgreSQLClient.getInstance().reconciliationExecution.findMany({
+          skip: offset,
+          take: pageSize,
+          orderBy: { executedAt: "desc" },
+        }),
+        PostgreSQLClient.getInstance().reconciliationExecution.count(),
+      ]);
+      const allowedStatus = ["passed", "failed", "warning"] as const;
+      return {
+        total: totalRows,
+        executions: rows.map((row) => ({
+          ruleId: row.ruleId,
+          status: allowedStatus.includes(row.status as any)
+            ? (row.status as "passed" | "failed" | "warning")
+            : "warning",
+          recordsChecked: row.recordsChecked,
+          discrepancies: row.discrepancies,
+          executedAt:
+            row.executedAt instanceof Date
+              ? row.executedAt.toISOString()
+              : String(row.executedAt),
+          executionTime: row.executionTime,
+          details: row.details ? JSON.parse(row.details as string) : [],
+        })),
+      };
+    } catch (error) {
+      this.logger.error("Failed to get reconciliation history", error as Error);
+      return { total: 0, executions: [] };
+    }
+  }
+
+  /**
+   * Get discrepancy details for a specific run
+   */
+  public async getDiscrepancyDetails(
+    runId: string
+  ): Promise<DiscrepancyDetail[] | null> {
+    try {
+      const row =
+        await PostgreSQLClient.getInstance().reconciliationExecution.findUnique(
+          {
+            where: { id: runId },
+            select: { details: true },
+          }
+        );
+      if (!row) return null;
+      return row.details ? JSON.parse(row.details as string) : [];
+    } catch (error) {
+      this.logger.error("Failed to get discrepancy details", error as Error, {
+        runId,
+      });
+      return null;
+    }
+  }
+
   private readonly logger: Logger;
   private readonly metrics: MetricsCollector;
 
-  constructor(
-    redis: RedisClient,
-    clickhouse: ClickHouseClient,
-    postgres: PostgreSQLClient,
-    logger: Logger,
-    metrics: MetricsCollector
-  ) {
-    this.redis = redis;
-    this.clickhouse = clickhouse;
-    this.postgres = postgres;
+  constructor(logger: Logger, metrics: MetricsCollector) {
     this.logger = logger;
     this.metrics = metrics;
   }
@@ -87,18 +183,24 @@ export class DataReconciliationService {
       };
 
       // Store rule in PostgreSQL
-      await PostgreSQLClient.executeRaw(
-        `INSERT INTO reconciliation_rules (id, name, source_table, target_table, join_key, enabled, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-        [
-          rule.id,
-          rule.name,
-          rule.sourceTable,
-          rule.targetTable,
-          rule.joinKey,
-          rule.enabled,
-        ]
-      );
+      await PostgreSQLClient.getInstance().reconciliationRule.create({
+        data: {
+          id: rule.id,
+          name: rule.name,
+          sourceTable: rule.sourceTable,
+          targetTable: rule.targetTable,
+          joinKey: rule.joinKey,
+          enabled: rule.enabled,
+          sourceColumns: rule.sourceColumns
+            ? JSON.stringify(rule.sourceColumns)
+            : undefined,
+          targetColumns: rule.targetColumns
+            ? JSON.stringify(rule.targetColumns)
+            : undefined,
+          tolerance: rule.tolerance,
+          createdAt: new Date(),
+        },
+      });
 
       // Cache the rule
       const redisClient = RedisClient.getInstance();
@@ -157,7 +259,7 @@ export class DataReconciliationService {
         executedAt: new Date().toISOString(),
         executionTime: performance.now() - startTime,
         details: discrepancies
-          .slice(0, 50)
+          .slice(0, DataReconciliationService.MAX_DISCREPANCY_DETAILS)
           .map((d: any) => this.mapDiscrepancy(d, rule)),
       };
 
@@ -205,42 +307,46 @@ export class DataReconciliationService {
     lastExecution?: string;
   }> {
     try {
-      // Get total and active rules count
-      const totalRules = await PostgreSQLClient.executeRaw(
-        "SELECT COUNT(*) as count FROM reconciliation_rules"
-      );
-      const activeRules = await PostgreSQLClient.executeRaw(
-        "SELECT COUNT(*) as count FROM reconciliation_rules WHERE enabled = true"
-      );
-
-      // Get recent executions (last 24 hours)
-      const recentExecutions = await PostgreSQLClient.executeRaw(
-        `SELECT COUNT(*) as count FROM reconciliation_executions 
-         WHERE executed_at > NOW() - INTERVAL '24 hours'`
-      );
-
-      // Get recent failures
-      const recentFailures = await PostgreSQLClient.executeRaw(
-        `SELECT COUNT(*) as count FROM reconciliation_executions 
-         WHERE executed_at > NOW() - INTERVAL '24 hours' AND status = 'failed'`
-      );
-
-      // Get last execution
-      const lastExecution = await PostgreSQLClient.executeRaw(
-        `SELECT executed_at FROM reconciliation_executions 
-         ORDER BY executed_at DESC LIMIT 1`
-      );
-
-      const execCount = (recentExecutions as any[])[0]?.count || 0;
-      const failCount = (recentFailures as any[])[0]?.count || 0;
+      // Use Prisma ORM for all queries
+      const prisma = PostgreSQLClient.getInstance();
+      const [
+        totalRules,
+        activeRules,
+        recentExecutions,
+        recentFailures,
+        lastExecution,
+      ] = await Promise.all([
+        prisma.reconciliationRule.count(),
+        prisma.reconciliationRule.count({ where: { enabled: true } }),
+        prisma.reconciliationExecution.count({
+          where: {
+            executedAt: {
+              gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
+            },
+          },
+        }),
+        prisma.reconciliationExecution.count({
+          where: {
+            executedAt: {
+              gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
+            },
+            status: "failed",
+          },
+        }),
+        prisma.reconciliationExecution.findFirst({
+          orderBy: { executedAt: "desc" },
+          select: { executedAt: true },
+        }),
+      ]);
+      const execCount = recentExecutions || 0;
+      const failCount = recentFailures || 0;
       const failureRate = execCount > 0 ? (failCount / execCount) * 100 : 0;
-
       return {
-        totalRules: (totalRules as any[])[0]?.count || 0,
-        activeRules: (activeRules as any[])[0]?.count || 0,
+        totalRules,
+        activeRules,
         recentExecutions: execCount,
         failureRate: Math.round(failureRate * 100) / 100,
-        lastExecution: (lastExecution as any[])[0]?.executed_at?.toISOString(),
+        lastExecution: lastExecution?.executedAt?.toISOString(),
       };
     } catch (error) {
       this.logger.error("Failed to get reconciliation status", error as Error);
@@ -376,41 +482,31 @@ export class DataReconciliationService {
       }
 
       // Get from database
-      const rows = await PostgreSQLClient.executeRaw(
-        `SELECT id, name, source_table, target_table, join_key, enabled,
-                source_columns, target_columns, tolerance
-         FROM reconciliation_rules WHERE id = $1`,
-        [ruleId]
-      );
-
-      if ((rows as any[]).length === 0) {
-        return null;
-      }
-
-      const row = (rows as any[])[0];
+      const row =
+        await PostgreSQLClient.getInstance().reconciliationRule.findUnique({
+          where: { id: ruleId },
+        });
+      if (!row) return null;
       const rule: ReconciliationRule = {
         id: row.id,
         name: row.name,
-        sourceTable: row.source_table,
-        targetTable: row.target_table,
-        joinKey: row.join_key,
+        sourceTable: row.sourceTable,
+        targetTable: row.targetTable,
+        joinKey: row.joinKey,
         enabled: row.enabled,
-        sourceColumns: row.source_columns
-          ? JSON.parse(row.source_columns)
+        sourceColumns: row.sourceColumns
+          ? JSON.parse(row.sourceColumns as string)
           : undefined,
-        targetColumns: row.target_columns
-          ? JSON.parse(row.target_columns)
+        targetColumns: row.targetColumns
+          ? JSON.parse(row.targetColumns as string)
           : undefined,
-        tolerance: row.tolerance,
+        tolerance: row.tolerance ?? undefined,
       };
-
-      // Cache for future use
       await redisClient.setex(
         `recon_rule:${ruleId}`,
         3600,
         JSON.stringify(rule)
       );
-
       return rule;
     } catch (error) {
       this.logger.error("Failed to get reconciliation rule", error as Error, {
@@ -422,17 +518,16 @@ export class DataReconciliationService {
 
   private async getActiveRules(): Promise<ReconciliationRule[]> {
     try {
-      const rows = await PostgreSQLClient.executeRaw(
-        `SELECT id, name, source_table, target_table, join_key, enabled
-         FROM reconciliation_rules WHERE enabled = true`
-      );
-
-      return (rows as any[]).map((row) => ({
+      const rows =
+        await PostgreSQLClient.getInstance().reconciliationRule.findMany({
+          where: { enabled: true },
+        });
+      return rows.map((row) => ({
         id: row.id,
         name: row.name,
-        sourceTable: row.source_table,
-        targetTable: row.target_table,
-        joinKey: row.join_key,
+        sourceTable: row.sourceTable,
+        targetTable: row.targetTable,
+        joinKey: row.joinKey,
         enabled: row.enabled,
       }));
     } catch (error) {
@@ -458,13 +553,13 @@ export class DataReconciliationService {
     const selectFields: string[] = [];
     selectFields.push("s.{joinKey:String} as join_key");
 
-    sourceColumns.forEach((col, index) => {
+    sourceColumns.forEach((col: string, index: number) => {
       selectFields.push(
         `s.{sourceCol${index}:String} as source_{sourceCol${index}:String}`
       );
     });
 
-    targetColumns.forEach((col, index) => {
+    targetColumns.forEach((col: string, index: number) => {
       selectFields.push(
         `t.{targetCol${index}:String} as target_{targetCol${index}:String}`
       );
@@ -477,7 +572,7 @@ export class DataReconciliationService {
     ];
 
     // Add column comparison conditions
-    sourceColumns.forEach((col, index) => {
+    sourceColumns.forEach((col: string, index: number) => {
       const targetCol = targetColumns[index] || col;
       if (rule.tolerance) {
         whereConditions.push(
@@ -507,11 +602,11 @@ export class DataReconciliationService {
     };
 
     // Add column parameters
-    sourceColumns.forEach((col, index) => {
+    sourceColumns.forEach((col: string, index: number) => {
       params[`sourceCol${index}`] = col;
     });
 
-    targetColumns.forEach((col, index) => {
+    targetColumns.forEach((col: string, index: number) => {
       params[`targetCol${index}`] = col;
     });
 
@@ -543,20 +638,17 @@ export class DataReconciliationService {
   private async storeExecutionResult(
     result: ReconciliationResult
   ): Promise<void> {
-    await PostgreSQLClient.executeRaw(
-      `INSERT INTO reconciliation_executions 
-       (rule_id, status, records_checked, discrepancies, executed_at, execution_time, details)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [
-        result.ruleId,
-        result.status,
-        result.recordsChecked,
-        result.discrepancies,
-        result.executedAt,
-        result.executionTime,
-        JSON.stringify(result.details || []),
-      ]
-    );
+    await PostgreSQLClient.getInstance().reconciliationExecution.create({
+      data: {
+        ruleId: result.ruleId,
+        status: result.status,
+        recordsChecked: result.recordsChecked,
+        discrepancies: result.discrepancies,
+        executedAt: new Date(result.executedAt),
+        executionTime: result.executionTime,
+        details: JSON.stringify(result.details || []),
+      },
+    });
   }
 
   private async generateRepairOperation(
@@ -594,26 +686,29 @@ export class DataReconciliationService {
     operation: RepairOperation
   ): Promise<void> {
     try {
-      await PostgreSQLClient.executeRaw(operation.query, operation.params);
-
-      // Log successful repair
-      await PostgreSQLClient.executeRaw(
-        `INSERT INTO repair_operations (operation_id, type, status, executed_at)
-         VALUES ($1, $2, $3, NOW())`,
-        [operation.operationId, operation.type, "success"]
+      // Use Prisma ORM for update
+      await PostgreSQLClient.getInstance().$executeRawUnsafe(
+        operation.query,
+        ...operation.params
       );
+      await PostgreSQLClient.getInstance().repairOperation.create({
+        data: {
+          operationId: operation.operationId,
+          type: operation.type,
+          status: "success",
+          executedAt: new Date(),
+        },
+      });
     } catch (error) {
-      // Log failed repair
-      await PostgreSQLClient.executeRaw(
-        `INSERT INTO repair_operations (operation_id, type, status, error, executed_at)
-         VALUES ($1, $2, $3, $4, NOW())`,
-        [
-          operation.operationId,
-          operation.type,
-          "failed",
-          (error as Error).message,
-        ]
-      );
+      await PostgreSQLClient.getInstance().repairOperation.create({
+        data: {
+          operationId: operation.operationId,
+          type: operation.type,
+          status: "failed",
+          error: (error as Error).message,
+          executedAt: new Date(),
+        },
+      });
       throw error;
     }
   }

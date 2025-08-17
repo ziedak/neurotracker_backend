@@ -121,7 +121,7 @@ async function startServer() {
     builder
       .addRoutes((app: Elysia) => {
         setupRootRoutes(app);
-        setupAuthRoutes(app);
+        setupAuthRoutes(app, logger);
         setupApiRoutes(app, endpointRegistryService, logger);
         return app;
       })

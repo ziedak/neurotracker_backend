@@ -154,14 +154,51 @@ export const setupReconciliationRoutes = (
           params: [{ field: "ruleId", type: "string", required: true }],
           body: [
             { field: "name", type: "string", required: false },
-            { field: "config", type: "object", required: false },
+            { field: "sourceTable", type: "string", required: false },
+            { field: "targetTable", type: "string", required: false },
+            { field: "joinKey", type: "string", required: false },
             { field: "enabled", type: "boolean", required: false },
+            { field: "sourceColumns", type: "array", required: false },
+            { field: "targetColumns", type: "array", required: false },
+            { field: "tolerance", type: "number", required: false },
           ],
         }),
       ],
-      async ({ params, body }) => {
-        // TODO: Implement rule update logic
-        return { message: "Reconciliation rule update not implemented." };
+      async ({
+        params,
+        body,
+      }: {
+        params: { ruleId: string };
+        body: Partial<{
+          name: string;
+          sourceTable: string;
+          targetTable: string;
+          joinKey: string;
+          enabled: boolean;
+          sourceColumns: string[];
+          targetColumns: string[];
+          tolerance: number;
+        }>;
+      }) => {
+        try {
+          const reconciliationService = getDataReconciliation();
+          const updated = await reconciliationService.updateRule(
+            params.ruleId,
+            body
+          );
+          if (!updated) {
+            return {
+              error: "Rule update failed",
+              message: "Rule not found or update error.",
+            };
+          }
+          return updated;
+        } catch (error) {
+          return {
+            error: "Rule update failed",
+            message: (error as Error).message,
+          };
+        }
       }
     );
 
@@ -178,9 +215,26 @@ export const setupReconciliationRoutes = (
           params: [{ field: "ruleId", type: "string", required: true }],
         }),
       ],
-      async ({ params }) => {
-        // TODO: Implement rule delete logic
-        return { message: "Reconciliation rule delete not implemented." };
+      async ({ params }: { params: { ruleId: string } }) => {
+        try {
+          const reconciliationService = getDataReconciliation();
+          const deleted = await reconciliationService.updateRule(
+            params.ruleId,
+            { enabled: false }
+          );
+          if (!deleted) {
+            return {
+              error: "Rule delete failed",
+              message: "Rule not found or delete error.",
+            };
+          }
+          return { message: "Rule disabled (soft delete)", rule: deleted };
+        } catch (error) {
+          return {
+            error: "Rule delete failed",
+            message: (error as Error).message,
+          };
+        }
       }
     );
 
@@ -196,13 +250,22 @@ export const setupReconciliationRoutes = (
           ],
         }),
       ],
-      async ({ query }) => {
+      async ({ query }: { query: { page?: number; pageSize?: number } }) => {
         auditMiddleware.auditAction(
           "view_reconciliation_history",
           "reconciliation"
         );
-        // TODO: Implement history listing logic
-        return { message: "Reconciliation history not implemented." };
+        try {
+          const reconciliationService = getDataReconciliation();
+          const page = query.page ?? 1;
+          const pageSize = query.pageSize ?? 20;
+          return await reconciliationService.getHistory(page, pageSize);
+        } catch (error) {
+          return {
+            error: "History retrieval failed",
+            message: (error as Error).message,
+          };
+        }
       }
     );
 
@@ -219,11 +282,25 @@ export const setupReconciliationRoutes = (
           params: [{ field: "runId", type: "string", required: true }],
         }),
       ],
-      async ({ params }) => {
-        // TODO: Implement discrepancy details retrieval
-        return {
-          message: "Reconciliation discrepancy details not implemented.",
-        };
+      async ({ params }: { params: { runId: string } }) => {
+        try {
+          const reconciliationService = getDataReconciliation();
+          const details = await reconciliationService.getDiscrepancyDetails(
+            params.runId
+          );
+          if (!details) {
+            return {
+              error: "Discrepancy details not found",
+              runId: params.runId,
+            };
+          }
+          return { runId: params.runId, details };
+        } catch (error) {
+          return {
+            error: "Discrepancy details retrieval failed",
+            message: (error as Error).message,
+          };
+        }
       }
     );
 

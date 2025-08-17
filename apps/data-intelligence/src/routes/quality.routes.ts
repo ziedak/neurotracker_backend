@@ -294,6 +294,75 @@ export const setupQualityRoutes = (
       }
     );
 
+    group.post(
+      "/gdpr/forget",
+      [
+        authMiddleware.authenticate({ requiredRoles: ["admin"] }),
+        rateLimitMiddleware.userLimit(),
+        validationMiddleware.validate({
+          body: [{ field: "userId", type: "string", required: true }],
+        }),
+      ],
+      async ({ body }: { body: { userId: string } }) => {
+        try {
+          const qualityService = getDataQuality();
+          return await qualityService.forgetUser(body.userId);
+        } catch (error) {
+          return {
+            error: "GDPR forget request failed",
+            message: (error as Error).message,
+          };
+        }
+      }
+    );
+
+    group.get(
+      "/gdpr/export",
+      [
+        authMiddleware.authenticate({ requiredRoles: ["admin"] }),
+        rateLimitMiddleware.userLimit(),
+        validationMiddleware.validate({
+          query: [{ field: "userId", type: "string", required: true }],
+        }),
+      ],
+      async ({ query, set }: { query: { userId: string }; set: any }) => {
+        try {
+          const qualityService = getDataQuality();
+          const result = await qualityService.exportUserData(query.userId);
+          set.headers["Content-Type"] = "application/json";
+          return result;
+        } catch (error) {
+          set.status = 500;
+          return {
+            error: "GDPR export request failed",
+            message: (error as Error).message,
+          };
+        }
+      }
+    );
+
+    group.get(
+      "/gdpr/status",
+      [
+        authMiddleware.authenticate({ requiredRoles: ["admin"] }),
+        rateLimitMiddleware.userLimit(),
+        validationMiddleware.validate({
+          query: [{ field: "requestId", type: "string", required: true }],
+        }),
+      ],
+      async ({ query }: { query: { requestId: string } }) => {
+        try {
+          const qualityService = getDataQuality();
+          return await qualityService.getGdprStatus(query.requestId);
+        } catch (error) {
+          return {
+            error: "GDPR status request failed",
+            message: (error as Error).message,
+          };
+        }
+      }
+    );
+
     return group;
   });
 

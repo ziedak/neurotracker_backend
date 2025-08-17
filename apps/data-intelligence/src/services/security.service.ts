@@ -468,27 +468,19 @@ export class SecurityService {
    */
   private async validateJwtToken(token: string): Promise<AuthResult> {
     try {
-      // In a real implementation, you would validate JWT signature, expiration, etc.
-      // For now, this is a simplified version
-
-      // Check if token exists in cache (for revoked tokens check)
       const redisClient = RedisClient.getInstance();
       const isRevoked = await redisClient.get(`revoked_token:${token}`);
-
       if (isRevoked) {
         return { authenticated: false, error: "Token has been revoked" };
       }
-
-      // For demo purposes, extract userId from token (in real scenario, decode JWT)
-      const tokenParts = token.split(".");
-      if (tokenParts.length !== 3) {
-        return { authenticated: false, error: "Invalid token format" };
+      const jwtService = JWTService.getInstance();
+      // Use the actual method name from your JWTService
+      const payload = await jwtService.verifyToken(token);
+      if (!payload || !payload.sub) {
+        return { authenticated: false, error: "Invalid or expired token" };
       }
-
-      // Simulate token validation - in reality you'd decode and verify
-      const userId = "demo_user"; // Would be extracted from decoded JWT
+      const userId = payload.sub;
       const userRoles = await this.getUserRoles(userId);
-
       return {
         authenticated: true,
         userId,
@@ -499,7 +491,6 @@ export class SecurityService {
       return { authenticated: false, error: "Token validation failed" };
     }
   }
-
   /**
    * Check rate limits for a user
    */
@@ -608,25 +599,23 @@ export class SecurityService {
     try {
       const redisClient = RedisClient.getInstance();
       const cached = await redisClient.get(`user_roles:${userId}`);
-
       if (cached) {
         return JSON.parse(cached);
       }
-
-      // Default roles for demo - in reality would query database
-      const defaultRoles = ["viewer"]; // Most restrictive default
-
+      // Query roles from database
+      const prisma = PostgreSQLClient.getInstance();
+      const roles = await prisma.userRole.findMany({ where: { userId } });
+      const roleNames = roles.map((r) => r.role);
       // Cache for 5 minutes
       await redisClient.setex(
         `user_roles:${userId}`,
         300,
-        JSON.stringify(defaultRoles)
+        JSON.stringify(roleNames)
       );
-
-      return defaultRoles;
+      return roleNames.length > 0 ? roleNames : ["viewer"];
     } catch (error) {
       this.logger.error("Failed to get user roles", error as Error, { userId });
-      return ["viewer"]; // Safe default
+      return ["viewer"];
     }
   }
 
@@ -673,64 +662,30 @@ export class SecurityService {
    * Map endpoint and method to required permission
    */
   private getRequiredPermission(endpoint: string, method: string): string {
+    /**
+     * Maps endpoint and HTTP method to required permission string.
+     * @param endpoint API endpoint path (e.g., '/v1/features/list')
+     * @param method HTTP method (GET, POST, PUT, DELETE)
+     * @returns Permission string (e.g., 'features:read')
+     */
     const pathSegments = endpoint.split("/").filter((s) => s);
-
     if (pathSegments.length < 2) return "unknown";
-
     const resource = pathSegments[1]; // e.g., 'features', 'reports', etc.
-    const action =
-      method.toLowerCase() === "get"
-        ? "read"
-        : method.toLowerCase() === "post"
-        ? "write"
-        : method.toLowerCase() === "put"
-        ? "write"
-        : method.toLowerCase() === "delete"
-        ? "delete"
-        : "read";
-
-    return `${resource}:${action}`;
-  }
-
-  /**
-   * Get security status and metrics
-   */
-  async getSecurityStatus(): Promise<{
-    activeApiKeys: number;
-    rateLimitViolations24h: number;
-    authFailures24h: number;
-    securityHealth: "healthy" | "warning" | "critical";
-  }> {
-    try {
-      const redisClient = RedisClient.getInstance();
-
-      // Count active API keys (simplified)
-      const apiKeyKeys = await redisClient.keys("api_key:*");
-      const activeApiKeys = apiKeyKeys.length;
-
-      // Get metrics from the last 24 hours (simplified)
-      const rateLimitViolations24h = 0; // Would query metrics
-      const authFailures24h = 0; // Would query metrics
-
-      let securityHealth: "healthy" | "warning" | "critical" = "healthy";
-
-      if (authFailures24h > 100) {
-        securityHealth = "critical";
-      } else if (authFailures24h > 20 || rateLimitViolations24h > 50) {
-        securityHealth = "warning";
-      }
-
-      return {
-        activeApiKeys,
-        rateLimitViolations24h,
-        authFailures24h,
-        securityHealth,
-      };
-    } catch (error) {
-      this.logger.error("Failed to get security status", error as Error);
-      throw new Error(
-        `Failed to get security status: ${(error as Error).message}`
-      );
+    let action: string;
+    switch (method.toLowerCase()) {
+      case "get":
+        action = "read";
+        break;
+      case "post":
+      case "put":
+        action = "write";
+        break;
+      case "delete":
+        action = "delete";
+        break;
+      default:
+        action = "unknown";
     }
+    return `${resource}:${action}`;
   }
 }

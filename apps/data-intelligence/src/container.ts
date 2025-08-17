@@ -199,42 +199,25 @@ export class DataIntelligenceContainer {
 
     // Data Quality Service - singleton
     this._registry.registerSingleton("dataQualityService", () => {
-      const clickhouse =
-        this._registry.resolve<ClickHouseClient>("clickhouseClient");
-      const postgres =
-        this._registry.resolve<PostgreSQLClient>("postgresClient");
-      const redis = this._registry.resolve<RedisClient>("redisClient");
       const logger = this._registry.resolve<Logger>("logger");
       const metrics =
         this._registry.resolve<MetricsCollector>("metricsCollector");
 
-      return new DataQualityService(
-        clickhouse,
-        postgres,
-        redis,
-        logger,
-        metrics
-      );
+      return new DataQualityService(logger, metrics);
     });
 
     // Data Reconciliation Service - singleton
     this._registry.registerSingleton("dataReconciliationService", () => {
-      const clickhouse =
-        this._registry.resolve<ClickHouseClient>("clickhouseClient");
-      const postgres =
-        this._registry.resolve<PostgreSQLClient>("postgresClient");
-      const redis = this._registry.resolve<RedisClient>("redisClient");
+      // const clickhouse =
+      //   this._registry.resolve<ClickHouseClient>("clickhouseClient");
+      // const postgres =
+      //   this._registry.resolve<PostgreSQLClient>("postgresClient");
+      // const redis = this._registry.resolve<RedisClient>("redisClient");
       const logger = this._registry.resolve<Logger>("logger");
       const metrics =
         this._registry.resolve<MetricsCollector>("metricsCollector");
 
-      return new DataReconciliationService(
-        redis,
-        clickhouse,
-        postgres,
-        logger,
-        metrics
-      );
+      return new DataReconciliationService(logger, metrics);
     });
 
     // Security Service - singleton

@@ -527,3 +527,38 @@ model QualityAnomaly {
   details   Json?
   timestamp DateTime @default(now())
 }
+
+model ReconciliationRule {
+  id            String                    @id @default(uuid())
+  name          String
+  sourceTable   String
+  targetTable   String
+  joinKey       String
+  enabled       Boolean                   @default(true)
+  sourceColumns String?
+  targetColumns String?
+  tolerance     Float?
+  createdAt     DateTime                  @default(now())
+  executions    ReconciliationExecution[]
+}
+
+model ReconciliationExecution {
+  id             String             @id @default(uuid())
+  ruleId         String
+  status         String
+  recordsChecked Int
+  discrepancies  Int
+  executedAt     DateTime           @default(now())
+  executionTime  Float
+  details        String?
+  rule           ReconciliationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+}
+
+model RepairOperation {
+  id          String   @id @default(uuid())
+  operationId String
+  type        String
+  status      String
+  error       String?
+  executedAt  DateTime @default(now())
+}
