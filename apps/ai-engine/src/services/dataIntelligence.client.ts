@@ -5,6 +5,11 @@ import { CircuitBreaker } from "@libs/utils";
 import { FeatureSet, FeatureComputationRequest } from "../types";
 import { performance } from "perf_hooks";
 
+const TIMEOUT_MS: number = 5000;
+const MAX_RETRIES: number = 3;
+const CIRCUIT_BREAKER_THRESHOLD: number = 5;
+const CIRCUIT_BREAKER_TIMEOUT: number = 10000;
+
 /**
  * Data Intelligence Service Client
  * Handles communication with the data-intelligence service
@@ -27,10 +32,10 @@ export class DataIntelligenceClient {
   private readonly baseUrl: string;
 
   // Configuration constants
-  private readonly TIMEOUT_MS: number;
-  private readonly MAX_RETRIES: number;
-  private readonly CIRCUIT_BREAKER_THRESHOLD: number;
-  private readonly CIRCUIT_BREAKER_TIMEOUT: number;
+  private readonly timeout_ms: number = 5000;
+  private readonly max_retries: number = 3;
+  private readonly circuit_breaker_threshold: number = 5;
+  private readonly circuit_breaker_timeout: number = 10000;
 
   constructor(
     logger: Logger,
@@ -45,15 +50,17 @@ export class DataIntelligenceClient {
     this.logger = logger;
     this.metrics = metrics;
     this.baseUrl = getEnv("DATA_INTELLIGENCE_URL", "http://localhost:3001");
-    this.TIMEOUT_MS = config?.timeoutMs ?? 5000;
-    this.MAX_RETRIES = config?.maxRetries ?? 3;
-    this.CIRCUIT_BREAKER_THRESHOLD = config?.circuitBreakerThreshold ?? 5;
-    this.CIRCUIT_BREAKER_TIMEOUT = config?.circuitBreakerTimeout ?? 10000;
+    this.timeout_ms = config?.timeoutMs ?? TIMEOUT_MS;
+    this.max_retries = config?.maxRetries ?? MAX_RETRIES;
+    this.circuit_breaker_threshold =
+      config?.circuitBreakerThreshold ?? CIRCUIT_BREAKER_THRESHOLD;
+    this.circuit_breaker_timeout =
+      config?.circuitBreakerTimeout ?? CIRCUIT_BREAKER_TIMEOUT;
 
     // Configure HTTP client with timeouts and retry logic
     this.httpClient = axios.create({
       baseURL: this.baseUrl,
-      timeout: this.TIMEOUT_MS,
+      timeout: this.timeout_ms,
       headers: {
         "Content-Type": "application/json",
         "User-Agent": "ai-engine/1.0.0",
@@ -68,7 +75,7 @@ export class DataIntelligenceClient {
 
     this.logger.info("Data Intelligence Client initialized", {
       baseUrl: this.baseUrl,
-      timeout: this.TIMEOUT_MS,
+      timeout: this.timeout_ms,
     });
   }
   /**
@@ -149,9 +156,6 @@ export class DataIntelligenceClient {
 
   /**
    * Get features for a cart from the data-intelligence service
-   */
-  /**
-   * Get features for a cart from the data-intelligence service
    * @param request FeatureComputationRequest
    * @returns FeatureSet
    */
@@ -196,9 +200,6 @@ export class DataIntelligenceClient {
 
   /**
    * Get feature definitions from data-intelligence service
-   */
-  /**
-   * Get feature definitions from data-intelligence service
    * @returns Array of feature definitions
    */
   async getFeatureDefinitions(): Promise<any[]> {
@@ -217,9 +218,6 @@ export class DataIntelligenceClient {
     }
   }
 
-  /**
-   * Validate data quality with data-intelligence service
-   */
   /**
    * Validate data quality with data-intelligence service
    * @returns true if valid, false if not
@@ -255,9 +253,6 @@ export class DataIntelligenceClient {
 
   /**
    * Get business intelligence insights for model enhancement
-   */
-  /**
-   * Get business intelligence insights for model enhancement
    * @param request { period, metrics, filters }
    * @returns Insights object
    */
@@ -287,9 +282,6 @@ export class DataIntelligenceClient {
 
   /**
    * Health check endpoint for data-intelligence service
-   */
-  /**
-   * Health check endpoint for data-intelligence service
    * @returns true if healthy, false otherwise
    */
   async healthCheck(): Promise<boolean> {
@@ -316,9 +308,6 @@ export class DataIntelligenceClient {
     }
   }
 
-  /**
-   * Batch feature computation for multiple carts
-   */
   /**
    * Batch feature computation for multiple carts
    * @param requests Array of FeatureComputationRequest
@@ -360,9 +349,6 @@ export class DataIntelligenceClient {
 
   /**
    * Get circuit breaker status
-   */
-  /**
-   * Get circuit breaker status
    * @returns Circuit breaker status object
    */
   getCircuitBreakerStatus(): {
@@ -380,17 +366,11 @@ export class DataIntelligenceClient {
   /**
    * Reset circuit breaker manually
    */
-  /**
-   * Reset circuit breaker manually
-   */
   resetCircuitBreaker(): void {
     // this.circuitBreaker.reset(); // Method not accessible, using no-op
     this.logger.info("Circuit breaker reset manually");
   }
 
-  /**
-   * Dispose of resources
-   */
   /**
    * Dispose of resources
    */
