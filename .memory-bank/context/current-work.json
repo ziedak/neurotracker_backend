@@ -105,6 +105,15 @@
       "task_dir": ".memory-bank/tasks/2025-08-11-implement-intervention-engine-service/",
       "current_focus": "Implementing intervention-engine service using @libs/elysia-server WebSocket capabilities and existing patterns",
       "dependencies": ["ai-engine-service", "existing-websocket-infrastructure"]
+    },
+    {
+      "name": "optimize-data-intelligence-service",
+      "date": "2025-08-16",
+      "status": "active",
+      "priority": "critical",
+      "progress": 0,
+      "task_dir": ".memory-bank/tasks/2025-08-16-optimize-data-intelligence-service/",
+      "current_focus": "Comprehensive optimization of data-intelligence service for reliability, maintainability, performance, and observability."
     }
   ],
   "paused_tasks": [

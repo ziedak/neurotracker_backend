@@ -3,7 +3,6 @@ import {
   PostgreSQLClient,
   RedisClient,
   DatabaseUtils,
-  ClickHouseQueryBuilder,
 } from "@libs/database";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { performance } from "perf_hooks";
@@ -31,41 +30,36 @@ export interface ExportResult {
  * Implements memory-efficient streaming for large datasets
  */
 export class DataExportService {
-  private readonly redis: RedisClient;
-  private readonly clickhouse: ClickHouseClient;
-  private readonly postgres: PostgreSQLClient;
-  private readonly logger: Logger;
-  private readonly metrics: MetricsCollector;
-
-  // Memory management configuration
-  private readonly MEMORY_CONFIG = {
-    MAX_MEMORY_MB: 512, // 512MB max memory usage
-    STREAM_CHUNK_SIZE: 5000, // Records per streaming chunk
-    MEMORY_CHECK_INTERVAL: 1000, // Check memory every 1000 records
-    MAX_EXPORT_SIZE: 1000000, // 1M records max per export
-    BATCH_SIZE_SMALL: 5000, // For exports < 50k records
-    BATCH_SIZE_LARGE: 10000, // For exports > 50k records
-  };
-
-  // Performance monitoring
   private readonly PERFORMANCE_TARGETS = {
     EXPORT_SPEED_RECORDS_PER_SEC: 1000,
     MAX_EXPORT_TIME_MINUTES: 30,
     MEMORY_WARNING_THRESHOLD_MB: 400,
   };
+  private readonly MEMORY_CONFIG = {
+    MAX_MEMORY_MB: 512,
+    STREAM_CHUNK_SIZE: 5000,
+    MEMORY_CHECK_INTERVAL: 1000,
+    MAX_EXPORT_SIZE: 1000000,
+    BATCH_SIZE_SMALL: 5000,
+    BATCH_SIZE_LARGE: 10000,
+  };
+  private readonly logger: Logger;
+  private readonly metrics: MetricsCollector;
 
-  constructor(
-    redis: RedisClient,
-    clickhouse: ClickHouseClient,
-    postgres: PostgreSQLClient,
-    logger: Logger,
-    metrics: MetricsCollector
-  ) {
-    this.redis = redis;
-    this.clickhouse = clickhouse;
-    this.postgres = postgres;
+  constructor(logger: Logger, metrics: MetricsCollector) {
     this.logger = logger;
     this.metrics = metrics;
+  }
+
+  /**
+   * Helper to parse Redis Stream fields array into an object
+   */
+  private parseStreamFields(fields: string[]): Record<string, string> {
+    const obj: Record<string, string> = {};
+    for (let i = 0; i < fields.length; i += 2) {
+      obj[fields[i]] = fields[i + 1];
+    }
+    return obj;
   }
 
   /**
@@ -432,6 +426,105 @@ export class DataExportService {
         status: "failed",
         error: (error as Error).message,
       };
+    }
+  }
+  /**
+   * Get the status of an export job by jobId.
+   * Returns status, progress, and metadata if available.
+   */
+
+  async getExportStatus(jobId: string): Promise<ExportResult> {
+    try {
+      const redis = RedisClient.getInstance();
+      // Read latest status from Redis Stream
+      const streamKey = `export:stream:${jobId}`;
+      const messages = await redis.xrevrange(streamKey, "+", "-", "COUNT", 1);
+      if (!messages || messages.length === 0 || !messages[0][1]) {
+        return { exportId: jobId, status: "pending" };
+      }
+      const fieldsObj = this.parseStreamFields(messages[0][1]);
+      const status = fieldsObj.status
+        ? JSON.parse(fieldsObj.status)
+        : { exportId: jobId, status: "pending" };
+      return status as ExportResult;
+    } catch (error) {
+      this.logger.error("Failed to get export status", error as Error, {
+        jobId,
+      });
+      return {
+        exportId: jobId,
+        status: "failed",
+        error: (error as Error).message,
+      };
+    }
+  }
+
+  /**
+   * Cancel an export job by jobId.
+   * Marks job as cancelled in Redis.
+   */
+  /**
+   * Cancel an export job by adding a cancellation event to Redis Stream.
+   */
+  async cancelExport(
+    jobId: string
+  ): Promise<{ success: boolean; exportId: string }> {
+    try {
+      const redis = RedisClient.getInstance();
+      const streamKey = `export:stream:${jobId}`;
+      await redis.xadd(
+        streamKey,
+        "*",
+        "status",
+        JSON.stringify({
+          exportId: jobId,
+          status: "failed",
+          error: "Cancelled by user",
+        })
+      );
+      this.logger.info("Export job cancelled via stream", { jobId });
+      return { success: true, exportId: jobId };
+    } catch (error) {
+      this.logger.error("Failed to cancel export", error as Error, { jobId });
+      return { success: false, exportId: jobId };
+    }
+  }
+
+  /**
+   * Get export history for a user or all users.
+   * Returns a paginated list of export jobs.
+   */
+
+  async getExportHistory(query: {
+    userId?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ExportResult[]> {
+    try {
+      const redis = RedisClient.getInstance();
+      // For demo: scan all export streams (in production, index job IDs)
+      const keys = await redis.keys("export:stream:*");
+      const jobs: ExportResult[] = [];
+      const start = query.offset || 0;
+      const end = start + (query.limit || 20);
+      for (const key of keys.slice(start, end)) {
+        const messages = await redis.xrevrange(key, "+", "-", "COUNT", 1);
+        if (messages && messages.length > 0 && messages[0][1]) {
+          const fieldsObj = this.parseStreamFields(messages[0][1]);
+          if (fieldsObj.status) {
+            const job = JSON.parse(fieldsObj.status) as ExportResult;
+            if (!query.userId || job.exportId.startsWith(query.userId)) {
+              jobs.push(job);
+            }
+          }
+        }
+      }
+      return jobs;
+    } catch (error) {
+      this.logger.error("Failed to get export history", error as Error, {
+        query,
+      });
+      return [];
     }
   }
 }

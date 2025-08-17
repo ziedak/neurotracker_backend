@@ -1,4 +1,4 @@
-import { PostgreSQLClient } from "../src/postgresql";
+import { PostgreSQLClient } from "../src/postgress/pgClient";
 
 async function main() {
   const prisma = PostgreSQLClient.getInstance();

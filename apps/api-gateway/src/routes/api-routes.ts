@@ -1,15 +1,15 @@
 import { Elysia } from "elysia";
 import { Logger } from "@libs/monitoring";
 import { AppError } from "@libs/utils";
-import { ServiceRegistry, proxyToService } from "../service-registry";
+import { proxyToService } from "../proxyToService";
 import { handleError } from "../types";
-
-const logger = new Logger("api-gateway");
+import type { EndpointRegistryService } from "../services/EndpointRegistryService";
 
 export function setupApiRoutes(
   app: Elysia,
-  serviceRegistry: ServiceRegistry
-): any {
+  endpointRegistryService: EndpointRegistryService,
+  logger: Logger
+): Elysia {
   return app
     .all("/api/events/*", async (context) => {
       try {
@@ -17,14 +17,15 @@ export function setupApiRoutes(
         const result = await proxyToService(
           "event-pipeline",
           context.request,
-          serviceRegistry,
-          authHeader
+          endpointRegistryService,
+          logger,
+          { authHeader }
         );
         context.set.status = result.status;
         return result.data;
       } catch (error) {
         const err = handleError(error);
-        logger.error("Events proxy error", err);
+        logger.error("Events proxy error", err as Error);
         if (error instanceof AppError) {
           context.set.status = error.statusCode;
           return { error: err.message };
@@ -40,14 +41,15 @@ export function setupApiRoutes(
         const result = await proxyToService(
           "ai-engine",
           context.request,
-          serviceRegistry,
-          authHeader
+          endpointRegistryService,
+          logger,
+          { authHeader }
         );
         context.set.status = result.status;
         return result.data;
       } catch (error) {
         const err = handleError(error);
-        logger.error("AI proxy error", err);
+        logger.error("AI proxy error", err as Error);
         if (error instanceof AppError) {
           context.set.status = error.statusCode;
           return { error: err.message };
@@ -63,14 +65,15 @@ export function setupApiRoutes(
         const result = await proxyToService(
           "intervention-engine",
           context.request,
-          serviceRegistry,
-          authHeader
+          endpointRegistryService,
+          logger,
+          { authHeader }
         );
         context.set.status = result.status;
         return result.data;
       } catch (error) {
         const err = handleError(error);
-        logger.error("Interventions proxy error", err);
+        logger.error("Interventions proxy error", err as Error);
         if (error instanceof AppError) {
           context.set.status = error.statusCode;
           return { error: err.message };
@@ -86,14 +89,15 @@ export function setupApiRoutes(
         const result = await proxyToService(
           "data-platform",
           context.request,
-          serviceRegistry,
-          authHeader
+          endpointRegistryService,
+          logger,
+          { authHeader }
         );
         context.set.status = result.status;
         return result.data;
       } catch (error) {
         const err = handleError(error);
-        logger.error("Data proxy error", err);
+        logger.error("Data proxy error", err as Error);
         if (error instanceof AppError) {
           context.set.status = error.statusCode;
           return { error: err.message };

@@ -3,96 +3,442 @@
 
 generator client {
   provider = "prisma-client-js"
-  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  url      = "postgresql://postgres:TEST@localhost:5432/neurotracker?schema=public"
+  // env("DATABASE_URL")
+}
+
+// generator repository {
+//   provider = "prisma-repository-generator"
+//   // Add any specific options for the generator here
+// }
+
+// generator zod {
+//   provider = "prisma-zod-generator"
+// }
+
+generator repo {
+  provider = "prisma-repo"
+  output   = "../src/repository"
+  query    = true
+  warn     = true
+  info     = true
+  error    = true
+}
+
+enum StoreStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+model Store {
+  id             String            @id @default(cuid())
+  name           String            @db.VarChar(255)
+  url            String            @unique @db.VarChar(255)
+  ownerId        String
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  deletedAt      DateTime?
+  isDeleted      Boolean           @default(false)
+  status         StoreStatus       @default(ACTIVE)
+  settings       StoreSettings?
+  users          User[]
+  carts          Cart[]
+  products       Product[]
+  sessions       UserSession[]
+  recoveryEvents RecoveryEvent[]
+  webhooks       Webhook[]
+  reports        Report[]
+  activities     SessionActivity[]
+
+  @@index([ownerId])
+  @@map("stores")
+}
+
+enum EventType {
+  LOGIN
+  LOGOUT
+  CART_CREATED
+  CART_UPDATED
+  CART_ABANDONED
+  ORDER_PLACED
+  ORDER_COMPLETED
+  FEATURE_COMPUTED
+  EXPORT_REQUESTED
+  QUALITY_ALERT
+  RECONCILIATION_RUN
+  OTHER
+}
+
+enum UserRoleType {
+  ADMIN
+  ANALYST
+  VIEWER
+  USER
+}
+
+model StoreSettings {
+  id        String   @id @default(cuid())
+  storeId   String   @unique
+  config    Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@map("store_settings")
+}
+
+model RecoveryEvent {
+  id        String         @id @default(cuid())
+  cartId    String
+  storeId   String
+  userId    String?
+  sessionId String?
+  eventType String         @db.VarChar(128)
+  status    RecoveryStatus @default(PENDING)
+  outcome   String?
+  metadata  Json?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  cart    Cart         @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  store   Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  user    User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  session UserSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([eventType])
+  @@index([status])
+  @@map("recovery_events")
+}
+
+enum RecoveryStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  IGNORED
+}
+
+model Report {
+  id          String       @id @default(cuid())
+  storeId     String
+  type        String       @db.VarChar(64)
+  status      ReportStatus @default(PENDING)
+  data        Json?
+  url         String?
+  generatedAt DateTime?
+  error       String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([type])
+  @@index([status])
+  @@map("reports")
+}
+
+enum ReportStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+model SessionActivity {
+  id        String   @id @default(cuid())
+  sessionId String
+  storeId   String
+  activity  String   @db.VarChar(128)
+  timestamp DateTime @default(now())
+  metadata  Json?
+
+  session UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  store   Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  User    User[]
+
+  @@index([activity])
+  @@map("session_activities")
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  name        String   @unique @db.VarChar(64)
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("permissions")
+}
+
+model Webhook {
+  id            String    @id @default(cuid())
+  storeId       String
+  url           String    @db.VarChar(255)
+  eventType     String    @db.VarChar(128)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastTriggered DateTime?
+  metadata      Json?
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([eventType])
+  @@map("webhooks")
 }
 
 // Example models for cart recovery system
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String     @id @default(cuid())
+  email          String     @unique @db.VarChar(255)
+  password       String     @db.VarChar(255)
+  name           String?    @db.VarChar(255)
+  status         UserStatus @default(ACTIVE)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  deletedAt      DateTime?
+  isDeleted      Boolean    @default(false)
+  createdBy      String?
+  updatedBy      String?
+  organizationId String?
+  auditLog       Json? // Audit field for compliance
 
   // Relations
-  sessions UserSession[]
-  events   UserEvent[]
-  carts    Cart[]
+  sessions       UserSession[]
+  events         UserEvent[]
+  carts          Cart[]
+  roles          UserRole[]
+  notifications  Notification[]
+  orders         Order[]
+  storeId        String?
+  store          Store?            @relation(fields: [storeId], references: [id])
+  recoveryEvents RecoveryEvent[]
+  activities     SessionActivity[]
 
+  @@index([email])
+  @@index([status])
   @@map("users")
 }
 
+enum UserStatus {
+  ACTIVE
+  BANNED
+  INACTIVE
+  DELETED
+}
+
+model UserRole {
+  id         String    @id @default(cuid())
+  userId     String
+  role       String    @db.VarChar(64)
+  assignedAt DateTime  @default(now())
+  revokedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([role])
+  @@map("user_roles")
+}
+
 model UserSession {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
-  sessionId String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  sessionId String    @unique @db.VarChar(128)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   expiresAt DateTime?
+  ipAddress String?
+  userAgent String?
+  metadata  Json?
+  isActive  Boolean   @default(true)
+  endedAt   DateTime?
 
   // Relations
-  user   User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  events UserEvent[]
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events          UserEvent[]
+  logs            SessionLog[]
+  Store           Store[]
+  RecoveryEvent   RecoveryEvent[]
+  SessionActivity SessionActivity[]
 
+  @@index([sessionId])
   @@map("user_sessions")
 }
 
+model SessionLog {
+  id        String   @id @default(cuid())
+  sessionId String
+  event     String   @db.VarChar(128)
+  timestamp DateTime @default(now())
+  metadata  Json?
+
+  session UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([event])
+  @@map("session_logs")
+}
+
 model UserEvent {
-  id          String   @id @default(cuid())
-  userId      String
-  sessionId   String?
-  eventType   String
-  timestamp   DateTime @default(now())
-  metadata    Json?
-  pageUrl     String?
-  userAgent   String?
-  ipAddress   String?
+  id        String   @id @default(cuid())
+  userId    String
+  sessionId String?
+  eventType String   @db.VarChar(128)
+  timestamp DateTime @default(now())
+  metadata  Json?
+  pageUrl   String?
+  userAgent String?
+  ipAddress String?
+  isError   Boolean  @default(false)
+  errorMsg  String?
 
   // Relations
   user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   session UserSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
 
+  @@index([eventType])
   @@map("user_events")
 }
 
 model Product {
-  id          String   @id @default(cuid())
-  name        String
+  id          String        @id @default(cuid())
+  name        String        @db.VarChar(255)
   description String?
   price       Decimal
-  currency    String   @default("USD")
-  sku         String?  @unique
+  currency    String        @default("USD")
+  sku         String?       @unique @db.VarChar(128)
   imageUrl    String?
   category    String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  status      ProductStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  deletedAt   DateTime?
+  isDeleted   Boolean       @default(false)
+  createdBy   String?
+  updatedBy   String?
+  metadata    Json?
 
   // Relations
-  cartItems CartItem[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+  Store      Store[]
 
+  @@index([sku])
   @@map("products")
 }
 
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+  DELETED
+}
+
 model Cart {
-  id        String   @id @default(cuid())
+  id        String     @id @default(cuid())
   userId    String
   status    CartStatus @default(ACTIVE)
   total     Decimal    @default(0)
   currency  String     @default("USD")
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
+  deletedAt DateTime?
+  isDeleted Boolean    @default(false)
+  archived  Boolean    @default(false)
+  metadata  Json?
+  auditLog  Json? // Audit field for compliance
 
   // Relations
-  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items CartItem[]
-  features Feature[]
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items         CartItem[]
+  features      Feature[]
+  orders        Order[]
+  Store         Store[]
+  RecoveryEvent RecoveryEvent[]
 
+  @@index([status])
+  @@index([userId])
   @@map("carts")
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  cartId      String
+  userId      String
+  status      OrderStatus @default(PENDING)
+  total       Decimal
+  currency    String      @default("USD")
+  paymentId   String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  completedAt DateTime?
+  cancelledAt DateTime?
+  metadata    Json?
+
+  // Relations
+  cart     Cart        @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items    OrderItem[]
+  payments Payment[]
+
+  @@index([status])
+  @@map("orders")
+}
+
+enum OrderStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+model OrderItem {
+  id        String   @id @default(cuid())
+  orderId   String
+  productId String
+  quantity  Int      @default(1)
+  price     Decimal
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, productId])
+  @@map("order_items")
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  orderId       String
+  amount        Decimal
+  currency      String        @default("USD")
+  status        PaymentStatus @default(PENDING)
+  provider      String?
+  transactionId String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  completedAt   DateTime?
+  failedAt      DateTime?
+  metadata      Json?
+
+  // Relations
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("payments")
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
 }
 
 model CartItem {
@@ -103,6 +449,7 @@ model CartItem {
   price     Decimal
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  metadata  Json?
 
   // Relations
   cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
@@ -112,20 +459,51 @@ model CartItem {
   @@map("cart_items")
 }
 
-
 model Feature {
-  id        String   @id @default(cuid())
-  cartId    String
-  name      String
-  value     Json
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  cartId      String
+  name        String   @db.VarChar(128)
+  value       Json
+  version     String   @default("1.0.0") @db.VarChar(32)
+  description String?
+  ttl         Int? // Time-to-live in seconds (optional)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  metadata    Json?
 
   // Relations
-  cart      Cart?    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  cart Cart? @relation(fields: [cartId], references: [id], onDelete: Cascade)
 
   @@unique([cartId, name], name: "cartId_name")
+  @@index([version])
   @@map("features")
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String    @db.VarChar(64)
+  message   String
+  read      Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+  metadata  Json?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([type])
+  @@map("notifications")
+}
+
+model Config {
+  id          String   @id @default(cuid())
+  key         String   @unique @db.VarChar(128)
+  value       Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  description String?
+
+  @@map("config")
 }
 
 enum CartStatus {
@@ -133,4 +511,19 @@ enum CartStatus {
   ABANDONED
   CONVERTED
   EXPIRED
+}
+
+model QualityValidation {
+  id        String   @id @default(uuid())
+  table     String
+  check     String
+  status    String // e.g., "passed", "failed"
+  timestamp DateTime @default(now())
+}
+
+model QualityAnomaly {
+  id        String   @id @default(uuid())
+  type      String // e.g., "outlier", "missing", "duplicate"
+  details   Json?
+  timestamp DateTime @default(now())
 }

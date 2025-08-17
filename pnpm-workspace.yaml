@@ -1,3 +1,10 @@
 packages:
-  - "libs/*"
-  - "apps/*"
+  - libs/*
+  - apps/*
+
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - bcrypt
+  - esbuild
+  - prisma

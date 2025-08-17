@@ -2,7 +2,11 @@
 // Implements real-time and batch feature management endpoints
 // Integrates Redis, ClickHouse, PostgreSQL
 
-import { RedisClient ,ClickHouseClient,PostgreSQLClient} from "@libs/database";
+import {
+  RedisClient,
+  ClickHouseClient,
+  PostgreSQLClient,
+} from "@libs/database";
 
 // TODO: Add DI and service registration
 
@@ -11,7 +15,7 @@ export class FeatureStoreService {
   async generateReport(params: any) {
     try {
       const clickhouseClient = this.clickhouse
-        .constructor as typeof import("../../../libs/database/src/clickhouse").ClickHouseClient;
+        .constructor as typeof import("@libs/database").ClickHouseClient;
       const result = await clickhouseClient.execute(
         "SELECT eventType, count(*) as count FROM events GROUP BY eventType"
       );
@@ -34,7 +38,7 @@ export class FeatureStoreService {
   async exportEvents() {
     try {
       const clickhouseClient = this.clickhouse
-        .constructor as typeof import("../../../libs/database/src/clickhouse").ClickHouseClient;
+        .constructor as typeof import("@libs/database").ClickHouseClient;
       const result = await clickhouseClient.execute(
         "SELECT * FROM events LIMIT 1000"
       );
@@ -48,7 +52,7 @@ export class FeatureStoreService {
   async exportFeatures() {
     try {
       const clickhouseClient = this.clickhouse
-        .constructor as typeof import("../../../libs/database/src/clickhouse").ClickHouseClient;
+        .constructor as typeof import("@libs/database").ClickHouseClient;
       const result = await clickhouseClient.execute(
         "SELECT * FROM features LIMIT 1000"
       );
@@ -62,7 +66,7 @@ export class FeatureStoreService {
   async exportPredictions() {
     try {
       const clickhouseClient = this.clickhouse
-        .constructor as typeof import("../../../libs/database/src/clickhouse").ClickHouseClient;
+        .constructor as typeof import("@libs/database").ClickHouseClient;
       const result = await clickhouseClient.execute(
         "SELECT * FROM predictions LIMIT 1000"
       );
@@ -81,7 +85,7 @@ export class FeatureStoreService {
   async forgetUser(userId: string) {
     try {
       const pgClient = this.postgres
-        .constructor as typeof import("../../../libs/database/src/postgresql").PostgreSQLClient;
+        .constructor as typeof import("@libs/database").PostgreSQLClient;
       const prisma = pgClient.getInstance();
       await prisma.user.delete({ where: { id: userId } });
       return { userId, status: "forgotten" };
@@ -94,7 +98,7 @@ export class FeatureStoreService {
   async exportUserData(userId: string) {
     try {
       const pgClient = this.postgres
-        .constructor as typeof import("../../../libs/database/src/postgresql").PostgreSQLClient;
+        .constructor as typeof import("@libs/database").PostgreSQLClient;
       const prisma = pgClient.getInstance();
       const user = await prisma.user.findUnique({ where: { id: userId } });
       return { userId, data: user };
@@ -136,7 +140,7 @@ export class FeatureStoreService {
       typeof params?.threshold === "number" ? params.threshold : 3; // z-score threshold
     try {
       const clickhouseClient = this.clickhouse
-        .constructor as typeof import("../../../libs/database/src/clickhouse").ClickHouseClient;
+        .constructor as typeof import("@libs/database").ClickHouseClient;
       let query = "";
       if (type === "features") {
         query = `SELECT cartId, name, value, (value - avgValue) / stddev AS zscore FROM (
@@ -179,7 +183,7 @@ export class FeatureStoreService {
     // Try to fetch features from Redis first
     try {
       const redisClient = this.redis
-        .constructor as typeof import("../../../libs/database/src/redis").RedisClient;
+        .constructor as typeof import("@libs/database/src/redisClient").RedisClient;
       await redisClient.connect();
       const features = await redisClient
         .getInstance()
@@ -193,7 +197,7 @@ export class FeatureStoreService {
     // Fallback to ClickHouse if not found in Redis
     try {
       const clickhouseClient = this.clickhouse
-        .constructor as typeof import("../../../libs/database/src/clickhouse").ClickHouseClient;
+        .constructor as typeof import("@libs/database").ClickHouseClient;
       const query = `SELECT * FROM features WHERE cartId = '{cartId}' LIMIT 1`;
       const result = await clickhouseClient.execute(query, { cartId });
       if (result && result.length > 0) {
@@ -205,7 +209,7 @@ export class FeatureStoreService {
     // Fallback to PostgreSQL if not found in ClickHouse
     try {
       const pgClient = this.postgres
-        .constructor as typeof import("../../../libs/database/src/postgresql").PostgreSQLClient;
+        .constructor as typeof import("@libs/database").PostgreSQLClient;
       const prisma = pgClient.getInstance();
       // Assumes a Prisma model 'feature' with cartId field
       const feature = await prisma.feature.findFirst({ where: { cartId } });
@@ -228,7 +232,7 @@ export class FeatureStoreService {
     // Store in Redis (cache)
     try {
       const redisClient = this.redis
-        .constructor as typeof import("../../../libs/database/src/redis").RedisClient;
+        .constructor as typeof import("@libs/database/src/redisClient").RedisClient;
       await redisClient.connect();
       await redisClient
         .getInstance()
@@ -239,7 +243,7 @@ export class FeatureStoreService {
     // Store in ClickHouse (analytics)
     try {
       const clickhouseClient = this.clickhouse
-        .constructor as typeof import("../../../libs/database/src/clickhouse").ClickHouseClient;
+        .constructor as typeof import("@libs/database").ClickHouseClient;
       await clickhouseClient.insert("features", [{ cartId, ...features }]);
     } catch (error) {
       console.error("ClickHouse store failed:", error);
@@ -247,7 +251,7 @@ export class FeatureStoreService {
     // Store in PostgreSQL (Feature model)
     try {
       const pgClient = this.postgres
-        .constructor as typeof import("../../../libs/database/src/postgresql").PostgreSQLClient;
+        .constructor as typeof import("@libs/database").PostgreSQLClient;
       const prisma = pgClient.getInstance();
       await prisma.feature.create({
         data: {
@@ -267,7 +271,7 @@ export class FeatureStoreService {
     // Fetch feature definitions (schema) from PostgreSQL
     try {
       const pgClient = this.postgres
-        .constructor as typeof import("../../../libs/database/src/postgresql").PostgreSQLClient;
+        .constructor as typeof import("@libs/database").PostgreSQLClient;
       const prisma = pgClient.getInstance();
       // Get all unique feature names and their latest value types
       const features = await prisma.feature.findMany({
@@ -291,7 +295,7 @@ export class FeatureStoreService {
     // Batch feature computation using ClickHouse
     try {
       const clickhouseClient = this.clickhouse
-        .constructor as typeof import("../../../libs/database/src/clickhouse").ClickHouseClient;
+        .constructor as typeof import("@libs/database").ClickHouseClient;
       // Example: batchPayload contains array of cartIds
       const cartIds = batchPayload.cartIds || [];
       if (!Array.isArray(cartIds) || cartIds.length === 0) return [];

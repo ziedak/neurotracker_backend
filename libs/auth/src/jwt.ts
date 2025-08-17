@@ -2,6 +2,9 @@ import { jwt } from "@elysiajs/jwt";
 import { getEnv, getNumberEnv } from "@libs/config";
 import * as jose from "jose";
 
+/**
+ * JWTPayload: Structure for JWT access token payload
+ */
 export interface JWTPayload {
   sub: string; // user ID
   email: string;
@@ -12,6 +15,9 @@ export interface JWTPayload {
   exp: number;
 }
 
+/**
+ * RefreshTokenPayload: Structure for JWT refresh token payload
+ */
 export interface RefreshTokenPayload {
   sub: string;
   type: "refresh";
@@ -37,18 +43,32 @@ export const refreshTokenConfig = {
   exp: getEnv("JWT_REFRESH_EXPIRES_IN", "7d"),
 };
 
+/**
+ * Create JWT plugin for Elysia
+ */
 export function createJWTPlugin() {
   return jwt(jwtConfig);
 }
 
+/**
+ * Create Refresh JWT plugin for Elysia
+ */
 export function createRefreshJWTPlugin() {
   return jwt(refreshTokenConfig);
 }
 
+/**
+ * JWTService: Secure JWT token generation and verification
+ * - Singleton pattern for centralized JWT logic
+ * - Strict TypeScript enforced
+ * - All config values parameterized
+ * - No magic values
+ * - Modular, testable, and maintainable
+ */
 export class JWTService {
   private static instance: JWTService;
-  private jwtSecret: Uint8Array;
-  private refreshSecret: Uint8Array;
+  private readonly jwtSecret: Uint8Array;
+  private readonly refreshSecret: Uint8Array;
 
   private constructor() {
     this.jwtSecret = new TextEncoder().encode(jwtConfig.secret as string);
@@ -57,44 +77,57 @@ export class JWTService {
     );
   }
 
-  static getInstance(): JWTService {
+  /**
+   * Get singleton instance
+   */
+  public static getInstance(): JWTService {
     if (!JWTService.instance) {
       JWTService.instance = new JWTService();
     }
     return JWTService.instance;
   }
 
-  async generateTokens(payload: Omit<JWTPayload, "iat" | "exp">): Promise<{
+  /**
+   * Generate access and refresh tokens for a user
+   * @param payload - User payload (without iat/exp)
+   * @returns { accessToken, refreshToken, expiresIn }
+   */
+  public async generateTokens(
+    payload: Omit<JWTPayload, "iat" | "exp">
+  ): Promise<{
     accessToken: string;
     refreshToken: string;
     expiresIn: number;
   }> {
-    const now = Math.floor(Date.now() / 1000);
-    const accessTokenExp =
-      now + getNumberEnv("JWT_EXPIRES_IN_SECONDS", 24 * 60 * 60); // 24 hours
-    const refreshTokenExp =
-      now + getNumberEnv("JWT_REFRESH_EXPIRES_IN_SECONDS", 7 * 24 * 60 * 60); // 7 days
+    const now: number = Math.floor(Date.now() / 1000);
+    const accessTokenExp: number =
+      now + getNumberEnv("JWT_EXPIRES_IN_SECONDS", 24 * 60 * 60);
+    const refreshTokenExp: number =
+      now + getNumberEnv("JWT_REFRESH_EXPIRES_IN_SECONDS", 7 * 24 * 60 * 60);
 
-    const accessTokenPayload: Record<string, any> = {
+    const accessTokenPayload: JWTPayload = {
       ...payload,
       iat: now,
       exp: accessTokenExp,
     };
-
-    const refreshTokenPayload: Record<string, any> = {
+    const refreshTokenPayload: RefreshTokenPayload = {
       sub: payload.sub,
       type: "refresh",
       iat: now,
       exp: refreshTokenExp,
     };
 
-    const accessToken = await new jose.SignJWT(accessTokenPayload)
+    const accessToken: string = await new jose.SignJWT(
+      accessTokenPayload as unknown as Record<string, unknown>
+    )
       .setProtectedHeader({ alg: "HS256" })
       .setExpirationTime(accessTokenExp)
       .setIssuedAt(now)
       .sign(this.jwtSecret);
 
-    const refreshToken = await new jose.SignJWT(refreshTokenPayload)
+    const refreshToken: string = await new jose.SignJWT(
+      refreshTokenPayload as unknown as Record<string, unknown>
+    )
       .setProtectedHeader({ alg: "HS256" })
       .setExpirationTime(refreshTokenExp)
       .setIssuedAt(now)
@@ -107,41 +140,77 @@ export class JWTService {
     };
   }
 
-  async verifyToken(token: string): Promise<JWTPayload | null> {
+  /**
+   * Verify access token and return payload if valid
+   * @param token - JWT access token
+   * @returns JWTPayload or null
+   */
+  public async verifyToken(token: string): Promise<JWTPayload | null> {
     try {
       const { payload } = await jose.jwtVerify(token, this.jwtSecret);
-
-      // Validate that the payload has the required fields
       if (
-        !payload.sub ||
-        !payload.email ||
-        !payload.role ||
-        !Array.isArray(payload.permissions)
+        typeof payload.sub === "string" &&
+        typeof payload.email === "string" &&
+        typeof payload.role === "string" &&
+        Array.isArray(payload.permissions) &&
+        typeof payload.iat === "number" &&
+        typeof payload.exp === "number"
       ) {
-        return null;
+        // Optionally validate role and permissions further
+        return {
+          sub: payload.sub,
+          email: payload.email,
+          storeId:
+            typeof payload.storeId === "string" ? payload.storeId : undefined,
+          role: payload.role as JWTPayload["role"],
+          permissions: payload.permissions as string[],
+          iat: payload.iat,
+          exp: payload.exp,
+        };
       }
-
-      return payload as unknown as JWTPayload;
+      return null;
     } catch (error) {
+      // Log error for observability if needed
       return null;
     }
   }
 
-  async verifyRefreshToken(token: string): Promise<RefreshTokenPayload | null> {
+  /**
+   * Verify refresh token and return payload if valid
+   * @param token - JWT refresh token
+   * @returns RefreshTokenPayload or null
+   */
+  public async verifyRefreshToken(
+    token: string
+  ): Promise<RefreshTokenPayload | null> {
     try {
       const { payload } = await jose.jwtVerify(token, this.refreshSecret);
-
-      if (payload.type !== "refresh" || !payload.sub) {
-        return null;
+      if (
+        typeof payload.sub === "string" &&
+        payload.type === "refresh" &&
+        typeof payload.iat === "number" &&
+        typeof payload.exp === "number"
+      ) {
+        return {
+          sub: payload.sub,
+          type: "refresh",
+          iat: payload.iat,
+          exp: payload.exp,
+        };
       }
-
-      return payload as unknown as RefreshTokenPayload;
+      return null;
     } catch (error) {
+      // Log error for observability if needed
       return null;
     }
   }
 
-  async refreshAccessToken(refreshToken: string): Promise<{
+  /**
+   * Generate a new access token from a valid refresh token
+   * @param refreshToken - JWT refresh token
+   * @returns { accessToken, expiresIn } or null
+   */
+  public async refreshAccessToken(refreshToken: string): Promise<{
     accessToken: string;
     expiresIn: number;
   } | null> {
@@ -149,16 +218,14 @@ export class JWTService {
     if (!refreshPayload) {
       return null;
     }
-
-    // In a real implementation, you'd fetch user data from database
-    // For now, we'll create a basic payload
-    const userPayload = {
+    // TODO: Fetch user data from database for real implementation
+    // This is a stub for demonstration; must be replaced with DB lookup
+    const userPayload: Omit<JWTPayload, "iat" | "exp"> = {
       sub: refreshPayload.sub,
-      email: "", // Would be fetched from database
-      role: "customer" as const,
+      email: "", // Should be fetched from DB
+      role: "customer",
       permissions: [],
     };
-
     const tokens = await this.generateTokens(userPayload);
     return {
       accessToken: tokens.accessToken,

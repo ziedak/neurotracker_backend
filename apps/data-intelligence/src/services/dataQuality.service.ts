@@ -7,6 +7,7 @@ import {
 } from "@libs/database";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { performance } from "perf_hooks";
+import { Parser as CsvParser } from "json2csv";
 
 export interface QualityCheck {
   name: string;
@@ -47,86 +48,81 @@ export interface AnomalyDetectionResult {
 
 /**
  * Data Quality & GDPR Compliance Service
- * Handles data quality monitoring, validation, and GDPR compliance
+ * Handles data quality monitoring, validation, anomaly detection, and GDPR compliance
  * Uses secure database utilities to prevent SQL injection
+ * Strict TypeScript, Clean Architecture, SOLID, DRY, KISS, YAGNI principles
  */
 export class DataQualityService {
-  private readonly clickhouse: ClickHouseClient;
-  private readonly postgres: PostgreSQLClient;
-  private readonly redis: RedisClient;
   private readonly logger: Logger;
   private readonly metrics: MetricsCollector;
 
-  constructor(
-    clickhouse: ClickHouseClient,
-    postgres: PostgreSQLClient,
-    redis: RedisClient,
-    logger: Logger,
-    metrics: MetricsCollector
-  ) {
-    this.clickhouse = clickhouse;
-    this.postgres = postgres;
-    this.redis = redis;
+  // Magic values as constants
+  private static readonly FAILURE_SCORE_DECREMENT = 30;
+  private static readonly WARNING_SCORE_DECREMENT = 10;
+  private static readonly WARNING_SCORE_MIN = 70;
+  private static readonly ZSCORE_OUTLIER_THRESHOLD = 3;
+  private static readonly ANOMALY_LIMIT = 1000;
+  private static readonly RECENT_DAYS = 7;
+
+  constructor(logger: Logger, metrics: MetricsCollector) {
     this.logger = logger;
     this.metrics = metrics;
   }
 
-  // === Data Quality Methods ===
-
   /**
    * Get overall data quality status
+   * @returns {Promise<QualityReport>} Quality report with status, checks, and score
    */
   async getQualityStatus(): Promise<QualityReport> {
     const startTime = performance.now();
-
     try {
       this.logger.info("Generating data quality report");
-
-      const checks = await Promise.all([
+      const checks: QualityCheck[] = await Promise.all([
         this.checkDataCompleteness(),
         this.checkDataFreshness(),
         this.checkDataConsistency(),
         this.checkDataAccuracy(),
       ]);
-
       const failedChecks = checks.filter(
         (check) => check.status === "failed"
       ).length;
       const warningChecks = checks.filter(
         (check) => check.status === "warning"
       ).length;
-
       let overallStatus: "healthy" | "warning" | "critical";
       let score: number;
-
       if (failedChecks > 0) {
         overallStatus = "critical";
-        score = Math.max(0, 100 - failedChecks * 30 - warningChecks * 10);
+        score = Math.max(
+          0,
+          100 -
+            failedChecks * DataQualityService.FAILURE_SCORE_DECREMENT -
+            warningChecks * DataQualityService.WARNING_SCORE_DECREMENT
+        );
       } else if (warningChecks > 0) {
         overallStatus = "warning";
-        score = Math.max(70, 100 - warningChecks * 15);
+        score = Math.max(
+          DataQualityService.WARNING_SCORE_MIN,
+          100 - warningChecks * 15
+        );
       } else {
         overallStatus = "healthy";
         score = 100;
       }
-
       const report: QualityReport = {
         timestamp: new Date().toISOString(),
         overallStatus,
         checks,
         score,
       };
-
       const duration = performance.now() - startTime;
       await this.metrics.recordTimer("quality_check_duration", duration);
       await this.metrics.recordCounter("quality_checks_completed", 1);
-
       this.logger.info("Data quality report generated", {
         overallStatus,
         score,
         duration: Math.round(duration),
       });
-
       return report;
     } catch (error) {
       this.logger.error("Quality status check failed", error as Error);
@@ -137,6 +133,7 @@ export class DataQualityService {
 
   /**
    * Get quality alerts (failed or warning checks)
+   * @returns {Promise<{ alerts: QualityCheck[] }>} Alerts array
    */
   async getQualityAlerts(): Promise<{ alerts: QualityCheck[] }> {
     try {
@@ -144,16 +141,17 @@ export class DataQualityService {
       const alerts = qualityReport.checks.filter(
         (check) => check.status === "failed" || check.status === "warning"
       );
-
       return { alerts };
     } catch (error) {
       this.logger.error("Failed to get quality alerts", error as Error);
-      return { alerts: [] };
+      throw error;
     }
   }
 
   /**
    * Validate data quality for specific dataset
+   * @param request - validation request
+   * @returns {Promise<{ status: string; results: QualityCheck[] }>}
    */
   async validateQuality(request: {
     table: string;
@@ -161,15 +159,11 @@ export class DataQualityService {
     threshold?: number;
   }): Promise<{ status: string; results: QualityCheck[] }> {
     const { table, checks, threshold = 0.95 } = request;
-
     try {
       this.logger.info("Validating data quality", { table, checks });
-
       const results: QualityCheck[] = [];
-
       for (const checkType of checks) {
         let check: QualityCheck;
-
         switch (checkType) {
           case "completeness":
             check = await this.checkTableCompleteness(table, threshold);
@@ -187,14 +181,11 @@ export class DataQualityService {
               message: `Unknown check type: ${checkType}`,
             };
         }
-
         results.push(check);
       }
-
       const status = results.every((r) => r.status === "passed")
         ? "passed"
         : "failed";
-
       return { status, results };
     } catch (error) {
       this.logger.error("Data quality validation failed", error as Error, {
@@ -211,100 +202,94 @@ export class DataQualityService {
     type?: "features" | "events";
     threshold?: number;
   }): Promise<AnomalyDetectionResult> {
-    const { type = "features", threshold = 3 } = params;
+    const {
+      type = "features",
+      threshold = DataQualityService.ZSCORE_OUTLIER_THRESHOLD,
+    } = params;
 
     try {
       this.logger.info("Detecting anomalies", { type, threshold });
+      const recentWindowMs =
+        DataQualityService.RECENT_DAYS * 24 * 60 * 60 * 1000;
+      const anomalyLimit = DataQualityService.ANOMALY_LIMIT;
+      const dateFrom = new Date(Date.now() - recentWindowMs).toISOString();
 
-      // Use secure ClickHouse query builder
-      let query: string;
+      let subQuery: string;
+      let mainQuery: string;
       let queryParams: Record<string, any>;
 
       if (type === "features") {
-        const { query: buildQuery, params } =
-          ClickHouseQueryBuilder.buildSelectQuery("features", {
+        // Build subquery for window functions
+        const sub = ClickHouseQueryBuilder.buildWindowFunctionQuery(
+          "features",
+          {
             select: [
               "cartId",
               "name",
               "value",
-              "(value - avgValue) / nullIf(stddev, 0) AS zscore",
+              "avg(value) OVER (PARTITION BY name) AS avgValue",
+              "stddevPop(value) OVER (PARTITION BY name) AS stddev",
               "timestamp",
             ],
-            where: {
-              timestamp_from: new Date(
-                Date.now() - 7 * 24 * 60 * 60 * 1000
-              ).toISOString(),
-              zscore_threshold: { operator: ">", value: threshold },
-            },
-            orderBy: [{ field: "zscore", direction: "DESC" }],
-            limit: 1000,
+            where: { timestamp_from: dateFrom },
             allowedTables: ["features"],
             allowedFields: ["cartId", "name", "value", "timestamp"],
-          });
-
-        // Build subquery with window functions securely
-        query = `
-          SELECT 
-            cartId, 
-            name, 
-            value,
-            (value - avgValue) / nullIf(stddev, 0) AS zscore,
-            timestamp
-          FROM (
-            SELECT 
-              cartId, 
-              name, 
-              value,
-              avg(value) OVER (PARTITION BY name) AS avgValue,
-              stddevPop(value) OVER (PARTITION BY name) AS stddev,
-              timestamp
-            FROM features
-            WHERE timestamp >= {dateFrom:DateTime}
-              AND isFinite(value)
-          ) 
-          WHERE abs(zscore) > {threshold:Float64}
-          ORDER BY abs(zscore) DESC
-          LIMIT 1000
-        `;
-
+          }
+        );
+        subQuery = sub.query;
+        // Build main query as subquery
+        const main = ClickHouseQueryBuilder.buildSubquery(subQuery, {
+          select: [
+            "cartId",
+            "name",
+            "value",
+            "(value - avgValue) / nullIf(stddev, 0) AS zscore",
+            "timestamp",
+          ],
+          where: { threshold },
+          orderBy: [{ field: "zscore", direction: "DESC" }],
+          limit: anomalyLimit,
+        });
+        mainQuery = main.query + " WHERE abs(zscore) > {threshold:Float64}";
         queryParams = {
-          dateFrom: new Date(
-            Date.now() - 7 * 24 * 60 * 60 * 1000
-          ).toISOString(),
+          ...sub.params,
           threshold: Number(threshold),
+          limit: anomalyLimit,
         };
       } else {
-        query = `
-          SELECT 
-            eventType, 
-            value,
-            (value - avgValue) / nullIf(stddev, 0) AS zscore,
-            timestamp
-          FROM (
-            SELECT 
-              eventType, 
-              value,
-              avg(value) OVER (PARTITION BY eventType) AS avgValue,
-              stddevPop(value) OVER (PARTITION BY eventType) AS stddev,
-              timestamp
-            FROM events
-            WHERE timestamp >= {dateFrom:DateTime}
-              AND isFinite(value)
-          ) 
-          WHERE abs(zscore) > {threshold:Float64}
-          ORDER BY abs(zscore) DESC
-          LIMIT 1000
-        `;
-
+        const sub = ClickHouseQueryBuilder.buildWindowFunctionQuery("events", {
+          select: [
+            "eventType",
+            "value",
+            "avg(value) OVER (PARTITION BY eventType) AS avgValue",
+            "stddevPop(value) OVER (PARTITION BY eventType) AS stddev",
+            "timestamp",
+          ],
+          where: { timestamp_from: dateFrom },
+          allowedTables: ["events"],
+          allowedFields: ["eventType", "value", "timestamp"],
+        });
+        subQuery = sub.query;
+        const main = ClickHouseQueryBuilder.buildSubquery(subQuery, {
+          select: [
+            "eventType",
+            "value",
+            "(value - avgValue) / nullIf(stddev, 0) AS zscore",
+            "timestamp",
+          ],
+          where: { threshold },
+          orderBy: [{ field: "zscore", direction: "DESC" }],
+          limit: anomalyLimit,
+        });
+        mainQuery = main.query + " WHERE abs(zscore) > {threshold:Float64}";
         queryParams = {
-          dateFrom: new Date(
-            Date.now() - 7 * 24 * 60 * 60 * 1000
-          ).toISOString(),
+          ...sub.params,
           threshold: Number(threshold),
+          limit: anomalyLimit,
         };
       }
 
-      const results = await ClickHouseClient.execute(query, queryParams);
+      const results = await ClickHouseClient.execute(mainQuery, queryParams);
 
       const anomalies = results.map((row: any) => ({
         type: type === "features" ? `${row.cartId}:${row.name}` : row.eventType,
@@ -550,31 +535,179 @@ export class DataQualityService {
     }
   }
 
+  /**
+   * Generate quality report (JSON, CSV, PDF)
+   */
+  async generateReport({ format }: { format: string }): Promise<any> {
+    // Example: aggregate metrics from PostgreSQL
+    const prisma = PostgreSQLClient.getInstance();
+    const failedValidations = await prisma.qualityValidation.findMany({
+      where: { status: "failed" },
+      select: { id: true, table: true, check: true, timestamp: true },
+    });
+    const anomalyCounts = await prisma.qualityAnomaly.groupBy({
+      by: ["type"],
+      _count: { id: true },
+    });
+
+    // Aggregate results
+    const report = {
+      failedValidations,
+      anomalyCounts,
+      generatedAt: new Date().toISOString(),
+    };
+
+    if (format === "csv") {
+      const parser = new CsvParser();
+      return parser.parse(report.failedValidations);
+    }
+    if (format === "pdf") {
+      // TODO: Implement PDF generation (stub)
+      return Buffer.from("PDF generation not implemented");
+    }
+    return report;
+  }
+
+  /**
+   * Get historical quality trends (time series)
+   */
+  async getQualityTrends({
+    from,
+    to,
+  }: {
+    from?: string;
+    to?: string;
+  }): Promise<any[]> {
+    // Example: query ClickHouse for daily anomaly counts
+    const table = "quality_anomaly";
+    const dateField = "timestamp";
+    const interval = "day";
+    const { query, params } = ClickHouseQueryBuilder.buildTimeSeriesQuery(
+      table,
+      dateField,
+      interval,
+      {
+        select: ["type"],
+        dateFrom: from,
+        dateTo: to,
+        allowedTables: [table],
+        allowedFields: [dateField, "type"],
+      }
+    );
+    const rows = await ClickHouseClient.execute(query, params);
+    // Format: [{ time_interval, type, count }]
+    return rows;
+  }
+
+  /**
+   * Get aggregated quality metrics for dashboard API
+   * @param from - start date
+   * @param to - end date
+   * @returns {Promise<{ dailyFailures: any[]; anomalyTypes: any[] }>}
+   */
+  async getAggregatedQualityMetrics({
+    from,
+    to,
+  }: {
+    from?: string;
+    to?: string;
+  }): Promise<{ dailyFailures: any[]; anomalyTypes: any[] }> {
+    const prisma = PostgreSQLClient.getInstance();
+    const dailyFailures = await prisma.qualityValidation.groupBy({
+      by: ["timestamp"],
+      where: {
+        status: "failed",
+        timestamp: {
+          gte: from ? new Date(from) : undefined,
+          lte: to ? new Date(to) : undefined,
+        },
+      },
+      _count: { id: true },
+      orderBy: { timestamp: "asc" },
+    });
+    const anomalyTypes = await prisma.qualityAnomaly.groupBy({
+      by: ["type"],
+      where: {
+        timestamp: {
+          gte: from ? new Date(from) : undefined,
+          lte: to ? new Date(to) : undefined,
+        },
+      },
+      _count: { id: true },
+      orderBy: { _count: { id: "desc" } },
+    });
+    return { dailyFailures, anomalyTypes };
+  }
+  /**
+   * Detect outliers in daily failure rates using Z-score
+   * @param threshold - Z-score threshold
+   * @param from - start date
+   * @param to - end date
+   * @returns {Promise<Array<{ day: string; failures: number; zscore: number }>>}
+   */
+  async detectOutliers({
+    threshold = DataQualityService.ZSCORE_OUTLIER_THRESHOLD,
+    from,
+    to,
+  }: {
+    threshold?: number;
+    from?: string;
+    to?: string;
+  }): Promise<Array<{ day: string; failures: number; zscore: number }>> {
+    const prisma = PostgreSQLClient.getInstance();
+    const daily = await prisma.qualityValidation.groupBy({
+      by: ["timestamp"],
+      where: {
+        status: "failed",
+        timestamp: {
+          gte: from ? new Date(from) : undefined,
+          lte: to ? new Date(to) : undefined,
+        },
+      },
+      _count: { id: true },
+      orderBy: { timestamp: "asc" },
+    });
+    const counts = daily.map((d) => d._count.id);
+    const zScores = calculateZScores(counts);
+    const outliers = daily
+      .map((d, i) => ({
+        day:
+          typeof d.timestamp === "string"
+            ? d.timestamp
+            : d.timestamp instanceof Date
+            ? d.timestamp.toISOString()
+            : String(d.timestamp),
+        failures: d._count.id,
+        zscore: zScores[i]?.zscore ?? 0,
+      }))
+      .filter((d) => Math.abs(d.zscore) > threshold);
+    return outliers;
+  }
+
   // === Private Helper Methods ===
 
   private async checkDataCompleteness(): Promise<QualityCheck> {
     try {
-      // Use secure parameterized query
       const oneDayAgo = new Date(
         Date.now() - 24 * 60 * 60 * 1000
       ).toISOString();
-
-      const result = await ClickHouseClient.execute(
-        `
-        SELECT 
-          count(*) as total,
-          countIf(isNull(userId)) as nullUsers,
-          countIf(isNull(timestamp)) as nullTimestamps
-        FROM events 
-        WHERE timestamp >= {dateFrom:DateTime}
-      `,
-        { dateFrom: oneDayAgo }
+      const { query, params } = ClickHouseQueryBuilder.buildSelectQuery(
+        "events",
+        {
+          select: [
+            "count(*) as total",
+            "countIf(isNull(userId)) as nullUsers",
+            "countIf(isNull(timestamp)) as nullTimestamps",
+          ],
+          where: { timestamp_from: oneDayAgo },
+          allowedTables: ["events"],
+          allowedFields: ["userId", "timestamp"],
+        }
       );
-
+      const result = await ClickHouseClient.execute(query, params);
       const data = result[0];
       const completeness =
         1 - (data.nullUsers + data.nullTimestamps) / (data.total * 2);
-
       return {
         name: "Data Completeness",
         status:
@@ -598,16 +731,19 @@ export class DataQualityService {
 
   private async checkDataFreshness(): Promise<QualityCheck> {
     try {
-      const result = await ClickHouseClient.execute(`
-        SELECT max(timestamp) as latestTimestamp
-        FROM events
-      `);
-
+      const { query, params } = ClickHouseQueryBuilder.buildSelectQuery(
+        "events",
+        {
+          select: ["max(timestamp) as latestTimestamp"],
+          allowedTables: ["events"],
+          allowedFields: ["timestamp"],
+        }
+      );
+      const result = await ClickHouseClient.execute(query, params);
       const latestTimestamp = new Date(result[0].latestTimestamp);
       const now = new Date();
       const hoursSinceLatest =
         (now.getTime() - latestTimestamp.getTime()) / (1000 * 60 * 60);
-
       return {
         name: "Data Freshness",
         status:
@@ -647,17 +783,23 @@ export class DataQualityService {
 
       const consistencyResult = results[0];
       const isConsistent = consistencyResult.status === "passed";
-
+      let percentageDiff = 0;
+      if (
+        consistencyResult.details &&
+        typeof consistencyResult.details === "object" &&
+        "percentageDiff" in consistencyResult.details &&
+        typeof (consistencyResult.details as any).percentageDiff === "number"
+      ) {
+        percentageDiff = (consistencyResult.details as any).percentageDiff;
+      }
       return {
         name: "Cross-System Consistency",
         status: isConsistent ? "passed" : "failed",
         threshold: 95,
-        actualValue: isConsistent
-          ? 100
-          : 100 - (consistencyResult.details?.percentageDiff || 0),
+        actualValue: isConsistent ? 100 : 100 - percentageDiff,
         message: isConsistent
           ? "Data is consistent across systems"
-          : `Inconsistency detected: ${consistencyResult.details?.percentageDiff}% difference`,
+          : `Inconsistency detected: ${percentageDiff}% difference`,
       };
     } catch (error) {
       return {
@@ -670,23 +812,24 @@ export class DataQualityService {
 
   private async checkDataAccuracy(): Promise<QualityCheck> {
     try {
-      // Use secure query to check data accuracy
-      const result = await ClickHouseClient.execute(
-        `
-        SELECT 
-          count(*) as total,
-          countIf(value < 0 OR value > 1000000) as outliers
-        FROM features 
-        WHERE timestamp >= {dateFrom:DateTime}
-      `,
+      const oneDayAgo = new Date(
+        Date.now() - 24 * 60 * 60 * 1000
+      ).toISOString();
+      const { query, params } = ClickHouseQueryBuilder.buildSelectQuery(
+        "features",
         {
-          dateFrom: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+          select: [
+            "count(*) as total",
+            "countIf(value < 0 OR value > 1000000) as outliers",
+          ],
+          where: { timestamp_from: oneDayAgo },
+          allowedTables: ["features"],
+          allowedFields: ["value", "timestamp"],
         }
       );
-
+      const result = await ClickHouseClient.execute(query, params);
       const data = result[0];
       const accuracy = 1 - data.outliers / data.total;
-
       return {
         name: "Data Accuracy",
         status:
@@ -711,13 +854,13 @@ export class DataQualityService {
     threshold: number
   ): Promise<QualityCheck> {
     try {
-      const result = await ClickHouseClient.execute(`
-        SELECT count(*) as total, countIf(isNull(*)) as nullCount
-        FROM ${table}
-      `);
-
+      const { query, params } = ClickHouseQueryBuilder.buildSelectQuery(table, {
+        select: ["count(*) as total", "countIf(isNull(*)) as nullCount"],
+        allowedTables: [table],
+        allowedFields: ["*"],
+      });
+      const result = await ClickHouseClient.execute(query, params);
       const completeness = 1 - result[0].nullCount / result[0].total;
-
       return {
         name: `${table} Completeness`,
         status: completeness >= threshold ? "passed" : "failed",
@@ -751,22 +894,40 @@ export class DataQualityService {
         r.check.includes("uniqueness")
       );
 
+      let uniqueCount: number | undefined = undefined;
+      let errorMsg: string | undefined = undefined;
+      if (
+        uniquenessResult &&
+        uniquenessResult.details &&
+        typeof uniquenessResult.details === "object"
+      ) {
+        if (
+          "unique_count" in uniquenessResult.details &&
+          typeof (uniquenessResult.details as any).unique_count === "number"
+        ) {
+          uniqueCount = (uniquenessResult.details as any).unique_count;
+        }
+        if (
+          "error" in uniquenessResult.details &&
+          typeof (uniquenessResult.details as any).error === "string"
+        ) {
+          errorMsg = (uniquenessResult.details as any).error;
+        }
+      }
       if (uniquenessResult && uniquenessResult.status === "passed") {
         return {
           name: `${table} Uniqueness`,
           status: "passed",
           message: "All records have unique identifiers",
-          actualValue: uniquenessResult.details?.unique_count,
+          actualValue: uniqueCount,
           threshold,
         };
       } else {
         return {
           name: `${table} Uniqueness`,
           status: "failed",
-          message:
-            uniquenessResult?.details?.error ||
-            "Uniqueness constraint violation detected",
-          actualValue: uniquenessResult?.details?.unique_count,
+          message: errorMsg || "Uniqueness constraint violation detected",
+          actualValue: uniqueCount,
           threshold,
         };
       }
@@ -858,4 +1019,21 @@ export class DataQualityService {
       return null;
     }
   }
+}
+
+/**
+ * Utility: Calculate Z-scores for an array of numbers
+ */
+function calculateZScores(
+  values: number[]
+): { value: number; zscore: number }[] {
+  if (!values.length) return [];
+  const avg = values.reduce((a, b) => a + b, 0) / values.length;
+  const stddev = Math.sqrt(
+    values.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / values.length
+  );
+  return values.map((value) => ({
+    value,
+    zscore: stddev ? (value - avg) / stddev : 0,
+  }));
 }

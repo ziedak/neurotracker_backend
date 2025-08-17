@@ -1,6 +1,6 @@
 // Entry point for Data Intelligence Service
 import { createElysiaServer, DEFAULT_SERVER_CONFIG } from "@libs/elysia-server";
-import { setupFeatureRoutes } from "./routes";
+import { setupRoutes } from "./routes/routes";
 import { container } from "./container";
 
 async function startServer() {
@@ -19,7 +19,7 @@ async function startServer() {
         port: 4000,
         version: "1.0.0",
       },
-      (app) => setupFeatureRoutes(app, container)
+      (app) => setupRoutes(app, container)
     );
 
     // Graceful shutdown handling

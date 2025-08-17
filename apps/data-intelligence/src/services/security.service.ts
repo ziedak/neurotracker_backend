@@ -1,5 +1,6 @@
 import { RedisClient, PostgreSQLClient } from "@libs/database";
 import { Logger, MetricsCollector } from "@libs/monitoring";
+import { PasswordService, JWTService } from "@libs/auth";
 import { performance } from "perf_hooks";
 
 export interface AuthRequest {
@@ -38,6 +39,151 @@ export interface RateLimit {
  * Handles authentication, authorization, and rate limiting
  */
 export class SecurityService {
+  /**
+   * Register a new user
+   * Uses PostgreSQL (Prisma) for user storage, checks for duplicates, hashes password
+   */
+  async registerUser({
+    email,
+    password,
+    name,
+  }: {
+    email: string;
+    password: string;
+    name: string;
+  }) {
+    const prisma = PostgreSQLClient.getInstance();
+    try {
+      const existing = await prisma.user.findUnique({ where: { email } });
+      if (existing)
+        return { success: false, error: "Email already registered" };
+      const passwordValidation = PasswordService.validatePassword(password);
+      if (!passwordValidation.valid)
+        return { success: false, error: passwordValidation.errors.join(", ") };
+      const hashed = await PasswordService.hash(password);
+      const user = await prisma.user.create({
+        data: { email, password: hashed, name },
+      });
+      this.logger.info("User registered", { userId: user.id, email });
+      await this.metrics.recordCounter("user_registered");
+      return { success: true, userId: user.id };
+    } catch (error) {
+      this.logger.error("User registration failed", error as Error, { email });
+      return { success: false, error: (error as Error).message };
+    }
+  }
+
+  /**
+   * Initiate password reset (send token via email, store in Redis)
+   */
+  async initiatePasswordReset(email: string) {
+    const prisma = PostgreSQLClient.getInstance();
+    const redis = RedisClient.getInstance();
+    try {
+      const user = await prisma.user.findUnique({ where: { email } });
+      if (!user) return { success: false, error: "User not found" };
+      const token = `reset_${Date.now()}_${Math.random()
+        .toString(36)
+        .substr(2, 16)}`;
+      await redis.setex(`password_reset:${token}`, 3600, user.id.toString());
+      // TODO: Send email with token
+      this.logger.info("Password reset initiated", { userId: user.id, email });
+      await this.metrics.recordCounter("password_reset_initiated");
+      return { success: true };
+    } catch (error) {
+      this.logger.error("Password reset failed", error as Error, { email });
+      return { success: false, error: (error as Error).message };
+    }
+  }
+
+  /**
+   * Refresh authentication token (validate refresh token, issue new JWT)
+   */
+  async refreshToken(refreshToken: string) {
+    const redis = RedisClient.getInstance();
+    try {
+      const jwtService = JWTService.getInstance();
+      const payload = await jwtService.verifyRefreshToken(refreshToken);
+      if (!payload) return { success: false, error: "Invalid refresh token" };
+      const revoked = await redis.get(`revoked_token:${refreshToken}`);
+      if (revoked) return { success: false, error: "Token revoked" };
+      const prisma = PostgreSQLClient.getInstance();
+      const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+      if (!user) return { success: false, error: "User not found" };
+      // Fetch roles from UserRole relation
+      const roles = await prisma.userRole.findMany({
+        where: { userId: user.id },
+      });
+      const roleNames = roles.map((r) => r.role);
+      // Derive permissions from roles using your mapping
+
+      const tokens = await jwtService.generateTokens({
+        sub: user.id,
+        email: user.email,
+        role: this.mapRoleToJwt(roleNames[0]),
+        permissions: this.getUserPermissionsFromRoles(roleNames),
+      });
+      this.logger.info("Token refreshed", { userId: user.id });
+      await this.metrics.recordCounter("token_refreshed");
+      return {
+        success: true,
+        token: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+      };
+    } catch (error) {
+      this.logger.error("Token refresh failed", error as Error);
+      return { success: false, error: (error as Error).message };
+    }
+  }
+  private mapRoleToJwt(
+    role?: string
+  ): "admin" | "store_owner" | "api_user" | "customer" {
+    switch ((role || "").toLowerCase()) {
+      case "admin":
+        return "admin";
+      case "store_owner":
+      case "owner":
+        return "store_owner";
+      case "api_user":
+      case "user":
+        return "api_user";
+      case "customer":
+      case "viewer":
+        return "customer";
+      default:
+        return "customer";
+    }
+  }
+  /**
+   * Maps an array of role names to a deduplicated array of permissions.
+   * @param roleNames Array of role names assigned to the user
+   * @returns Array of permissions (deduplicated)
+   */
+  getUserPermissionsFromRoles(roleNames: string[]): string[] {
+    const permissions = new Set<string>();
+    for (const roleName of roleNames) {
+      const rolePerm = this.rolePermissions.find((rp) => rp.role === roleName);
+      if (rolePerm) {
+        rolePerm.permissions.forEach((perm) => permissions.add(perm));
+      }
+    }
+    return Array.from(permissions);
+  }
+  /**
+   * Logout (invalidate token in Redis)
+   */
+  async logout(token: string) {
+    const redis = RedisClient.getInstance();
+    try {
+      await redis.setex(`revoked_token:${token}`, 86400, "1");
+      this.logger.info("User logged out", { token });
+      await this.metrics.recordCounter("user_logged_out");
+      return { success: true };
+    } catch (error) {
+      this.logger.error("Logout failed", error as Error);
+      return { success: false, error: (error as Error).message };
+    }
+  }
   private readonly redis: RedisClient;
   private readonly postgres: PostgreSQLClient;
   private readonly logger: Logger;

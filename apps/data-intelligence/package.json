@@ -14,12 +14,15 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@libs/elysia-server": "workspace:*",
+    "@libs/auth": "workspace:*",
     "@libs/database": "workspace:*",
+    "@libs/elysia-server": "workspace:*",
     "@libs/monitoring": "workspace:*",
-    "@libs/utils": "workspace:*"
+    "@libs/utils": "workspace:*",
+    "json2csv": "6.0.0-alpha.2"
   },
   "devDependencies": {
+    "@types/json2csv": "^5.0.7",
     "@types/node": "^24.2.1",
     "nodemon": "^3.1.10",
     "tsx": "^4.20.3",

@@ -24,6 +24,10 @@ export class DataIntelligenceContainer {
   private readonly _registry: IServiceRegistry;
   private _initialized: boolean = false;
 
+  // Add circuit breaker and LRU cache keys
+  private readonly CIRCUIT_BREAKER_KEY = "circuitBreaker";
+  private readonly LRU_CACHE_KEY = "featureLruCache";
+
   constructor() {
     this._registry = ServiceRegistry; // Use the singleton instance
   }
@@ -89,6 +93,29 @@ export class DataIntelligenceContainer {
     this._registry.registerSingleton("healthChecker", () => {
       return new HealthChecker();
     });
+
+    // Circuit breaker - singleton
+    this._registry.registerSingleton(
+      this.CIRCUIT_BREAKER_KEY,
+      () =>
+        new (require("@libs/utils").CircuitBreaker)({
+          threshold: 5,
+          timeout: 30000,
+          resetTimeout: 60000,
+        })
+    );
+
+    // LRU cache for features - singleton
+    this._registry.registerSingleton(
+      this.LRU_CACHE_KEY,
+      () =>
+        new (require("@libs/utils").LRUCache)({
+          max: 10000,
+          ttl: 3600 * 1000, // 1 hour
+          allowStale: true,
+          ttlAutopurge: true,
+        })
+    );
   }
 
   /**
@@ -125,34 +152,29 @@ export class DataIntelligenceContainer {
       const logger = this._registry.resolve<Logger>("logger");
       const metrics =
         this._registry.resolve<MetricsCollector>("metricsCollector");
+      const circuitBreaker = this._registry.resolve<any>(
+        this.CIRCUIT_BREAKER_KEY
+      );
+      const lruCache = this._registry.resolve<any>(this.LRU_CACHE_KEY);
 
       return new FeatureStoreService(
         redis,
         clickhouse,
         postgres,
         logger,
-        metrics
+        metrics,
+        circuitBreaker,
+        lruCache
       );
     });
 
     // Data Export Service - singleton
     this._registry.registerSingleton("dataExportService", () => {
-      const clickhouse =
-        this._registry.resolve<ClickHouseClient>("clickhouseClient");
-      const postgres =
-        this._registry.resolve<PostgreSQLClient>("postgresClient");
-      const redis = this._registry.resolve<RedisClient>("redisClient");
       const logger = this._registry.resolve<Logger>("logger");
       const metrics =
         this._registry.resolve<MetricsCollector>("metricsCollector");
 
-      return new DataExportService(
-        redis,
-        clickhouse,
-        postgres,
-        logger,
-        metrics
-      );
+      return new DataExportService(logger, metrics);
     });
 
     // Business Intelligence Service - singleton

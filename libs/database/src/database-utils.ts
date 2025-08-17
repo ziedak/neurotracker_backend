@@ -1,22 +1,25 @@
-import { PostgreSQLClient } from "./postgresql";
-import { ClickHouseClient } from "./clickhouse";
-import { RedisClient } from "./redis";
-import {
-  QueryBuilder,
-  FeatureQueryBuilder,
-  CartQueryBuilder,
-  UserEventQueryBuilder,
-} from "./query-builder";
-import { ClickHouseQueryBuilder } from "./clickhouse-query-builder";
-import { Prisma } from "../node_modules/.prisma/client";
+import { PostgreSQLClient } from "./postgress/pgClient";
+import { ClickHouseClient } from "./clickhouse/clickhouseClient";
+import { RedisClient } from "./redisClient";
+import { FeatureQueryBuilder } from "./postgress/query-builder";
+import { ClickHouseQueryBuilder } from "./clickhouse/clickhouse-query-builder";
+import { Prisma } from "@prisma/client";
 
 /**
  * Database service utilities that provide secure, reusable patterns
  * All methods prevent SQL injection and use parameterized queries
  */
+/**
+ * Database service utilities that provide secure, reusable patterns
+ * All methods prevent SQL injection and use parameterized queries
+ * Optimized for strict typing, maintainability, and error handling
+ */
 export class DatabaseUtils {
   /**
    * Feature Store Operations
+   */
+  /**
+   * Get features for a cart, optionally from cache
    */
   static async getFeatures(
     cartId: string,
@@ -26,7 +29,7 @@ export class DatabaseUtils {
       fromCache?: boolean;
       cacheKeyPrefix?: string;
     } = {}
-  ): Promise<Record<string, any>> {
+  ): Promise<Record<string, unknown>> {
     const {
       featureNames,
       includeExpired = false,
@@ -40,23 +43,22 @@ export class DatabaseUtils {
         const cacheKey = `${cacheKeyPrefix}:${cartId}`;
         const cached = await RedisClient.getInstance().get(cacheKey);
         if (cached) {
-          const parsedCache = JSON.parse(cached);
-
-          // Filter by feature names if specified
+          const parsedCache = JSON.parse(cached) as Record<string, unknown>;
           if (featureNames?.length) {
-            const filtered: Record<string, any> = {};
-            featureNames.forEach((name) => {
-              if (parsedCache[name] !== undefined) {
+            const filtered: Record<string, unknown> = {};
+            for (const name of featureNames) {
+              if (parsedCache[name] !== undefined)
                 filtered[name] = parsedCache[name];
-              }
-            });
+            }
             return filtered;
           }
-
           return parsedCache;
         }
       } catch (error) {
-        console.warn("Cache retrieval failed:", error);
+        console.warn(
+          `[DatabaseUtils] Cache retrieval failed for cartId=${cartId}:`,
+          error
+        );
       }
     }
 
@@ -80,10 +82,10 @@ export class DatabaseUtils {
     });
 
     // Convert to key-value format
-    const result: Record<string, any> = {};
-    features.forEach((feature) => {
+    const result: Record<string, unknown> = {};
+    for (const feature of features) {
       result[feature.name] = feature.value;
-    });
+    }
 
     // Cache the result
     if (Object.keys(result).length > 0) {
@@ -95,7 +97,10 @@ export class DatabaseUtils {
           JSON.stringify(result)
         );
       } catch (error) {
-        console.warn("Cache storage failed:", error);
+        console.warn(
+          `[DatabaseUtils] Cache storage failed for cartId=${cartId}:`,
+          error
+        );
       }
     }
 
@@ -107,7 +112,7 @@ export class DatabaseUtils {
    */
   static async storeFeatures(
     cartId: string,
-    features: Record<string, any>,
+    features: Record<string, Prisma.InputJsonValue>,
     options: {
       version?: string;
       cacheKeyPrefix?: string;
@@ -126,30 +131,23 @@ export class DatabaseUtils {
     await prisma.$transaction(async (tx) => {
       const upsertPromises = Object.entries(features).map(
         async ([name, value]) => {
-          // First try to find existing feature
           const existing = await tx.feature.findFirst({
-            where: {
-              cartId: cartId,
-              name: name,
-            },
+            where: { cartId, name },
           });
-
           if (existing) {
-            // Update existing feature
             return tx.feature.update({
               where: { id: existing.id },
               data: {
-                value: value,
+                value: value as Prisma.InputJsonValue,
                 updatedAt: new Date(),
               },
             });
           } else {
-            // Create new feature
             return tx.feature.create({
               data: {
-                cartId: cartId,
-                name: name,
-                value: value,
+                cartId,
+                name,
+                value: value as Prisma.InputJsonValue,
                 createdAt: new Date(),
                 updatedAt: new Date(),
               },
@@ -157,7 +155,6 @@ export class DatabaseUtils {
           }
         }
       );
-
       await Promise.all(upsertPromises);
     });
 
@@ -175,7 +172,10 @@ export class DatabaseUtils {
         JSON.stringify(cacheData)
       );
     } catch (error) {
-      console.warn("Cache update failed:", error);
+      console.warn(
+        `[DatabaseUtils] Cache update failed for cartId=${cartId}:`,
+        error
+      );
     }
   }
 
@@ -189,7 +189,10 @@ export class DatabaseUtils {
       function: "COUNT" | "SUM" | "AVG" | "MIN" | "MAX";
       alias?: string;
     }[],
-    filters: Record<string, any> = {},
+    filters: Record<
+      string,
+      string | number | boolean | Date | { operator: string; value: any } | null
+    > = {},
     options: {
       groupBy?: string[];
       dateFrom?: string;
@@ -230,8 +233,6 @@ export class DatabaseUtils {
         allowedFields,
       }
     );
-
-    // Add date range if specified
     if (options.dateFrom || options.dateTo) {
       const dateField = table === "user_events" ? "timestamp" : "createdAt";
       const { query: timeQuery, params: timeParams } =
@@ -242,10 +243,8 @@ export class DatabaseUtils {
           allowedTables,
           allowedFields,
         });
-
       return await ClickHouseClient.execute(timeQuery, timeParams);
     }
-
     return await ClickHouseClient.execute(query, params);
   }
 
@@ -254,7 +253,10 @@ export class DatabaseUtils {
    */
   static async exportData(
     table: string,
-    filters: Record<string, any> = {},
+    filters: Record<
+      string,
+      string | number | boolean | Date | { operator: string; value: any } | null
+    > = {},
     options: {
       select?: string[];
       limit?: number;
@@ -302,12 +304,11 @@ export class DatabaseUtils {
       select: options.select,
       where: filters,
       orderBy: options.orderBy,
-      limit: Math.min(options.limit || 10000, 100000), // Max 100k records per export
+      limit: Math.min(options.limit || 10000, 100000),
       offset: options.offset,
       allowedTables,
       allowedFields,
     });
-
     return await ClickHouseClient.execute(query, params);
   }
 
@@ -319,10 +320,10 @@ export class DatabaseUtils {
     checks: {
       type: "uniqueness" | "validity" | "completeness" | "consistency";
       field?: string;
-      criteria?: Record<string, any>;
+      criteria?: Record<string, unknown>;
     }[]
   ): Promise<
-    Array<{ check: string; status: "passed" | "failed"; details?: any }>
+    Array<{ check: string; status: "passed" | "failed"; details?: unknown }>
   > {
     const allowedTables = [
       "features",
@@ -346,13 +347,15 @@ export class DatabaseUtils {
       throw new Error(`Unauthorized table: ${table}`);
     }
 
-    const results = [];
-
+    const results: Array<{
+      check: string;
+      status: "passed" | "failed";
+      details?: unknown;
+    }> = [];
     for (const check of checks) {
       try {
         let query: string;
-        let params: Record<string, any> = {};
-
+        let params: Record<string, unknown> = {};
         switch (check.type) {
           case "uniqueness":
             if (!check.field || !allowedFields.includes(check.field)) {
@@ -362,7 +365,6 @@ export class DatabaseUtils {
             }
             query = `SELECT COUNT(*) as total, COUNT(DISTINCT ${check.field}) as unique_count FROM ${table}`;
             break;
-
           case "completeness":
             if (!check.field || !allowedFields.includes(check.field)) {
               throw new Error(
@@ -371,9 +373,7 @@ export class DatabaseUtils {
             }
             query = `SELECT COUNT(*) as total, COUNT(${check.field}) as non_null_count FROM ${table}`;
             break;
-
           case "validity":
-            // Example: Check if all emails are valid format
             if (check.field === "email") {
               query = `SELECT COUNT(*) as total, COUNT(*) as valid_count FROM ${table} WHERE match(email, '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$')`;
             } else {
@@ -382,25 +382,19 @@ export class DatabaseUtils {
               );
             }
             break;
-
           default:
             throw new Error(`Unknown check type: ${check.type}`);
         }
-
         const result = await ClickHouseClient.execute(query, params);
-
-        // Determine pass/fail based on check type
         let status: "passed" | "failed" = "passed";
-        let details: any = result[0];
-
+        let details: unknown = result[0];
         if (check.type === "uniqueness" && result[0]) {
           status =
             result[0].total === result[0].unique_count ? "passed" : "failed";
         } else if (check.type === "completeness" && result[0]) {
           const completeness = result[0].non_null_count / result[0].total;
-          status = completeness >= 0.95 ? "passed" : "failed"; // 95% completeness threshold
+          status = completeness >= 0.95 ? "passed" : "failed";
         }
-
         results.push({
           check: `${check.type}_${check.field || table}`,
           status,
@@ -409,12 +403,11 @@ export class DatabaseUtils {
       } catch (error) {
         results.push({
           check: `${check.type}_${check.field || table}`,
-          status: "failed" as const,
+          status: "failed",
           details: { error: (error as Error).message },
         });
       }
     }
-
     return results;
   }
 
@@ -431,7 +424,7 @@ export class DatabaseUtils {
       tolerance?: number;
     }[]
   ): Promise<
-    Array<{ rule: string; status: "passed" | "failed"; details: any }>
+    Array<{ rule: string; status: "passed" | "failed"; details: unknown }>
   > {
     const allowedTables = [
       "features",
@@ -459,8 +452,11 @@ export class DatabaseUtils {
       throw new Error("Unauthorized table in reconciliation");
     }
 
-    const results = [];
-
+    const results: Array<{
+      rule: string;
+      status: "passed" | "failed";
+      details: unknown;
+    }> = [];
     for (const rule of reconciliationRules) {
       try {
         if (
@@ -471,60 +467,48 @@ export class DatabaseUtils {
             `Invalid fields in reconciliation rule: ${rule.sourceField}, ${rule.targetField}`
           );
         }
-
         let sourceQuery: string;
         let targetQuery: string;
-        const params = {};
-
+        const params: Record<string, unknown> = {};
         switch (rule.operation) {
           case "count":
             sourceQuery = `SELECT COUNT(*) as count FROM ${sourceTable}`;
             targetQuery = `SELECT COUNT(*) as count FROM ${targetTable}`;
             break;
-
           case "sum":
             sourceQuery = `SELECT SUM(${rule.sourceField}) as sum FROM ${sourceTable}`;
             targetQuery = `SELECT SUM(${rule.targetField}) as sum FROM ${targetTable}`;
             break;
-
           case "existence":
             sourceQuery = `SELECT DISTINCT ${rule.sourceField} FROM ${sourceTable}`;
             targetQuery = `SELECT DISTINCT ${rule.targetField} FROM ${targetTable}`;
             break;
-
           default:
             throw new Error(
               `Unknown reconciliation operation: ${rule.operation}`
             );
         }
-
         const [sourceResult, targetResult] = await Promise.all([
           ClickHouseClient.execute(sourceQuery, params),
           ClickHouseClient.execute(targetQuery, params),
         ]);
-
-        // Compare results
         let status: "passed" | "failed" = "passed";
-        let details: any = {
+        let details: unknown = {
           source: sourceResult[0],
           target: targetResult[0],
         };
-
         if (rule.operation === "count" || rule.operation === "sum") {
           const sourceValue = sourceResult[0]?.[rule.operation] || 0;
           const targetValue = targetResult[0]?.[rule.operation] || 0;
           const tolerance = rule.tolerance || 0;
-
           const difference = Math.abs(sourceValue - targetValue);
           const percentageDiff = sourceValue
             ? (difference / sourceValue) * 100
             : 0;
-
           status = percentageDiff <= tolerance ? "passed" : "failed";
-          details.difference = difference;
-          details.percentageDiff = percentageDiff;
+          (details as any).difference = difference;
+          (details as any).percentageDiff = percentageDiff;
         }
-
         results.push({
           rule: `${rule.operation}_${rule.sourceField}_${rule.targetField}`,
           status,
@@ -533,21 +517,26 @@ export class DatabaseUtils {
       } catch (error) {
         results.push({
           rule: `${rule.operation}_${rule.sourceField}_${rule.targetField}`,
-          status: "failed" as const,
+          status: "failed",
           details: { error: (error as Error).message },
         });
       }
     }
-
     return results;
   }
 
   /**
    * Business Intelligence report generation
    */
+  /**
+   * Business Intelligence report generation
+   */
   static async generateReport(
     reportType: "user_behavior" | "cart_analytics" | "feature_usage" | "custom",
-    filters: Record<string, any> = {},
+    filters: Record<
+      string,
+      string | number | boolean | Date | { operator: string; value: any } | null
+    > = {},
     options: {
       dateFrom?: string;
       dateTo?: string;
@@ -604,8 +593,14 @@ export class DatabaseUtils {
 
   // === Private Helper Methods ===
 
+  /**
+   * Private: Get user behavior report
+   */
   private static async getUserBehaviorReport(
-    filters: Record<string, any>,
+    filters: Record<
+      string,
+      string | number | boolean | Date | { operator: string; value: any } | null
+    >,
     options: { dateFrom?: string; dateTo?: string; groupBy?: string }
   ): Promise<any[]> {
     const aggregations = [
@@ -620,8 +615,14 @@ export class DatabaseUtils {
     });
   }
 
+  /**
+   * Private: Get cart analytics report
+   */
   private static async getCartAnalyticsReport(
-    filters: Record<string, any>,
+    filters: Record<
+      string,
+      string | number | boolean | Date | { operator: string; value: any } | null
+    >,
     options: { dateFrom?: string; dateTo?: string; groupBy?: string }
   ): Promise<any[]> {
     const aggregations = [
@@ -637,8 +638,14 @@ export class DatabaseUtils {
     });
   }
 
+  /**
+   * Private: Get feature usage report
+   */
   private static async getFeatureUsageReport(
-    filters: Record<string, any>,
+    filters: Record<
+      string,
+      string | number | boolean | Date | { operator: string; value: any } | null
+    >,
     options: { dateFrom?: string; dateTo?: string; groupBy?: string }
   ): Promise<any[]> {
     const aggregations = [
