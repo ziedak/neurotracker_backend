@@ -213,7 +213,21 @@ export class FeatureStoreService {
     } catch (error) {
       this.logger.error("Failed to get features", error as Error, { cartId });
       await this.metrics.recordCounter("feature_retrieval_error");
-      throw error;
+      // Partial result logic: return cached data if available, else fallback response
+      const fallback = this.lruCache.peek(lruKey);
+      if (fallback) {
+        return {
+          ...fallback,
+          _partial: true,
+          _error: (error as Error).message,
+        };
+      }
+      return {
+        _partial: true,
+        _error: (error as Error).message,
+        message:
+          "Partial result: no fresh data available, returning empty result.",
+      };
     }
   }
 

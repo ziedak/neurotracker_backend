@@ -20,14 +20,14 @@ datasource db {
 //   provider = "prisma-zod-generator"
 // }
 
-generator repo {
-  provider = "prisma-repo"
-  output   = "../src/repository"
-  query    = true
-  warn     = true
-  info     = true
-  error    = true
-}
+// generator repo {
+//   provider = "prisma-repo"
+//   output   = "../src/repository"
+//   query    = true
+//   warn     = true
+//   info     = true
+//   error    = true
+// }
 
 enum StoreStatus {
   ACTIVE

@@ -7,6 +7,7 @@ import { setupHealthRoutes } from "./health.routes";
 import { setupQualityRoutes } from "./quality.routes";
 import { setupReconciliationRoutes } from "./reconciliation.routes";
 import { setupStatusRoutes } from "./status.routes";
+import { setupGdprRoutes } from "./gdpr.routes";
 import type { DataIntelligenceContainer } from "../container";
 
 export const setupRoutes = (
@@ -21,5 +22,6 @@ export const setupRoutes = (
   setupReconciliationRoutes(app, container);
   setupHealthRoutes(app, container);
   setupStatusRoutes(app, container);
+  setupGdprRoutes(app);
   return app;
 };
