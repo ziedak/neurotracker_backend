@@ -77,9 +77,53 @@ export {
 // CORE SERVICES
 // ===================================================================
 
-// User Management Service
-export { UserService } from "./services/user.service";
-export type { User, UserWithRoles } from "./services/user.service";
+// User Management Service - Step 4.1
+export {
+  UserService,
+  type IUserService,
+  type UserSecurityProfile,
+  createUserService,
+} from "./services/user-service";
+
+// Password Service - Supporting Step 4.1
+export {
+  PasswordService,
+  type IPasswordService,
+  type PasswordStrengthResult,
+  createPasswordService,
+} from "./services/password-service";
+
+// API Key Service - Step 5.1
+export {
+  APIKeyService,
+  type IAPIKeyService,
+  type APIKey,
+  type APIKeyOptions,
+  type APIKeyValidation,
+  type APIKeyUsage,
+  type APIKeyAnalytics,
+  type RateLimitResult,
+  APIKeyStatus,
+  APIKeyScope,
+  RateLimitStatus,
+  createAPIKeyService,
+} from "./services/api-key-service";
+
+// User Models
+export {
+  type User,
+  type CreateUserData,
+  type UpdateUserData,
+  type UserLoginHistory,
+  type UserActivitySummary,
+} from "./models/user-models";
+
+// Legacy User Service (keeping for compatibility)
+export { UserService as LegacyUserService } from "./services/user.service";
+export type {
+  User as LegacyUser,
+  UserWithRoles,
+} from "./services/user.service";
 
 // Permission Service - Step 3.3
 export {

@@ -16,10 +16,10 @@
  * @author Enterprise Auth Foundation
  */
 
-import { Logger } from "@libs/monitoring/logger";
-import { DatabaseUtils } from "@libs/database/utils";
+import { Logger } from "../utils/logger";
+import { DatabaseUtils } from "../utils/database-utils";
 import { PasswordService } from "./password-service";
-import { SessionManager } from "./session-manager";
+import { UnifiedSessionManager } from "./unified-session-manager";
 import { PermissionService } from "./permission-service";
 import {
   User,
@@ -28,6 +28,9 @@ import {
   UserStatus,
   UserSecurityProfile,
 } from "../models/user-models";
+
+// Re-export UserSecurityProfile for external use
+export type { UserSecurityProfile } from "../models/user-models";
 
 /**
  * User Service Interface
@@ -161,7 +164,9 @@ class UserCacheManager {
     // Implement LRU eviction if cache is full
     if (this.userCache.size >= this.MAX_CACHE_SIZE) {
       const oldestKey = this.userCache.keys().next().value;
-      this.userCache.delete(oldestKey);
+      if (oldestKey) {
+        this.userCache.delete(oldestKey);
+      }
     }
 
     this.userCache.set(user.id, {
@@ -218,7 +223,7 @@ export class UserService implements IUserService {
   private readonly logger: Logger;
   private readonly db: DatabaseUtils;
   private readonly passwordService: PasswordService;
-  private readonly sessionManager: SessionManager;
+  private readonly sessionManager: UnifiedSessionManager;
   private readonly permissionService: PermissionService;
   private readonly cache: UserCacheManager;
   private readonly metrics: Map<string, number> = new Map();
@@ -226,7 +231,7 @@ export class UserService implements IUserService {
   constructor(
     db: DatabaseUtils,
     passwordService: PasswordService,
-    sessionManager: SessionManager,
+    sessionManager: UnifiedSessionManager,
     permissionService: PermissionService,
     logger: Logger
   ) {
@@ -263,6 +268,15 @@ export class UserService implements IUserService {
     this.metrics.set("cache_misses", 0);
   }
 
+  /**
+   * Convert error to string safely
+   */
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return String(error);
+  }
   /**
    * Create a new user
    */
@@ -336,7 +350,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to create user", {
         email: userData.email,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -383,7 +397,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to get user by ID", {
         userId,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -434,7 +448,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to get user by email", {
         email,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -506,7 +520,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to update user", {
         userId,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -528,11 +542,22 @@ export class UserService implements IUserService {
         throw new UserNotFoundError(userId);
       }
 
-      // Soft delete in database
+      // Delete user in database
+      // Delete user in database
       await this.deleteUserFromDatabase(userId);
 
-      // Invalidate all user sessions
-      await this.sessionManager.invalidateAllUserSessions(userId);
+      // Invalidate all user sessions by getting and deleting them
+      try {
+        const userSessions = await this.sessionManager.getUserSessions(userId);
+        for (const sessionId of userSessions) {
+          await this.sessionManager.deleteSession(sessionId);
+        }
+      } catch (sessionError) {
+        this.logger.warn("Failed to invalidate user sessions during delete", {
+          userId,
+          error: sessionError,
+        });
+      }
 
       // Invalidate cache
       this.cache.invalidateUser(userId);
@@ -557,7 +582,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to delete user", {
         userId,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -657,7 +682,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Authentication failed", {
         email,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -702,7 +727,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to update user password", {
         userId,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -723,8 +748,18 @@ export class UserService implements IUserService {
         metadata: { lockReason: reason, lockedAt: new Date().toISOString() },
       });
 
-      // Invalidate all user sessions
-      await this.sessionManager.invalidateAllUserSessions(userId);
+      // Invalidate all user sessions by getting and deleting them
+      try {
+        const userSessions = await this.sessionManager.getUserSessions(userId);
+        for (const sessionId of userSessions) {
+          await this.sessionManager.deleteSession(sessionId);
+        }
+      } catch (sessionError) {
+        this.logger.warn("Failed to invalidate user sessions during lockout", {
+          userId,
+          error: sessionError,
+        });
+      }
 
       await this.logSecurityEvent(userId, "user_locked", {
         reason,
@@ -740,7 +775,7 @@ export class UserService implements IUserService {
       this.logger.error("Failed to lock user account", {
         userId,
         reason,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -782,7 +817,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to unlock user account", {
         userId,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -842,7 +877,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to batch get users", {
         userIds: userIds.length,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -890,7 +925,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to batch create users", {
         count: usersData.length,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -940,7 +975,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to batch update users", {
         count: updates.length,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -993,7 +1028,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to get user security profile", {
         userId,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -1051,7 +1086,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to update user security settings", {
         userId,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -1084,7 +1119,7 @@ export class UserService implements IUserService {
       this.logger.error("Failed to log security event", {
         userId,
         event,
-        error: error.message,
+        error: this.getErrorMessage(error),
       });
     }
   }
@@ -1114,7 +1149,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to preload user data", {
         count: userIds.length,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -1134,7 +1169,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to warm user cache", {
         userId,
-        error: error.message,
+        error: this.getErrorMessage(error),
       });
       throw error;
     }
@@ -1165,7 +1200,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to get user login history", {
         userId,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -1211,7 +1246,7 @@ export class UserService implements IUserService {
     } catch (error) {
       this.logger.error("Failed to get user activity summary", {
         userId,
-        error: error.message,
+        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -1355,7 +1390,7 @@ export class UserService implements IUserService {
 export const createUserService = (
   db: DatabaseUtils,
   passwordService: PasswordService,
-  sessionManager: SessionManager,
+  sessionManager: UnifiedSessionManager,
   permissionService: PermissionService,
   logger: Logger
 ): UserService => {
