@@ -12,13 +12,18 @@
  */
 
 import * as jose from "jose";
-import Redis from "ioredis";
 import { RedisClient } from "@libs/database";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { CircuitBreaker, LRUCache } from "@libs/utils";
 
+// Import JWT Blacklist Manager for Step 2.1 integration
+import {
+  JWTBlacklistManager,
+  TokenRevocationReason,
+} from "./jwt-blacklist-manager";
+
 // Import types from existing JWT service for compatibility
-import { JWTPayload, RefreshTokenPayload } from "../jwt";
+import { JWTPayload, RefreshTokenPayload } from "../types/jwt-types";
 
 // Enhanced Service Configuration
 export interface EnhancedJWTConfig {
@@ -87,9 +92,12 @@ export class EnhancedJWTService {
   private readonly refreshSecret: Uint8Array;
 
   // Infrastructure
-  private readonly redis: RedisClient;
+  private readonly redis: any; // Redis instance from RedisClient.getInstance()
   private readonly logger: Logger;
   private readonly metrics: MetricsCollector;
+
+  // JWT Blacklist Manager integration (Step 2.1)
+  private readonly blacklistManager: JWTBlacklistManager;
 
   // Performance Components
   private readonly circuitBreaker: CircuitBreaker;
@@ -116,6 +124,13 @@ export class EnhancedJWTService {
     this.redis = RedisClient.getInstance();
     this.logger = Logger.getInstance("EnhancedJWTService");
     this.metrics = MetricsCollector.getInstance();
+
+    // Initialize JWT Blacklist Manager (Step 2.1 integration)
+    this.blacklistManager = new JWTBlacklistManager(
+      {}, // Use default config
+      Logger.getInstance("JWTBlacklistManager"),
+      this.metrics
+    );
 
     // Initialize performance components
     this.circuitBreaker = new CircuitBreaker({
@@ -161,6 +176,9 @@ export class EnhancedJWTService {
 
       // Test Redis connectivity
       await RedisClient.ping();
+
+      // Initialize JWT Blacklist Manager
+      await this.blacklistManager.initialize();
 
       this.isInitialized = true;
       this.logger.info("Enhanced JWT Service initialization completed");
@@ -377,6 +395,44 @@ export class EnhancedJWTService {
         exp: verificationResult.exp as number,
       };
 
+      // Check token blacklist (Step 2.1 integration)
+      const tokenId = verificationResult.jti as string;
+      if (tokenId) {
+        try {
+          const isRevoked = await this.blacklistManager.isTokenRevoked(tokenId);
+          if (isRevoked) {
+            const result: TokenVerificationResult = {
+              valid: false,
+              error: "Token has been revoked",
+              errorCode: "REVOKED_TOKEN",
+              isRevoked: true,
+            };
+
+            // Cache negative result for revoked tokens
+            if (this.config.enableCaching) {
+              this.tokenCache.set(cacheKey, result);
+            }
+
+            await this.metrics.recordCounter(
+              "enhanced_jwt_revoked_token_detected"
+            );
+            return result;
+          }
+        } catch (blacklistError) {
+          // Log blacklist check failure but don't fail token verification
+          this.logger.warn(
+            "Blacklist check failed, proceeding with token verification",
+            {
+              tokenId,
+              error: (blacklistError as Error).message,
+            }
+          );
+          await this.metrics.recordCounter(
+            "enhanced_jwt_blacklist_check_failures"
+          );
+        }
+      }
+
       // Check if token should be rotated
       const shouldRotate = this.shouldRotateToken(jwtPayload);
 
@@ -390,7 +446,7 @@ export class EnhancedJWTService {
       if (this.config.enableCaching) {
         const cacheTTL = Math.min(
           300,
-          jwtPayload.exp - Math.floor(Date.now() / 1000)
+          (jwtPayload.exp || 0) - Math.floor(Date.now() / 1000)
         );
         this.tokenCache.set(cacheKey, result);
       }
@@ -780,8 +836,8 @@ export class EnhancedJWTService {
     }
 
     const currentTime = Math.floor(Date.now() / 1000);
-    const tokenAge = currentTime - payload.iat;
-    const tokenLifetime = payload.exp - payload.iat;
+    const tokenAge = currentTime - (payload.iat || 0);
+    const tokenLifetime = (payload.exp || 0) - (payload.iat || 0);
 
     return tokenAge / tokenLifetime >= this.config.rotationThreshold;
   }
@@ -925,6 +981,9 @@ export class EnhancedJWTService {
       // But we can reset counters if needed
       this.userTokenCount.clear();
 
+      // Perform blacklist manager maintenance
+      await this.blacklistManager.cleanupExpiredEntries();
+
       await this.metrics.recordCounter("enhanced_jwt_maintenance_completed");
       this.logger.info("Enhanced JWT Service maintenance completed");
     } catch (error) {
@@ -933,6 +992,189 @@ export class EnhancedJWTService {
         "Enhanced JWT Service maintenance failed",
         error as Error
       );
+    }
+  }
+
+  /**
+   * Revoke a specific JWT token (Step 2.1 integration)
+   */
+  public async revokeToken(
+    token: string,
+    reason: TokenRevocationReason = TokenRevocationReason.ADMIN_REVOKED,
+    revokedBy?: string
+  ): Promise<boolean> {
+    const startTime = Date.now();
+
+    try {
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
+      // Extract token information
+      const { payload } = await jose.jwtVerify(token, this.jwtSecret, {
+        clockTolerance: 30,
+      });
+
+      const tokenId = payload.jti as string;
+      const userId = payload.sub as string;
+
+      if (!tokenId || !userId) {
+        this.logger.warn("Cannot revoke token: missing tokenId or userId", {
+          hasTokenId: !!tokenId,
+          hasUserId: !!userId,
+        });
+        return false;
+      }
+
+      // Revoke through blacklist manager
+      await this.blacklistManager.revokeToken(tokenId, reason, {
+        revokedBy,
+        userAgent: "EnhancedJWTService",
+      });
+
+      // Clear from cache
+      if (this.config.enableCaching) {
+        const cacheKey = `access_token:${this.generateTokenHash(token)}`;
+        this.tokenCache.delete(cacheKey);
+      }
+
+      // Record metrics
+      const duration = Date.now() - startTime;
+      await this.metrics.recordHistogram(
+        "enhanced_jwt_revocation_duration",
+        duration
+      );
+      await this.metrics.recordCounter("enhanced_jwt_tokens_revoked");
+
+      this.logger.info("JWT token revoked successfully", {
+        tokenId,
+        userId,
+        reason,
+        revokedBy,
+        duration,
+      });
+
+      return true;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      await this.metrics.recordHistogram(
+        "enhanced_jwt_revocation_error_duration",
+        duration
+      );
+      await this.metrics.recordCounter("enhanced_jwt_revocation_errors");
+
+      this.logger.error("Failed to revoke JWT token", error as Error);
+      return false;
+    }
+  }
+
+  /**
+   * Revoke all tokens for a specific user (Step 2.1 integration)
+   */
+  public async revokeUserTokens(
+    userId: string,
+    reason: TokenRevocationReason = TokenRevocationReason.ADMIN_REVOKED,
+    revokedBy?: string
+  ): Promise<boolean> {
+    const startTime = Date.now();
+
+    try {
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
+      // Revoke through blacklist manager
+      await this.blacklistManager.revokeUserTokens(userId, reason, {
+        revokedBy,
+        metadata: { userAgent: "EnhancedJWTService" },
+      });
+
+      // Clear user token count
+      this.userTokenCount.delete(userId);
+
+      // Note: We cannot easily clear all cached tokens for a user without
+      // iterating through all cache entries, but the blacklist check will
+      // catch revoked tokens on verification
+
+      // Record metrics
+      const duration = Date.now() - startTime;
+      await this.metrics.recordHistogram(
+        "enhanced_jwt_user_revocation_duration",
+        duration
+      );
+      await this.metrics.recordCounter("enhanced_jwt_user_tokens_revoked");
+
+      this.logger.info("All user tokens revoked successfully", {
+        userId,
+        reason,
+        revokedBy,
+        duration,
+      });
+
+      return true;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      await this.metrics.recordHistogram(
+        "enhanced_jwt_user_revocation_error_duration",
+        duration
+      );
+      await this.metrics.recordCounter("enhanced_jwt_user_revocation_errors");
+
+      this.logger.error("Failed to revoke user tokens", error as Error, {
+        userId,
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Check if a token is revoked (Step 2.1 integration)
+   */
+  public async isTokenRevoked(tokenId: string): Promise<boolean> {
+    try {
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
+      return await this.blacklistManager.isTokenRevoked(tokenId);
+    } catch (error) {
+      this.logger.warn("Failed to check token revocation status", {
+        tokenId,
+        error: (error as Error).message,
+      });
+
+      // Fail-safe: assume not revoked if check fails
+      return false;
+    }
+  }
+
+  /**
+   * Get comprehensive service health including blacklist manager
+   */
+  public async getComprehensiveHealth(): Promise<
+    ServiceHealthStatus & { blacklist: any }
+  > {
+    const baseHealth = await this.getHealthStatus();
+
+    try {
+      const blacklistHealth = await this.blacklistManager.getHealthStatus();
+
+      return {
+        ...baseHealth,
+        blacklist: {
+          status: blacklistHealth.healthy ? "healthy" : "degraded",
+          components: blacklistHealth.components,
+          stats: blacklistHealth.stats,
+        },
+      };
+    } catch (error) {
+      return {
+        ...baseHealth,
+        blacklist: {
+          status: "error",
+          error: (error as Error).message,
+        },
+      };
     }
   }
 }

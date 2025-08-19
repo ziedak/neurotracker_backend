@@ -1,160 +1,32 @@
-// Enhanced JWT Service: Proper token generation, verification, and refresh capabilities
-// Flexible Guards: Works with any framework that provides headers and set objects
-// Password Security: Industry-standard password hashing and validation
-// Role-Based Access: Support for roles and granular permissions
-// Refresh Tokens: Secure token refresh mechanism
-// Unified Authentication Context: Cross-protocol auth support for HTTP and WebSocket
+/**
+ * @fileoverview Auth Library - Production-Ready Enhanced JWT Services
+ * @version 2.0.0
+ *
+ * This library provides enterprise-grade JWT authentication services:
+ * - Enhanced JWT Service with comprehensive token management
+ * - JWT Blacklist Manager for token revocation
+ * - Type definitions for JWT and user identity
+ */
 
-// JWT Service
-// const jwtService = JWTService.getInstance();
-// const tokens = await jwtService.generateTokens({
-//   sub: 'user123',
-//   email: 'user@example.com',
-//   role: 'customer',
-//   permissions: ['read:profile']
-// });
+// ===================================================================
+// TYPE DEFINITIONS
+// ===================================================================
 
-//  Password Service
-// const hashedPassword = await PasswordService.hash('plaintext');
-// const isValid = await PasswordService.verify('plaintext', hashedPassword);
+// JWT Types
+export type { JWTPayload, RefreshTokenPayload } from "./types/jwt-types";
 
-//  Guards
-// const payload = await requireAuth(context);
-// const adminPayload = await requireRole(context, 'admin');
-
-// Unified Auth Context
-// const factory = AuthContextFactory.create(jwtService, permissionService, userService);
-// const authResult = await factory.authenticate(context);
-// if (authResult.success) {
-//   const unifiedContext = authResult.context;
-//   const canAccess = unifiedContext.canAccess('resource', 'action');
-// }
-
-export {
-  JWTService,
-  createJWTPlugin,
-  createRefreshJWTPlugin,
-  jwtConfig,
-  refreshTokenConfig,
-} from "./jwt";
-export type { JWTPayload, RefreshTokenPayload } from "./jwt";
-
-export {
-  AuthGuard,
-  authGuard,
-  requireAuth,
-  requireRole,
-  requirePermission,
-  optionalAuth,
-} from "./guards";
-export type { AuthContext } from "./guards";
-
-export {
-  MiddlewareAuthGuard,
-  type MiddlewareAuthResult,
-  type AuthorizationRequirements,
-} from "./middleware-guard";
-
-export { PasswordService } from "./password";
-
-// Production Services exports
-export { UserService } from "./services/user.service";
-export type { User, UserWithRoles } from "./services/user.service";
-
-export { SessionManager } from "./services/session.service";
+// Unified Context Types
 export type {
-  SessionInfo,
-  SessionValidationResult,
-} from "./services/session.service";
+  UserIdentity,
+  UserRole,
+  UserStatus,
+} from "./types/unified-context-types";
 
-export { PermissionService } from "./services/permission.service";
-export type {
-  Permission,
-  RolePermissions,
-} from "./services/permission.service";
+// ===================================================================
+// ENHANCED JWT SERVICES (Phase 2C - Steps 2.1, 2.2 & 2.3)
+// ===================================================================
 
-export { AuthenticationService } from "./services/authentication.service";
-export type {
-  LoginCredentials,
-  LoginResult,
-  RegisterUserData,
-  RegisterResult,
-  RefreshTokenResult,
-} from "./services/authentication.service";
-
-// Unified Authentication Context exports
-export {
-  UnifiedAuthContextImpl,
-  type UnifiedAuthContext,
-  type UserIdentity,
-  type SessionData,
-  type TokenInfo,
-  type HTTPAuthContext,
-  type WebSocketAuthContext,
-  type SerializableAuthContext,
-  type UserRole,
-  type UserStatus,
-  type AuthMethod,
-  type ContextCreateOptions,
-  type ContextValidationResult,
-} from "./unified-context";
-
-export {
-  UnifiedAuthContextBuilder,
-  AuthContextUtils,
-  type WebSocketContextInput,
-} from "./context-builder";
-
-export {
-  AuthContextFactory,
-  type AuthResult,
-  type PermissionService as IPermissionService,
-  type UserService as IUserService,
-  type SessionManager as ISessionManager,
-} from "./context-factory";
-
-// Enterprise Session Management Models and Services
-export {
-  SessionAuthMethod,
-  type SessionProtocol as EnterpriseSessionProtocol,
-  SessionStatus,
-  SessionValidator,
-  SessionValidationError,
-  type SessionData as EnterpriseSessionData,
-  type SessionCreateOptions,
-  type SessionUpdateData,
-  type SessionMetadata,
-  type DeviceInfo,
-  type LocationInfo,
-  type SecurityInfo,
-  type SessionAnalytics,
-  type SessionHealthMetrics,
-  type RedisHealthMetrics,
-  type PostgreSQLHealthMetrics,
-  type CacheHealthMetrics,
-  type PerformanceMetrics,
-  type TimeRange,
-} from "./models/session-models";
-
-export {
-  RedisSessionStore,
-  type RedisSessionConfig,
-  DEFAULT_REDIS_SESSION_CONFIG,
-} from "./services/redis-session-store";
-
-export {
-  PostgreSQLSessionStore,
-  type PostgreSQLSessionConfig,
-  DEFAULT_POSTGRESQL_SESSION_CONFIG,
-} from "./services/postgresql-session-store";
-
-export {
-  UnifiedSessionManager,
-  type UnifiedSessionManagerConfig,
-  DEFAULT_UNIFIED_SESSION_MANAGER_CONFIG,
-} from "./services/unified-session-manager";
-
-// Enhanced JWT Token Management - Step 2.1
+// JWT Blacklist Manager - Step 2.1
 export {
   JWTBlacklistManager,
   TokenRevocationReason,
@@ -178,32 +50,101 @@ export {
   type ServiceHealthStatus,
 } from "./services/enhanced-jwt-service-v2";
 
-// TODO: Enhanced JWT Service (Step 2.2)
-/*
+// JWT Token Rotation Manager - Step 2.3
 export {
-  EnhancedJWTService,
-  SecurityLevel,
-  TokenValidationError,
-  type EnhancedJWTPayload,
-  type TokenGenerationOptions,
-  type TokenValidationResult,
-  type EnhancedJWTServiceConfig,
-  DEFAULT_ENHANCED_JWT_CONFIG,
-} from "./services/enhanced-jwt-service";
-*/
+  JWTRotationManager,
+  type JWTRotationConfig,
+  type TokenPair,
+  type TokenFamily,
+  type TokenOperation,
+  type TokenRotationResult as RotationResult,
+  type TokenReuseDetectionResult,
+} from "./services/jwt-rotation-manager";
 
-// TODO: Enhanced JWT Token Manager (Step 2.2)
-/*
+// ===================================================================
+// ENTERPRISE RBAC PERMISSION SYSTEM (Phase 2C - Step 3)
+// ===================================================================
+
+// Permission Cache - Step 3.2
 export {
-  JWTTokenManager,
-  TokenLifecycleEvent,
-  type TokenCreationContext,
-  type TokenValidationContext,
-  type TokenRotationPolicy,
-  type JWTTokenManagerConfig,
-  DEFAULT_TOKEN_MANAGER_CONFIG,
-  type TokenCreationResult,
-  type TokenRefreshResult,
-  type TokenAnalytics,
-} from "./services/jwt-token-manager";
-*/
+  PermissionCache,
+  type PermissionCacheConfig,
+  type CacheStats,
+  DEFAULT_PERMISSION_CACHE_CONFIG,
+} from "./services/permission-cache";
+
+// ===================================================================
+// CORE SERVICES
+// ===================================================================
+
+// User Management Service
+export { UserService } from "./services/user.service";
+export type { User, UserWithRoles } from "./services/user.service";
+
+// Permission Service - Step 3.3
+export {
+  PermissionService,
+  type PermissionServiceConfig,
+  type PermissionCheckResult,
+  type ConditionEvaluationResult,
+  type BatchPermissionCheckResult,
+  type PermissionAssignmentResult,
+  type RoleAssignmentResult,
+  type PermissionAnalytics,
+  DEFAULT_PERMISSION_SERVICE_CONFIG,
+} from "./services/permission-service";
+export type {
+  Permission,
+  RolePermissions,
+} from "./services/permission.service";
+
+// Core Session Management - alias for UnifiedSessionManager
+export { UnifiedSessionManager as SessionManager } from "./services/unified-session-manager";
+export type {
+  SessionInfo,
+  SessionValidationResult,
+} from "./services/session.service";
+
+// Enterprise Session Models
+export {
+  SessionAuthMethod,
+  type SessionProtocol as EnterpriseSessionProtocol,
+  SessionStatus,
+  SessionValidator,
+  SessionValidationError,
+  type SessionData as EnterpriseSessionData,
+  type SessionCreateOptions,
+  type SessionUpdateData,
+  type SessionMetadata,
+  type DeviceInfo,
+  type LocationInfo,
+  type SecurityInfo,
+  type SessionAnalytics,
+  type SessionHealthMetrics,
+  type RedisHealthMetrics,
+  type PostgreSQLHealthMetrics,
+  type CacheHealthMetrics,
+  type PerformanceMetrics,
+  type TimeRange,
+} from "./models/session-models";
+
+// Redis Session Store
+export {
+  RedisSessionStore,
+  type RedisSessionConfig,
+  DEFAULT_REDIS_SESSION_CONFIG,
+} from "./services/redis-session-store";
+
+// PostgreSQL Session Store
+export {
+  PostgreSQLSessionStore,
+  type PostgreSQLSessionConfig,
+  DEFAULT_POSTGRESQL_SESSION_CONFIG,
+} from "./services/postgresql-session-store";
+
+// Unified Session Manager
+export {
+  UnifiedSessionManager,
+  type UnifiedSessionManagerConfig,
+  DEFAULT_UNIFIED_SESSION_MANAGER_CONFIG,
+} from "./services/unified-session-manager";

@@ -1,404 +1,212 @@
-/**
- * Token Validation Utilities
- *
- * Single Responsibility: Token structure validation and extraction
- * Clean helper functions following DRY principles
- */
+/** * Token Validation Utilities * Helper functions for JWT token parsing and validation */
 
-/**
- * Token validation errors
- */
-export enum TokenValidationError {
-  INVALID_FORMAT = "invalid_format",
-  MISSING_REQUIRED_CLAIMS = "missing_required_claims",
-  INVALID_PAYLOAD_STRUCTURE = "invalid_payload_structure",
-  EXTRACTION_FAILED = "extraction_failed",
+import * as jose from "jose";
+
+/** * Extracted token information interface */
+export interface ExtractedTokenInfo {
+  jti?: string;
+  sub?: string;
+  exp?: number;
+  iat?: number;
+  iss?: string;
+  aud?: string | string[];
+}
+/** * Security level enumeration */ export enum SecurityLevel {
+  LOW = "low",
+  MEDIUM = "medium",
+  HIGH = "high",
+  CRITICAL = "critical",
+}
+/** * Token validation error class */ export class TokenValidationError extends Error {
+  constructor(message: string, public code?: string) {
+    super(message);
+    this.name = "TokenValidationError";
+  }
+}
+/** * Error classification helper for JWT operations */ export class ErrorClassificationHelper {
+  /**   * Classify JWT-related errors for monitoring and debugging   */ static classifyJWTError(
+    error: Error
+  ): string {
+    if (error.name === "JWTExpired") return "JWT_EXPIRED";
+    if (error.name === "JWTInvalid") return "JWT_INVALID";
+    if (error.name === "JWTMalformed") return "JWT_MALFORMED";
+    if (error.message.includes("Redis")) return "REDIS_ERROR";
+    if (error.message.includes("Network")) return "NETWORK_ERROR";
+    if (error.message.includes("timeout")) return "TIMEOUT_ERROR";
+    return "UNKNOWN_ERROR";
+  }
+  /**   * Get human-readable error message for error codes   */ static getErrorMessage(
+    errorCode: string
+  ): string {
+    const messages: Record<string, string> = {
+      JWT_EXPIRED: "Token has expired",
+      JWT_INVALID: "Token is invalid",
+      JWT_MALFORMED: "Token format is malformed",
+      REDIS_ERROR: "Redis operation failed",
+      NETWORK_ERROR: "Network connectivity issue",
+      TIMEOUT_ERROR: "Operation timed out",
+      UNKNOWN_ERROR: "An unknown error occurred",
+    };
+    return messages[errorCode] || "Unknown error";
+  }
 }
 
 /**
- * Token extraction result
+ * Token extraction result interface
  */
 export interface TokenExtractionResult {
-  readonly success: boolean;
-  readonly data?: {
-    readonly tokenId: string;
-    readonly userId: string;
-    readonly issuedAt: Date;
-    readonly expiresAt: Date;
+  success: boolean;
+  data?: ExtractedTokenInfo & {
+    tokenId: string;
+    userId: string;
+    expiresAt: number;
+    issuedAt: number;
   };
-  readonly error?: TokenValidationError;
+  error?: string;
 }
 
-/**
- * JWT payload interface for validation
- */
-export interface JWTPayloadStructure {
-  readonly sub: string;
-  readonly iat: number;
-  readonly exp: number;
-  readonly jti?: string;
-}
-
-/**
- * Token Extraction Helper
- *
- * Single responsibility: Extract and validate JWT token components
- * No external dependencies, pure functions for testability
- */
-export class TokenExtractionHelper {
-  /**
-   * Validate JWT token format (3 parts separated by dots)
-   */
-  static isValidJWTFormat(token: string): boolean {
-    if (typeof token !== "string" || token.trim().length === 0) {
-      return false;
-    }
-
-    const parts = token.split(".");
-    return parts.length === 3 && parts.every((part) => part.length > 0);
-  }
-
-  /**
-   * Extract payload from JWT without verification (for blacklist checking)
-   */
-  static extractPayload(token: string): JWTPayloadStructure | null {
-    if (!this.isValidJWTFormat(token)) {
-      return null;
-    }
-
+/** * Token extraction helper */ export class TokenExtractionHelper {
+  static async extractTokenInfo(token: string): Promise<TokenExtractionResult> {
     try {
-      const parts = token.split(".");
-      const payloadBase64 = parts[1];
-
-      // Add padding if needed
-      const paddedPayload =
-        payloadBase64 + "=".repeat((4 - (payloadBase64.length % 4)) % 4);
-
-      const payloadJson = atob(paddedPayload);
-      const payload = JSON.parse(payloadJson);
-
-      return this.validatePayloadStructure(payload) ? payload : null;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  /**
-   * Extract token information for blacklist operations
-   */
-  static extractTokenInfo(token: string): TokenExtractionResult {
-    const payload = this.extractPayload(token);
-
-    if (!payload) {
-      return {
-        success: false,
-        error: TokenValidationError.EXTRACTION_FAILED,
+      const payload = jose.decodeJwt(token);
+      const extractedInfo: ExtractedTokenInfo = {
+        jti: payload.jti as string,
+        sub: payload.sub as string,
+        exp: payload.exp as number,
+        iat: payload.iat as number,
+        iss: payload.iss as string,
+        aud: payload.aud as string | string[],
       };
-    }
-
-    try {
-      const tokenId =
-        payload.jti || this.generateTokenId(payload.sub, payload.iat);
 
       return {
         success: true,
         data: {
-          tokenId,
-          userId: payload.sub,
-          issuedAt: new Date(payload.iat * 1000),
-          expiresAt: new Date(payload.exp * 1000),
+          ...extractedInfo,
+          tokenId: extractedInfo.jti || "unknown",
+          userId: extractedInfo.sub || "unknown",
+          expiresAt: extractedInfo.exp || 0,
+          issuedAt: extractedInfo.iat || 0,
         },
       };
     } catch (error) {
       return {
         success: false,
-        error: TokenValidationError.EXTRACTION_FAILED,
+        error: error instanceof Error ? error.message : "Unknown error",
       };
     }
   }
 
-  /**
-   * Generate consistent token ID from sub and iat
-   */
-  static generateTokenId(userId: string, issuedAt: number): string {
-    return `${userId}-${issuedAt}`;
-  }
-
-  /**
-   * Validate payload has required structure
-   */
-  private static validatePayloadStructure(
-    payload: unknown
-  ): payload is JWTPayloadStructure {
-    if (typeof payload !== "object" || payload === null) {
-      return false;
+  // Keep the old method for backward compatibility
+  static async extractTokenInfoDirect(
+    token: string
+  ): Promise<ExtractedTokenInfo> {
+    try {
+      const payload = jose.decodeJwt(token);
+      return {
+        jti: payload.jti as string,
+        sub: payload.sub as string,
+        exp: payload.exp as number,
+        iat: payload.iat as number,
+        iss: payload.iss as string,
+        aud: payload.aud as string | string[],
+      };
+    } catch (error) {
+      throw new TokenValidationError(
+        `Failed to extract token info: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     }
-
-    const p = payload as Record<string, unknown>;
-
-    return (
-      typeof p.sub === "string" &&
-      typeof p.iat === "number" &&
-      typeof p.exp === "number" &&
-      p.sub.length > 0 &&
-      p.iat > 0 &&
-      p.exp > p.iat
-    );
   }
 }
 
 /**
- * Security levels type definition
- */
-export type SecurityLevel = "low" | "medium" | "high" | "critical";
-
-/**
- * Security Level Helper
- *
- * Single responsibility: Security level validation and comparison
- */
-export class SecurityLevelHelper {
-  /**
-   * Security levels in order of strength
-   */
-  static readonly LEVELS: readonly SecurityLevel[] = [
-    "low",
-    "medium",
-    "high",
-    "critical",
-  ] as const;
-
-  /**
-   * Check if security level is valid
-   */
-  static isValidSecurityLevel(level: string): level is SecurityLevel {
-    return this.LEVELS.includes(level as SecurityLevel);
-  }
-
-  /**
-   * Check if current level meets minimum requirement
-   */
-  static meetsMinimumLevel(
-    current: SecurityLevel,
-    minimum: SecurityLevel
-  ): boolean {
-    const currentIndex = this.LEVELS.indexOf(current);
-    const minimumIndex = this.LEVELS.indexOf(minimum);
-
-    return currentIndex >= minimumIndex;
-  }
-
-  /**
-   * Get security level strength (numeric value for comparison)
-   */
-  static getLevelStrength(level: SecurityLevel): number {
-    return this.LEVELS.indexOf(level);
-  }
-}
-
-/**
- * Token Time Helper
- *
- * Single responsibility: Time-related token operations
+ * Token time helper
  */
 export class TokenTimeHelper {
-  /**
-   * Check if token is expired based on exp claim
-   */
-  static isExpired(expiresAt: Date): boolean {
-    return Date.now() >= expiresAt.getTime();
+  static isExpired(tokenInfo: ExtractedTokenInfo): boolean {
+    if (!tokenInfo.exp) return false;
+    return Date.now() >= tokenInfo.exp * 1000;
   }
 
-  /**
-   * Calculate TTL in seconds from expiration date
-   */
-  static calculateTTLSeconds(expiresAt: Date): number {
-    const ttlMs = expiresAt.getTime() - Date.now();
-    return Math.max(Math.ceil(ttlMs / 1000), 0);
-  }
-
-  /**
-   * Check if token is within acceptable time bounds
-   */
-  static isWithinTimeBounds(issuedAt: Date, expiresAt: Date): boolean {
-    const now = Date.now();
-    const iat = issuedAt.getTime();
-    const exp = expiresAt.getTime();
-
-    // Basic sanity checks
-    return (
-      iat <= now && // Not issued in future
-      exp > iat && // Expires after issued
-      exp > now // Not already expired
-    );
-  }
-
-  /**
-   * Get current Unix timestamp
-   */
-  static getCurrentTimestamp(): number {
-    return Math.floor(Date.now() / 1000);
+  static getRemainingTime(tokenInfo: ExtractedTokenInfo): number {
+    if (!tokenInfo.exp) return 0;
+    const remaining = tokenInfo.exp - Math.floor(Date.now() / 1000);
+    return Math.max(0, remaining);
   }
 }
 
 /**
- * Token ID Generator
- *
- * Single responsibility: Generate unique, consistent token identifiers
- */
-export class TokenIdGenerator {
-  /**
-   * Generate unique token ID with timestamp and randomness
-   */
-  static generateUniqueId(userId: string): string {
-    const timestamp = TokenTimeHelper.getCurrentTimestamp();
-    const random = Math.random().toString(36).substring(2, 10);
-    return `${userId}-${timestamp}-${random}`;
-  }
-
-  /**
-   * Generate deterministic token ID (for blacklist consistency)
-   */
-  static generateDeterministicId(userId: string, issuedAt: number): string {
-    return `${userId}-${issuedAt}`;
-  }
-
-  /**
-   * Validate token ID format
-   */
-  static isValidTokenId(tokenId: string): boolean {
-    if (typeof tokenId !== "string" || tokenId.length < 3) {
-      return false;
-    }
-
-    // Should contain at least userId and timestamp
-    const parts = tokenId.split("-");
-    return parts.length >= 2 && parts[0].length > 0 && /^\d+$/.test(parts[1]);
-  }
-
-  /**
-   * Extract user ID from token ID
-   */
-  static extractUserIdFromTokenId(tokenId: string): string | null {
-    if (!this.isValidTokenId(tokenId)) {
-      return null;
-    }
-
-    const parts = tokenId.split("-");
-    return parts[0];
-  }
-}
-
-/**
- * Batch Operation Helper
- *
- * Single responsibility: Handle batch processing with proper chunking
+ * Batch operation helper
  */
 export class BatchOperationHelper {
-  /**
-   * Process array in batches with size limit
-   */
-  static chunkArray<T>(array: T[], chunkSize: number): T[][] {
-    if (chunkSize <= 0) {
-      throw new Error("Chunk size must be positive");
-    }
-
-    const chunks: T[][] = [];
-    for (let i = 0; i < array.length; i += chunkSize) {
-      chunks.push(array.slice(i, i + chunkSize));
-    }
-
-    return chunks;
-  }
-
-  /**
-   * Process batches with delay between each batch
-   */
-  static async processBatchesWithDelay<T, R>(
+  static async processBatch<T, R>(
     items: T[],
-    processor: (batch: T[]) => Promise<R[]>,
-    batchSize: number,
-    delayMs: number = 0
+    processor: (item: T) => Promise<R>,
+    batchSize: number = 100
   ): Promise<R[]> {
-    const chunks = this.chunkArray(items, batchSize);
     const results: R[] = [];
 
-    for (let i = 0; i < chunks.length; i++) {
-      const chunkResults = await processor(chunks[i]);
-      results.push(...chunkResults);
-
-      // Add delay between batches (except for the last one)
-      if (delayMs > 0 && i < chunks.length - 1) {
-        await this.sleep(delayMs);
-      }
+    for (let i = 0; i < items.length; i += batchSize) {
+      const batch = items.slice(i, i + batchSize);
+      const batchResults = await Promise.all(batch.map(processor));
+      results.push(...batchResults);
     }
 
     return results;
   }
+}
 
-  /**
-   * Sleep utility for delays
-   */
-  private static sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Security level helper
+ */
+export class SecurityLevelHelper {
+  static getNumericLevel(level: SecurityLevel): number {
+    const levels = {
+      [SecurityLevel.LOW]: 1,
+      [SecurityLevel.MEDIUM]: 2,
+      [SecurityLevel.HIGH]: 3,
+      [SecurityLevel.CRITICAL]: 4,
+    };
+    return levels[level] || 1;
+  }
+
+  static fromString(level: string): SecurityLevel {
+    const normalized = level.toLowerCase();
+    switch (normalized) {
+      case "low":
+        return SecurityLevel.LOW;
+      case "medium":
+        return SecurityLevel.MEDIUM;
+      case "high":
+        return SecurityLevel.HIGH;
+      case "critical":
+        return SecurityLevel.CRITICAL;
+      default:
+        return SecurityLevel.LOW;
+    }
   }
 }
 
 /**
- * Error Classification Helper
- *
- * Single responsibility: Classify and handle different types of validation errors
+ * Extract token information from JWT string
  */
-export class ErrorClassificationHelper {
-  /**
-   * Classify JWT verification errors
-   */
-  static classifyJWTError(error: unknown): TokenValidationError {
-    if (!error || typeof error !== "object") {
-      return TokenValidationError.INVALID_FORMAT;
-    }
+export async function extractTokenInfo(
+  token: string
+): Promise<ExtractedTokenInfo> {
+  return TokenExtractionHelper.extractTokenInfoDirect(token);
+}
 
-    const err = error as { name?: string; message?: string };
+/**
+ * Check if token is expired based on exp claim
+ */
+export function isTokenExpired(tokenInfo: ExtractedTokenInfo): boolean {
+  return TokenTimeHelper.isExpired(tokenInfo);
+}
 
-    if (err.name === "JWTExpired") {
-      return TokenValidationError.INVALID_FORMAT; // Let JWT service handle expiration
-    }
-
-    if (err.name === "JWTInvalid" || err.name === "JWTMalformed") {
-      return TokenValidationError.INVALID_FORMAT;
-    }
-
-    if (err.name === "JWTClaimValidationFailed") {
-      return TokenValidationError.MISSING_REQUIRED_CLAIMS;
-    }
-
-    return TokenValidationError.INVALID_PAYLOAD_STRUCTURE;
-  }
-
-  /**
-   * Check if error is recoverable
-   */
-  static isRecoverableError(error: TokenValidationError): boolean {
-    return ![
-      TokenValidationError.INVALID_FORMAT,
-      TokenValidationError.INVALID_PAYLOAD_STRUCTURE,
-    ].includes(error);
-  }
-
-  /**
-   * Get user-friendly error message
-   */
-  static getErrorMessage(error: TokenValidationError): string {
-    const messages = {
-      [TokenValidationError.INVALID_FORMAT]: "Token format is invalid",
-      [TokenValidationError.MISSING_REQUIRED_CLAIMS]:
-        "Token is missing required claims",
-      [TokenValidationError.INVALID_PAYLOAD_STRUCTURE]:
-        "Token payload structure is invalid",
-      [TokenValidationError.EXTRACTION_FAILED]:
-        "Failed to extract token information",
-    };
-
-    return messages[error] || "Unknown token validation error";
-  }
+/**
+ * Get token remaining time in seconds
+ */
+export function getTokenRemainingTime(tokenInfo: ExtractedTokenInfo): number {
+  return TokenTimeHelper.getRemainingTime(tokenInfo);
 }

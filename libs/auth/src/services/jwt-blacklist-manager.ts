@@ -560,14 +560,16 @@ class BlacklistBusinessLogic {
   /**
    * Validate revocation request with comprehensive checks
    */
-  validateRevocationRequest(
+  async validateRevocationRequest(
     token: string,
     reason: TokenRevocationReason,
     context?: Record<string, unknown>
-  ): OperationResult<{
-    tokenInfo: ExtractedTokenInfo;
-    revocationRecord: RevocationRecord;
-  }> {
+  ): Promise<
+    OperationResult<{
+      tokenInfo: ExtractedTokenInfo;
+      revocationRecord: RevocationRecord;
+    }>
+  > {
     // Validate token format
     if (!token || typeof token !== "string" || token.length === 0) {
       return {
@@ -587,7 +589,9 @@ class BlacklistBusinessLogic {
     }
 
     // Extract and validate token information
-    const extractionResult = TokenExtractionHelper.extractTokenInfo(token);
+    const extractionResult = await TokenExtractionHelper.extractTokenInfo(
+      token
+    );
     if (!extractionResult.success || !extractionResult.data) {
       return {
         success: false,
@@ -601,10 +605,10 @@ class BlacklistBusinessLogic {
     const { tokenId, userId, expiresAt, issuedAt } = extractionResult.data;
 
     // Check if token is already expired
-    if (TokenTimeHelper.isExpired(expiresAt)) {
+    if (TokenTimeHelper.isExpired({ exp: expiresAt })) {
       this.logger.debug("Attempting to revoke expired token", {
         tokenId,
-        expiresAt: expiresAt.toISOString(),
+        expiresAt: new Date(expiresAt * 1000).toISOString(),
       });
 
       return {
@@ -628,16 +632,23 @@ class BlacklistBusinessLogic {
       ipAddress: context?.ipAddress as string,
       userAgent: context?.userAgent as string,
       metadata: {
-        tokenIssuedAt: issuedAt.toISOString(),
-        tokenExpiresAt: expiresAt.toISOString(),
+        tokenIssuedAt: new Date(issuedAt * 1000).toISOString(),
+        tokenExpiresAt: new Date(expiresAt * 1000).toISOString(),
         ...(context?.metadata as Record<string, unknown>),
       },
+    };
+
+    const baseTokenInfo: ExtractedTokenInfo = {
+      tokenId: extractionResult.data.jti || "",
+      userId: extractionResult.data.sub || "",
+      expiresAt: new Date((extractionResult.data.exp || 0) * 1000),
+      issuedAt: new Date((extractionResult.data.iat || 0) * 1000),
     };
 
     return {
       success: true,
       data: {
-        tokenInfo: extractionResult.data,
+        tokenInfo: baseTokenInfo,
         revocationRecord,
       },
     };
@@ -923,7 +934,7 @@ export class JWTBlacklistManager {
 
     try {
       // Validate revocation request
-      const validation = this.business.validateRevocationRequest(
+      const validation = await this.business.validateRevocationRequest(
         token,
         reason,
         context
@@ -1004,13 +1015,27 @@ export class JWTBlacklistManager {
 
     try {
       // Extract token information
-      const extractionResult = TokenExtractionHelper.extractTokenInfo(token);
+      const extractionResult = await TokenExtractionHelper.extractTokenInfo(
+        token
+      );
       if (!extractionResult.success || !extractionResult.data) {
         await this.recordMetrics("check_token_invalid", startTime);
         return false; // Invalid tokens are not considered revoked
       }
 
-      const { tokenId, userId, issuedAt } = extractionResult.data;
+      const { tokenId, userId, issuedAt, expiresAt } = {
+        tokenId: extractionResult.data.jti || "",
+        userId: extractionResult.data.sub || "",
+        issuedAt: new Date((extractionResult.data.iat || 0) * 1000),
+        expiresAt: new Date((extractionResult.data.exp || 0) * 1000),
+      };
+
+      const tokenInfo: ExtractedTokenInfo = {
+        tokenId,
+        userId,
+        issuedAt,
+        expiresAt,
+      };
 
       // Check cache first if enabled
       let directRevocation: RevocationRecord | null = null;
@@ -1059,7 +1084,7 @@ export class JWTBlacklistManager {
 
       // Determine if token is revoked
       const revocationStatus = this.business.checkTokenRevocationStatus(
-        extractionResult.data,
+        tokenInfo,
         directRevocation,
         userRevocation
       );
