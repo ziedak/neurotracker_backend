@@ -7,7 +7,7 @@ export function setupMiddleware(app: Elysia, config: ServerConfig) {
     app.onBeforeHandle(({ request, headers }: any) => {
       const requestId = `req_${Date.now()}_${Math.random()
         .toString(36)
-        .substr(2, 9)}`;
+        .substring(2, 9)}`;
       console.log("Incoming request", {
         requestId,
         method: request.method,

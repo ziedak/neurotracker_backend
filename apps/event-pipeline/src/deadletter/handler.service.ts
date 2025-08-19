@@ -1,7 +1,7 @@
 import { Logger } from "@libs/monitoring";
 import { RedisClient } from "@libs/database";
 
-const logger = new Logger("event-pipeline-deadletter");
+const logger = Logger.getInstance("event-pipeline-deadletter");
 const redis = RedisClient.getInstance();
 
 export class DeadLetterHandler {

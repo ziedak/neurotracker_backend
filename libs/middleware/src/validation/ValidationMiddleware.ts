@@ -1,8 +1,8 @@
-import { BaseMiddleware } from '../base';
-import { MiddlewareContext, ValidationConfig } from '../types';
-import { Logger, MetricsCollector } from '@libs/monitoring';
-import { ZodValidator } from './ZodValidator';
-import { RuleValidator } from './RuleValidator';
+import { BaseMiddleware } from "../base";
+import { MiddlewareContext, ValidationConfig } from "../types";
+import { Logger, MetricsCollector } from "@libs/monitoring";
+import { ZodValidator } from "./ZodValidator";
+import { RuleValidator } from "./RuleValidator";
 
 /**
  * Validation result interface
@@ -37,20 +37,27 @@ export interface Validator {
 export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
   private readonly validator: Validator;
 
-  constructor(config: ValidationConfig, logger: Logger, metrics?: MetricsCollector) {
-    super('validation', config, logger, metrics);
-    
+  constructor(
+    config: ValidationConfig,
+    logger: Logger,
+    metrics?: MetricsCollector
+  ) {
+    super("validation", config, logger, metrics);
+
     // Initialize appropriate validator based on engine
-    if (config.engine === 'zod') {
+    if (config.engine === "zod") {
       this.validator = new ZodValidator(config, logger);
-    } else if (config.engine === 'rules') {
+    } else if (config.engine === "rules") {
       this.validator = new RuleValidator(config, logger);
     } else {
       throw new Error(`Unknown validation engine: ${config.engine}`);
     }
   }
 
-  async execute(context: MiddlewareContext, next: () => Promise<void>): Promise<void | any> {
+  async execute(
+    context: MiddlewareContext,
+    next: () => Promise<void>
+  ): Promise<void | any> {
     const startTime = performance.now();
     const requestId = this.getRequestId(context);
 
@@ -65,21 +72,21 @@ export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
 
       if (!result.valid) {
         context.set.status = 400;
-        await this.recordMetric('validation_failed');
-        
-        this.logger.warn('Validation failed', {
+        await this.recordMetric("validation_failed");
+
+        this.logger.warn("Validation failed", {
           path: context.request.url,
           method: context.request.method,
           errors: result.errors?.length || 0,
-          requestId
+          requestId,
         });
 
         return {
-          error: 'Validation failed',
-          message: 'Request contains invalid data',
+          error: "Validation failed",
+          message: "Request contains invalid data",
           details: result.errors,
-          code: 'VALIDATION_ERROR',
-          requestId
+          code: "VALIDATION_ERROR",
+          requestId,
         };
       }
 
@@ -88,7 +95,7 @@ export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
         if (!context.validated) {
           context.validated = {};
         }
-        
+
         // Store validated data by type
         if (result.data.body !== undefined) {
           context.validated.body = result.data.body;
@@ -101,35 +108,37 @@ export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
         }
       }
 
-      await this.recordMetric('validation_success');
-      this.logger.debug('Validation successful', {
+      await this.recordMetric("validation_success");
+      this.logger.debug("Validation successful", {
         path: context.request.url,
         method: context.request.method,
         engine: this.config.engine,
-        requestId
+        requestId,
       });
 
       await next();
-
     } catch (error) {
       const duration = performance.now() - startTime;
-      await this.recordTimer('validation_error_duration', duration);
-      
-      this.logger.error('Validation middleware error', error as Error, {
+      await this.recordTimer("validation_error_duration", duration);
+
+      this.logger.error("Validation middleware error", error as Error, {
         path: context.request.url,
         requestId,
-        duration: Math.round(duration)
+        duration: Math.round(duration),
       });
 
       context.set.status = 500;
       return {
-        error: 'Validation service error',
-        message: 'Internal validation error',
-        code: 'VALIDATION_SERVICE_ERROR',
-        requestId
+        error: "Validation service error",
+        message: "Internal validation error",
+        code: "VALIDATION_SERVICE_ERROR",
+        requestId,
       };
     } finally {
-      await this.recordTimer('validation_duration', performance.now() - startTime);
+      await this.recordTimer(
+        "validation_duration",
+        performance.now() - startTime
+      );
     }
   }
 
@@ -138,8 +147,8 @@ export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
    */
   private async checkRequestSize(context: MiddlewareContext): Promise<void> {
     try {
-      const contentLength = context.request.headers['content-length'];
-      
+      const contentLength = context.request.headers["content-length"];
+
       if (contentLength) {
         const size = parseInt(contentLength, 10);
         if (size > this.config.maxRequestSize!) {
@@ -159,7 +168,7 @@ export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
         }
       }
     } catch (error) {
-      if ((error as Error).message.includes('exceeds maximum')) {
+      if ((error as Error).message.includes("exceeds maximum")) {
         throw error;
       }
       // Ignore other size check errors
@@ -170,20 +179,20 @@ export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
    * Factory method for common validation configurations
    */
   public static create(
-    type: 'ai-engine' | 'data-intelligence' | 'event-pipeline' | 'api-gateway',
+    type: "ai-engine" | "data-intelligence" | "event-pipeline" | "api-gateway",
     overrides?: Partial<ValidationConfig>
   ): ValidationMiddleware {
     const configs = {
-      'ai-engine': {
-        engine: 'zod' as const,
+      "ai-engine": {
+        engine: "zod" as const,
         strictMode: true,
         sanitizeInputs: true,
         maxRequestSize: 1024 * 1024, // 1MB
         validateBody: true,
         validateQuery: true,
       },
-      'data-intelligence': {
-        engine: 'rules' as const,
+      "data-intelligence": {
+        engine: "rules" as const,
         strictMode: true,
         sanitizeInputs: true,
         maxRequestSize: 10 * 1024 * 1024, // 10MB for data exports
@@ -191,15 +200,15 @@ export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
         validateQuery: true,
         validateParams: true,
       },
-      'event-pipeline': {
-        engine: 'zod' as const,
+      "event-pipeline": {
+        engine: "zod" as const,
         strictMode: false, // More lenient for event data
         sanitizeInputs: false, // Preserve event data integrity
         maxRequestSize: 5 * 1024 * 1024, // 5MB for batch events
         validateBody: true,
       },
-      'api-gateway': {
-        engine: 'rules' as const,
+      "api-gateway": {
+        engine: "rules" as const,
         strictMode: false, // Gateway validates basics only
         sanitizeInputs: false, // Let downstream services handle
         maxRequestSize: 2 * 1024 * 1024, // 2MB
@@ -208,7 +217,7 @@ export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
     };
 
     const config = { ...configs[type], ...overrides };
-    const logger = Logger.getInstance();
+    const logger = Logger.getInstance(type);
     const metrics = MetricsCollector.getInstance();
 
     return new ValidationMiddleware(config, logger, metrics);
@@ -217,7 +226,11 @@ export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
   /**
    * Create validation middleware for specific schema
    */
-  public static forSchema(schemaName: string, engine: 'zod' | 'rules' = 'zod'): ValidationMiddleware {
+  public static forSchema(
+    schemaName: string,
+    engine: "zod" | "rules" = "zod",
+    logger: Logger
+  ): ValidationMiddleware {
     const config: ValidationConfig = {
       engine,
       schemas: { [schemaName]: true },
@@ -226,9 +239,23 @@ export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
       validateBody: true,
     };
 
-    const logger = Logger.getInstance();
     const metrics = MetricsCollector.getInstance();
-
     return new ValidationMiddleware(config, logger, metrics);
+  }
+
+  /**
+   * Create Elysia plugin for this middleware
+   */
+  public elysia(config?: Partial<ValidationConfig>) {
+    const finalConfig = config ? { ...this.config, ...config } : this.config;
+    const middleware = new ValidationMiddleware(
+      finalConfig,
+      this.logger,
+      this.metrics
+    );
+
+    return (app: any) => {
+      return app.onBeforeHandle(middleware.middleware());
+    };
   }
 }

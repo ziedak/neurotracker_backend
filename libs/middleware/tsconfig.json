@@ -1,17 +1,16 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true
+    "outDir": "../../dist/libs/middleware",
+    "tsBuildInfoFile": "../../dist/libs/middleware/tsconfig.tsbuildinfo",
+    "rootDir": "src",
+    "composite": true
   },
   "references": [
     { "path": "../../libs/config" },
     { "path": "../../libs/database" },
     { "path": "../../libs/monitoring" }
   ],
-  "include": ["src/**/*"],
-  "exclude": ["dist", "node_modules", "**/*.test.ts"]
+  "include": ["src"],
+  "exclude": ["dist", "node_modules", "**/*.test.ts", "**/*.spec.ts"]
 }

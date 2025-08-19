@@ -1,8 +1,8 @@
-import { BaseMiddleware } from '../base';
-import { MiddlewareContext, RateLimitConfig } from '../types';
-import { Logger, MetricsCollector } from '@libs/monitoring';
-import { RedisRateLimit } from './RedisRateLimit';
-import { IpStrategy, UserStrategy, ApiKeyStrategy } from './strategies';
+import { BaseMiddleware } from "../base";
+import { MiddlewareContext, RateLimitConfig } from "../types";
+import { Logger, MetricsCollector } from "@libs/monitoring";
+import { RedisRateLimit } from "./RedisRateLimit";
+import { IpStrategy, UserStrategy, ApiKeyStrategy } from "./strategies";
 
 /**
  * Rate limit result interface
@@ -30,32 +30,38 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
   private readonly redisRateLimit: RedisRateLimit;
   private readonly strategies: Map<string, RateLimitStrategy>;
 
-  constructor(config: RateLimitConfig, logger: Logger, metrics?: MetricsCollector) {
-    super('rateLimit', config, logger, metrics);
-    
+  constructor(
+    config: RateLimitConfig,
+    logger: Logger,
+    metrics?: MetricsCollector
+  ) {
+    super("rateLimit", config, logger, metrics);
+
     this.redisRateLimit = new RedisRateLimit(config, logger, metrics);
-    this.strategies = new Map([
-      ['ip', new IpStrategy()],
-      ['user', new UserStrategy()],
-      ['apiKey', new ApiKeyStrategy()],
-    ]);
+    this.strategies = new Map<string, RateLimitStrategy>();
+    this.strategies.set("ip", new IpStrategy());
+    this.strategies.set("user", new UserStrategy());
+    this.strategies.set("apiKey", new ApiKeyStrategy());
 
     // Add custom strategy if provided
-    if (config.keyStrategy === 'custom' && config.customKeyGenerator) {
-      this.strategies.set('custom', {
-        generateKey: config.customKeyGenerator
+    if (config.keyStrategy === "custom" && config.customKeyGenerator) {
+      this.strategies.set("custom", {
+        generateKey: config.customKeyGenerator,
       });
     }
   }
 
-  async execute(context: MiddlewareContext, next: () => Promise<void>): Promise<void | any> {
+  async execute(
+    context: MiddlewareContext,
+    next: () => Promise<void>
+  ): Promise<void | any> {
     const startTime = performance.now();
     const requestId = this.getRequestId(context);
 
     try {
       // Generate rate limit key
       const key = this.generateKey(context);
-      
+
       // Check rate limit
       const result = await this.checkRateLimit(key);
 
@@ -68,27 +74,28 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
       if (!result.allowed) {
         context.set.status = 429;
         if (result.retryAfter) {
-          context.set.headers['Retry-After'] = result.retryAfter.toString();
+          context.set.headers["Retry-After"] = result.retryAfter.toString();
         }
 
-        await this.recordMetric('rate_limit_exceeded');
-        this.logger.warn('Rate limit exceeded', {
+        await this.recordMetric("rate_limit_exceeded");
+        this.logger.warn("Rate limit exceeded", {
           key,
           totalHits: result.totalHits,
           maxRequests: this.config.maxRequests,
           clientIp: this.getClientIp(context),
-          userAgent: context.request.headers['user-agent'],
-          requestId
+          userAgent: context.request.headers["user-agent"],
+          requestId,
         });
 
         return {
-          error: 'Rate limit exceeded',
-          message: this.config.message || 'Too many requests, please try again later.',
+          error: "Rate limit exceeded",
+          message:
+            this.config.message || "Too many requests, please try again later.",
           retryAfter: result.resetTime.toISOString(),
-          code: 'RATE_LIMIT_EXCEEDED',
+          code: "RATE_LIMIT_EXCEEDED",
           maxRequests: this.config.maxRequests,
           remaining: result.remaining,
-          requestId
+          requestId,
         };
       }
 
@@ -106,29 +113,31 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
       } finally {
         // Update count based on success/failure rules
         await this.updateRateLimit(key, requestSuccessful, statusCode);
-        
+
         // Update headers with final count
         if (this.config.standardHeaders) {
           const updatedResult = await this.getRateLimitStatus(key);
           this.setRateLimitHeaders(context, updatedResult);
         }
 
-        await this.recordMetric('rate_limit_allowed');
+        await this.recordMetric("rate_limit_allowed");
       }
-
     } catch (error) {
       const duration = performance.now() - startTime;
-      await this.recordTimer('rate_limit_error_duration', duration);
-      
-      this.logger.error('Rate limit middleware error', error as Error, {
+      await this.recordTimer("rate_limit_error_duration", duration);
+
+      this.logger.error("Rate limit middleware error", error as Error, {
         requestId,
-        duration: Math.round(duration)
+        duration: Math.round(duration),
       });
 
       // Fail open - allow request on error
       await next();
     } finally {
-      await this.recordTimer('rate_limit_duration', performance.now() - startTime);
+      await this.recordTimer(
+        "rate_limit_duration",
+        performance.now() - startTime
+      );
     }
   }
 
@@ -138,14 +147,14 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
   private generateKey(context: MiddlewareContext): string {
     const strategy = this.strategies.get(this.config.keyStrategy);
     if (!strategy) {
-      this.logger.warn('Unknown rate limit strategy, falling back to IP', {
-        strategy: this.config.keyStrategy
+      this.logger.warn("Unknown rate limit strategy, falling back to IP", {
+        strategy: this.config.keyStrategy,
       });
-      return this.strategies.get('ip')!.generateKey(context);
+      return this.strategies.get("ip")!.generateKey(context);
     }
-    
+
     const baseKey = strategy.generateKey(context);
-    const prefix = this.config.redis?.keyPrefix || 'rate_limit';
+    const prefix = this.config.redis?.keyPrefix || "rate_limit";
     return `${prefix}:${baseKey}`;
   }
 
@@ -163,20 +172,24 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
   /**
    * Update rate limit count
    */
-  private async updateRateLimit(key: string, successful: boolean, statusCode: number): Promise<void> {
+  private async updateRateLimit(
+    key: string,
+    successful: boolean,
+    statusCode: number
+  ): Promise<void> {
     // Determine if we should count this request
     const shouldCount = this.shouldCountRequest(successful, statusCode);
-    
+
     if (shouldCount) {
       await this.redisRateLimit.increment(key, this.config.windowMs);
-      
+
       // Record metrics
-      await this.recordMetric('rate_limit_requests');
-      
+      await this.recordMetric("rate_limit_requests");
+
       // Warning if approaching limit
       const status = await this.getRateLimitStatus(key);
       if (status.remaining < this.config.maxRequests * 0.2) {
-        await this.recordMetric('rate_limit_warning');
+        await this.recordMetric("rate_limit_warning");
       }
     }
   }
@@ -195,11 +208,18 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
   /**
    * Set standard rate limit headers
    */
-  private setRateLimitHeaders(context: MiddlewareContext, result: RateLimitResult): void {
-    context.set.headers['X-RateLimit-Limit'] = this.config.maxRequests.toString();
-    context.set.headers['X-RateLimit-Remaining'] = Math.max(0, result.remaining).toString();
-    context.set.headers['X-RateLimit-Reset'] = result.resetTime.toISOString();
-    context.set.headers['X-RateLimit-Window'] = this.config.windowMs.toString();
+  private setRateLimitHeaders(
+    context: MiddlewareContext,
+    result: RateLimitResult
+  ): void {
+    context.set.headers["X-RateLimit-Limit"] =
+      this.config.maxRequests.toString();
+    context.set.headers["X-RateLimit-Remaining"] = Math.max(
+      0,
+      result.remaining
+    ).toString();
+    context.set.headers["X-RateLimit-Reset"] = result.resetTime.toISOString();
+    context.set.headers["X-RateLimit-Window"] = this.config.windowMs.toString();
   }
 
   /**
@@ -223,8 +243,8 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
   public async resetRateLimit(key: string): Promise<void> {
     const fullKey = this.generateKeyFromBase(key);
     await this.redisRateLimit.reset(fullKey);
-    
-    this.logger.info('Rate limit reset', { key: fullKey });
+
+    this.logger.info("Rate limit reset", { key: fullKey });
   }
 
   /**
@@ -238,59 +258,82 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
    * Generate full key from base key
    */
   private generateKeyFromBase(baseKey: string): string {
-    const prefix = this.config.redis?.keyPrefix || 'rate_limit';
+    const prefix = this.config.redis?.keyPrefix || "rate_limit";
     return `${prefix}:${baseKey}`;
+  }
+
+  /**
+   * Create Elysia plugin for this middleware
+   */
+  public elysia(config?: Partial<RateLimitConfig>) {
+    const finalConfig = config ? { ...this.config, ...config } : this.config;
+    const middleware = new RateLimitMiddleware(
+      finalConfig,
+      this.logger,
+      this.metrics
+    );
+
+    return (app: any) => {
+      return app.onBeforeHandle(middleware.middleware());
+    };
   }
 
   /**
    * Factory method for common rate limit configurations
    */
   public static create(
-    type: 'general' | 'strict' | 'api' | 'burst' | 'ai-prediction' | 'data-export',
+    type:
+      | "general"
+      | "strict"
+      | "api"
+      | "burst"
+      | "ai-prediction"
+      | "data-export",
     overrides?: Partial<RateLimitConfig>
   ): RateLimitMiddleware {
     const configs = {
       general: {
         windowMs: 60000, // 1 minute
         maxRequests: 1000,
-        keyStrategy: 'ip' as const,
-        message: 'Too many requests from this IP, please try again later.',
+        keyStrategy: "ip" as const,
+        message: "Too many requests from this IP, please try again later.",
       },
       strict: {
         windowMs: 60000, // 1 minute
         maxRequests: 100,
-        keyStrategy: 'user' as const,
-        message: 'Rate limit exceeded, please reduce request frequency.',
+        keyStrategy: "user" as const,
+        message: "Rate limit exceeded, please reduce request frequency.",
       },
       api: {
         windowMs: 60000, // 1 minute
         maxRequests: 5000,
-        keyStrategy: 'apiKey' as const,
-        message: 'API key rate limit exceeded, please contact support.',
+        keyStrategy: "apiKey" as const,
+        message: "API key rate limit exceeded, please contact support.",
       },
       burst: {
         windowMs: 10000, // 10 seconds
         maxRequests: 100,
-        keyStrategy: 'user' as const,
-        message: 'Burst rate limit exceeded, please pace your requests.',
+        keyStrategy: "user" as const,
+        message: "Burst rate limit exceeded, please pace your requests.",
       },
-      'ai-prediction': {
+      "ai-prediction": {
         windowMs: 60000, // 1 minute
         maxRequests: 1000,
-        keyStrategy: 'user' as const,
-        message: 'Prediction rate limit exceeded, please reduce frequency.',
+        keyStrategy: "user" as const,
+        message: "Prediction rate limit exceeded, please reduce frequency.",
         skipFailedRequests: true, // Don't count failed predictions
       },
-      'data-export': {
+      "data-export": {
         windowMs: 300000, // 5 minutes
         maxRequests: 50,
-        keyStrategy: 'user' as const,
-        message: 'Export rate limit exceeded, please wait before requesting more.',
+        keyStrategy: "user" as const,
+        message:
+          "Export rate limit exceeded, please wait before requesting more.",
       },
     };
 
     const config = { ...configs[type], standardHeaders: true, ...overrides };
-    const logger = Logger.getInstance();
+    const logger = Logger.getInstance("RateLimitMiddleware");
     const metrics = MetricsCollector.getInstance();
 
     return new RateLimitMiddleware(config, logger, metrics);

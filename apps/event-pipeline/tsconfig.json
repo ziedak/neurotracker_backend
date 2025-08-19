@@ -12,7 +12,8 @@
     { "path": "../../libs/messaging" },
     { "path": "../../libs/elysia-server" },
     { "path": "../../libs/database" },
-    { "path": "../../libs/monitoring" }
+    { "path": "../../libs/monitoring" },
+    { "path": "../../libs/middleware" }
   ],
   "include": ["src/**/*"],
   "exclude": ["node_modules"]

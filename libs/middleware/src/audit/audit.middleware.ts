@@ -152,7 +152,10 @@ export class AuditMiddleware {
         metadata: {
           method: request.method,
           url: request.url,
-          headers: this.sanitizeHeaders(request.headers, finalConfig.sensitiveFields || []),
+          headers: this.sanitizeHeaders(
+            request.headers,
+            finalConfig.sensitiveFields || []
+          ),
           ...(finalConfig.includeBody && request.body
             ? { body: this.sanitizeBody(request.body, finalConfig) }
             : {}),
@@ -238,7 +241,10 @@ export class AuditMiddleware {
   /**
    * Log successful request
    */
-  private async logSuccessfulRequest(context: any, config: AuditConfig): Promise<void> {
+  private async logSuccessfulRequest(
+    context: any,
+    config: AuditConfig
+  ): Promise<void> {
     const { request, response, auditContext, user, session } = context;
     const duration = Date.now() - auditContext.startTime;
 
@@ -273,7 +279,10 @@ export class AuditMiddleware {
   /**
    * Log failed request
    */
-  private async logFailedRequest(context: any, config: AuditConfig): Promise<void> {
+  private async logFailedRequest(
+    context: any,
+    config: AuditConfig
+  ): Promise<void> {
     const { request, error, auditContext, user, session, set } = context;
     const duration = Date.now() - auditContext.startTime;
 
@@ -306,19 +315,32 @@ export class AuditMiddleware {
   /**
    * Log audit event to storage
    */
-  async logAuditEvent(event: AuditEvent, config?: Partial<AuditConfig>): Promise<void> {
+  async logAuditEvent(
+    event: AuditEvent,
+    config?: Partial<AuditConfig>
+  ): Promise<void> {
     const finalConfig = { ...this.defaultConfig, ...config };
 
     try {
       // Store in Redis for quick access if configured
-      if (finalConfig.storageStrategy === "redis" || finalConfig.storageStrategy === "both") {
+      if (
+        finalConfig.storageStrategy === "redis" ||
+        finalConfig.storageStrategy === "both"
+      ) {
         const redisClient = RedisClient.getInstance();
         const redisKey = `audit:${event.id}`;
-        await redisClient.setex(redisKey, finalConfig.redisTtl || 604800, JSON.stringify(event));
+        await redisClient.setex(
+          redisKey,
+          finalConfig.redisTtl || 604800,
+          JSON.stringify(event)
+        );
       }
 
       // Store in ClickHouse for long-term analytics if configured
-      if (finalConfig.storageStrategy === "clickhouse" || finalConfig.storageStrategy === "both") {
+      if (
+        finalConfig.storageStrategy === "clickhouse" ||
+        finalConfig.storageStrategy === "both"
+      ) {
         await ClickHouseClient.insert("audit_events", [
           {
             id: event.id,
@@ -341,7 +363,10 @@ export class AuditMiddleware {
 
       // Record metrics
       await this.metrics.recordCounter(`audit_events_${event.result}`);
-      await this.metrics.recordTimer("audit_event_duration", event.duration || 0);
+      await this.metrics.recordTimer(
+        "audit_event_duration",
+        event.duration || 0
+      );
 
       // Log for monitoring
       this.logger.info("Audit event recorded", {
@@ -461,7 +486,10 @@ export class AuditMiddleware {
         WHERE timestamp BETWEEN {startDate:DateTime} AND {endDate:DateTime}
       `;
 
-      const summaryResults = await ClickHouseClient.execute(summaryQuery, queryParams);
+      const summaryResults = await ClickHouseClient.execute(
+        summaryQuery,
+        queryParams
+      );
 
       // Top actions
       const actionsQuery = `
@@ -473,7 +501,10 @@ export class AuditMiddleware {
         LIMIT 10
       `;
 
-      const actionsResults = await ClickHouseClient.execute(actionsQuery, queryParams);
+      const actionsResults = await ClickHouseClient.execute(
+        actionsQuery,
+        queryParams
+      );
 
       // Top resources
       const resourcesQuery = `
@@ -485,7 +516,10 @@ export class AuditMiddleware {
         LIMIT 10
       `;
 
-      const resourcesResults = await ClickHouseClient.execute(resourcesQuery, queryParams);
+      const resourcesResults = await ClickHouseClient.execute(
+        resourcesQuery,
+        queryParams
+      );
 
       const summary = summaryResults[0];
 
@@ -546,7 +580,7 @@ export class AuditMiddleware {
 
   private shouldSkipRoute(request: any, skipRoutes: string[]): boolean {
     const path = request.url || request.path || "/";
-    return skipRoutes.some(route => path.includes(route));
+    return skipRoutes.some((route) => path.includes(route));
   }
 
   private generateAuditId(): string {
@@ -588,7 +622,9 @@ export class AuditMiddleware {
     // Look for ID-like segments (UUID or numeric)
     for (const segment of segments) {
       if (
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(segment) ||
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          segment
+        ) ||
         /^\d+$/.test(segment)
       ) {
         return segment;
@@ -698,9 +734,9 @@ export class AuditMiddleware {
 export function createAuditMiddleware(config?: Partial<AuditConfig>) {
   const redis = RedisClient.getInstance();
   const clickhouse = ClickHouseClient.getInstance();
-  const logger = new Logger("Shared Audit Middleware");
-  const metrics = new MetricsCollector("audit");
-  
+  const logger = Logger.getInstance("Shared Audit Middleware");
+  const metrics = MetricsCollector.getInstance();
+
   const middleware = new AuditMiddleware(redis, clickhouse, logger, metrics);
   return middleware.elysia(config);
 }

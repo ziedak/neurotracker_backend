@@ -31,12 +31,10 @@ const serverConfig: Partial<ServerConfig> = {
     windowMs: getNumberEnv("RATE_LIMIT_WINDOW_MS", 60000),
   },
 };
-
-const logger = new Logger("AI Engine");
-
 /**
  * Initialize all services and dependencies
  */
+const logger = Logger.getInstance("ai-engine");
 async function initializeServices(): Promise<void> {
   logger.info("🤖 Starting AI Engine Service...");
   await container.initialize();

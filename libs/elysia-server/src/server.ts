@@ -300,7 +300,7 @@ export class ElysiaServerBuilder {
           this.cleanupConnection(connectionId, ws);
 
           this.logger.info(
-            `🔌 WebSocket connection closed: ${connectionId} (${this.connections.size} remaining)`
+            `WebSocket connection closed: ${connectionId} (${this.connections.size} remaining)`
           );
 
           // Call custom close handler if provided

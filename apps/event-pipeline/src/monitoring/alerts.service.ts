@@ -1,6 +1,6 @@
 import { Logger } from "@libs/monitoring";
 
-const logger = new Logger("event-pipeline-alerts");
+const logger = Logger.getInstance("event-pipeline-alerts");
 
 export class AlertsService {
   alert(message: string, meta?: any) {

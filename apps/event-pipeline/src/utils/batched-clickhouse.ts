@@ -14,7 +14,7 @@ export class BatchedClickHouseOperations {
 
   constructor(clickhouseClient?: any, batchSize: number = 100) {
     this.clickhouse = clickhouseClient || ClickHouseClient.getInstance();
-    this.logger = new Logger("BatchedClickHouseOperations");
+    this.logger = Logger.getInstance("BatchedClickHouseOperations");
     this.batchSize = batchSize;
   }
 

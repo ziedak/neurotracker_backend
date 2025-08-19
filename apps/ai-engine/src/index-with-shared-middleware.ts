@@ -31,7 +31,7 @@ const serverConfig: Partial<ServerConfig> = {
   },
 };
 
-const logger = new Logger("AI Engine (Shared Middleware)");
+const logger = Logger.getInstance("AI Engine (Shared Middleware)");
 
 /**
  * Initialize all services and dependencies
@@ -41,14 +41,19 @@ async function initializeServices(): Promise<void> {
   await container.initialize();
   await container.validateServices();
   logger.info("✅ Services initialized successfully");
-  logger.info("🔧 Using shared middleware library for auth, rate limiting, and validation");
+  logger.info(
+    "🔧 Using shared middleware library for auth, rate limiting, and validation"
+  );
 }
 
 /**
  * Create and start the Elysia server with shared middleware
  */
 function createServer(): { app: any; httpServer: any } {
-  const server = createElysiaServer(serverConfig, setupRoutesWithSharedMiddleware);
+  const server = createElysiaServer(
+    serverConfig,
+    setupRoutesWithSharedMiddleware
+  );
   const started = server.start();
   return { app: started.app, httpServer: started.server };
 }
@@ -64,7 +69,9 @@ async function gracefulShutdown(
   try {
     httpServer.stop();
     await container.dispose();
-    logger.info("✅ AI Engine Service (Shared Middleware) shut down successfully");
+    logger.info(
+      "✅ AI Engine Service (Shared Middleware) shut down successfully"
+    );
     process.exit(0);
   } catch (error) {
     logger.error("❌ Error during shutdown:", error as Error);
@@ -96,17 +103,26 @@ async function startServerWithSharedMiddleware(): Promise<void> {
   try {
     await initializeServices();
     const { app, httpServer } = createServer();
-    
-    logger.info(`🚀 AI Engine Service (Shared Middleware) running on port ${serverConfig.port}`);
-    logger.info(`📚 Swagger docs: http://localhost:${serverConfig.port}/swagger`);
-    logger.info(`🔍 Health check: http://localhost:${serverConfig.port}/ai-health`);
+
+    logger.info(
+      `🚀 AI Engine Service (Shared Middleware) running on port ${serverConfig.port}`
+    );
+    logger.info(
+      `📚 Swagger docs: http://localhost:${serverConfig.port}/swagger`
+    );
+    logger.info(
+      `🔍 Health check: http://localhost:${serverConfig.port}/ai-health`
+    );
     logger.info("🛡️  Authentication: API key + JWT with RBAC");
     logger.info("⏱️  Rate limiting: Redis-based with user strategy");
     logger.info("✅ Validation: Zod schemas with strict mode");
-    
+
     registerShutdownHandlers(httpServer);
   } catch (error) {
-    logger.error("❌ Failed to start AI Engine Service (Shared Middleware):", error as Error);
+    logger.error(
+      "❌ Failed to start AI Engine Service (Shared Middleware):",
+      error as Error
+    );
     process.exit(1);
   }
 }

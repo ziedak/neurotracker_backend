@@ -27,7 +27,7 @@ export class ServiceContainer {
     // Shared resources
     const redis = RedisClient.getInstance();
     const clickhouse = ClickHouseClient.getInstance();
-    const logger = new Logger("service-container");
+    const logger = Logger.getInstance("service-container");
 
     // Core services (no dependencies)
     this.services.set("ValidationService", new ValidationService());

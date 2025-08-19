@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
-    "outDir": "../../dist/apps/event-pipeline",
+    "outDir": "../../dist/apps/ai-engine",
     "rootDir": "src"
   },
   "references": [
@@ -12,7 +12,8 @@
     { "path": "../../libs/messaging" },
     { "path": "../../libs/elysia-server" },
     { "path": "../../libs/database" },
-    { "path": "../../libs/monitoring" }
+    { "path": "../../libs/monitoring" },
+    { "path": "../../libs/middleware" }
   ],
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]

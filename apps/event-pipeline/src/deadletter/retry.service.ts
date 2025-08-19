@@ -1,7 +1,7 @@
 import { Logger } from "@libs/monitoring";
 import { RoutingService } from "../processing/routing.service";
 
-const logger = new Logger("event-pipeline-retry");
+const logger = Logger.getInstance("event-pipeline-retry");
 
 export class RetryService {
   private routingService = new RoutingService();

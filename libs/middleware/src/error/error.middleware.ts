@@ -59,8 +59,12 @@ export class ErrorMiddleware {
     return (app: any) => {
       return app.onError(async (context: any) => {
         const { error, set, request } = context;
-        const errorResponse = await this.handleError(error, request, finalConfig);
-        
+        const errorResponse = await this.handleError(
+          error,
+          request,
+          finalConfig
+        );
+
         set.status = errorResponse.statusCode || 500;
         return errorResponse;
       });
@@ -430,7 +434,14 @@ export class ErrorMiddleware {
       includeStackTrace: true,
       logErrors: true,
       customErrorMessages: {},
-      sensitiveFields: ["password", "token", "secret", "key", "auth", "session"],
+      sensitiveFields: [
+        "password",
+        "token",
+        "secret",
+        "key",
+        "auth",
+        "session",
+      ],
     };
   }
 }
@@ -439,7 +450,7 @@ export class ErrorMiddleware {
  * Factory function for easy middleware creation
  */
 export function createErrorMiddleware(config?: Partial<ErrorConfig>) {
-  const logger = new Logger("Shared Error Middleware");
+  const logger = Logger.getInstance("Shared Error Middleware");
   const middleware = new ErrorMiddleware(logger);
   return middleware.elysia(config);
 }

@@ -7,7 +7,7 @@ export class DeduplicationService {
 
   constructor() {
     this.redis = RedisClient.getInstance();
-    this.logger = new Logger("DeduplicationService");
+    this.logger = Logger.getInstance("DeduplicationService");
   }
 
   async isDuplicate(event: any): Promise<boolean> {

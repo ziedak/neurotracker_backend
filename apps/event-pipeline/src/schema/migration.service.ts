@@ -1,6 +1,6 @@
 import { Logger } from "@libs/monitoring";
 
-const logger = new Logger("event-pipeline-schema-migration");
+const logger = Logger.getInstance("event-pipeline-schema-migration");
 
 export class MigrationService {
   migrate(oldSchema: any, newSchema: any): any {

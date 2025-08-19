@@ -5,7 +5,7 @@ export function setupErrorHandling(app: Elysia, config: ServerConfig) {
   return app.onError(({ error, set, request }: any) => {
     const requestId = `err_${Date.now()}_${Math.random()
       .toString(36)
-      .substr(2, 9)}`;
+      .substring(2, 9)}`;
 
     // Basic error handling
     console.error("Application error", {

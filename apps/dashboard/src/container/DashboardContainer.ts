@@ -37,7 +37,9 @@ export class DashboardContainer {
   }
 
   private registerInfrastructure(): void {
-    this._registry.registerSingleton("logger", () => new Logger("dashboard"));
+    this._registry.registerSingleton("logger", () =>
+      Logger.getInstance("dashboard")
+    );
     this._registry.registerSingleton("metricsCollector", () =>
       MetricsCollector.getInstance()
     );

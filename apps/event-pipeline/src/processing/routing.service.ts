@@ -5,7 +5,7 @@ export class RoutingService {
   private logger: Logger;
 
   constructor() {
-    this.logger = new Logger("RoutingService");
+    this.logger = Logger.getInstance("RoutingService");
   }
 
   async route(event: any): Promise<void> {

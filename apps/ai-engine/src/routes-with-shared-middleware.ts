@@ -46,52 +46,56 @@ class ServiceCache {
   }
 }
 
-// Get complete shared middleware for AI Engine
-const { auth, rateLimit, validation, logging, error, audit } = servicePresets.aiEngine({
+// Get complete shared middleware for AI Engine with proper configuration
+const middlewarePreset = servicePresets.aiEngine({
   // Override defaults for AI Engine specific requirements
   auth: {
-    requiredPermissions: ['predict', 'batch_predict'],
+    requiredPermissions: ["predict", "batch_predict"],
     apiKeys: new Set([
-      'ai-engine-key-prod-2024',
-      'ai-engine-key-dev-2024',
-      'dashboard-service-key',
-      'data-intelligence-key'
+      "ai-engine-key-prod-2024",
+      "ai-engine-key-dev-2024",
+      "dashboard-service-key",
+      "data-intelligence-key",
     ]),
-    bypassRoutes: ['/ai-health', '/stats/performance'],
+    bypassRoutes: ["/ai-health", "/stats/performance"],
   },
   rateLimit: {
     maxRequests: 1000, // AI Engine specific limit
     windowMs: 60000,
-    keyStrategy: 'user',
+    keyStrategy: "user",
     skipFailedRequests: true, // Don't count failed predictions
   },
   validation: {
-    engine: 'zod',
+    engine: "zod",
     strictMode: true,
     sanitizeInputs: true,
     maxRequestSize: 1024 * 1024, // 1MB for ML requests
   },
   logging: {
-    logLevel: 'info',
+    logLevel: "info",
     logRequestBody: false, // Privacy for ML data
     logResponseBody: false,
-    excludePaths: ['/ai-health', '/stats/performance'],
+    excludePaths: ["/ai-health", "/stats/performance"],
   },
   error: {
     includeStackTrace: false,
     customErrorMessages: {
-      ValidationError: 'Invalid prediction request',
-      AuthenticationError: 'ML service authentication required',
-      RateLimitError: 'Prediction rate limit exceeded',
+      ValidationError: "Invalid prediction request",
+      AuthenticationError: "ML service authentication required",
+      RateLimitError: "Prediction rate limit exceeded",
     },
   },
   audit: {
     includeBody: true, // Important for ML audit trails
     includeResponse: true,
-    storageStrategy: 'both',
-    skipRoutes: ['/ai-health'], // Don't audit health checks
-  }
+    storageStrategy: "both",
+    skipRoutes: ["/ai-health"], // Don't audit health checks
+  },
 });
+
+// Extract individual middleware from preset
+const { cors, security, auth, rateLimit, validation, logging, error, audit } =
+  middlewarePreset;
 
 /**
  * Setup AI Engine routes with shared middleware implementation
@@ -103,14 +107,16 @@ export function setupRoutesWithSharedMiddleware(app: Elysia): Elysia {
   const featureService = ServiceCache.featureService;
   const cacheService = ServiceCache.cacheService;
 
-  // Apply complete shared middleware stack
+  // Apply complete shared middleware stack in proper order
   app
-    .use(logging)       // Request/response logging with sanitization
-    .use(error)         // Centralized error handling
-    .use(auth)          // Authentication with RBAC
-    .use(rateLimit)     // Rate limiting with Redis
-    .use(validation)    // Request validation with Zod
-    .use(audit);        // Comprehensive audit trail
+    .use(cors) // CORS handling (Elysia plugin)
+    .use(security) // Security headers (Elysia plugin)
+    .use(logging) // Request/response logging (Elysia plugin)
+    .use(error) // Centralized error handling (Elysia plugin)
+    .use(auth) // Authentication with RBAC (Elysia plugin)
+    .use(rateLimit) // Rate limiting with Redis (Elysia plugin)
+    .use(validation) // Request validation with Zod (Elysia plugin)
+    .use(audit); // Comprehensive audit trail (Elysia plugin)
 
   // Health check (enhanced) - bypassed by auth middleware
   app.get("/ai-health", async () => {
@@ -149,13 +155,16 @@ export function setupRoutesWithSharedMiddleware(app: Elysia): Elysia {
     group.post("/", async (context: any) => {
       // Body is automatically validated by validation middleware
       const { body, user } = context;
-      
+
       // Check specific permissions for prediction
-      if (!user?.permissions?.includes('predict') && !user?.permissions?.includes('admin')) {
-        return { 
-          success: false, 
-          error: 'Insufficient permissions for prediction access',
-          required: ['predict'] 
+      if (
+        !user?.permissions?.includes("predict") &&
+        !user?.permissions?.includes("admin")
+      ) {
+        return {
+          success: false,
+          error: "Insufficient permissions for prediction access",
+          required: ["predict"],
         };
       }
 
@@ -171,13 +180,16 @@ export function setupRoutesWithSharedMiddleware(app: Elysia): Elysia {
     // Batch predictions
     group.post("/batch", async (context: any) => {
       const { body, user } = context;
-      
+
       // Check batch prediction permissions
-      if (!user?.permissions?.includes('batch_predict') && !user?.permissions?.includes('admin')) {
-        return { 
-          success: false, 
-          error: 'Insufficient permissions for batch prediction',
-          required: ['batch_predict'] 
+      if (
+        !user?.permissions?.includes("batch_predict") &&
+        !user?.permissions?.includes("admin")
+      ) {
+        return {
+          success: false,
+          error: "Insufficient permissions for batch prediction",
+          required: ["batch_predict"],
         };
       }
 
@@ -204,11 +216,14 @@ export function setupRoutesWithSharedMiddleware(app: Elysia): Elysia {
       const { user } = context;
 
       // Check explain permissions
-      if (!user?.permissions?.includes('explain') && !user?.permissions?.includes('admin')) {
-        return { 
-          success: false, 
-          error: 'Insufficient permissions for prediction explanation',
-          required: ['explain'] 
+      if (
+        !user?.permissions?.includes("explain") &&
+        !user?.permissions?.includes("admin")
+      ) {
+        return {
+          success: false,
+          error: "Insufficient permissions for prediction explanation",
+          required: ["explain"],
         };
       }
 
@@ -263,13 +278,16 @@ export function setupRoutesWithSharedMiddleware(app: Elysia): Elysia {
     // List models
     group.get("/", async (context: any) => {
       const { user } = context;
-      
+
       // Check models permission
-      if (!user?.permissions?.includes('models') && !user?.permissions?.includes('admin')) {
-        return { 
-          success: false, 
-          error: 'Insufficient permissions for model access',
-          required: ['models', 'admin'] 
+      if (
+        !user?.permissions?.includes("models") &&
+        !user?.permissions?.includes("admin")
+      ) {
+        return {
+          success: false,
+          error: "Insufficient permissions for model access",
+          required: ["models", "admin"],
         };
       }
 
@@ -287,11 +305,14 @@ export function setupRoutesWithSharedMiddleware(app: Elysia): Elysia {
       const { modelName } = context.params;
       const { user } = context;
 
-      if (!user?.permissions?.includes('models') && !user?.permissions?.includes('admin')) {
-        return { 
-          success: false, 
-          error: 'Insufficient permissions for model metadata',
-          required: ['models', 'admin'] 
+      if (
+        !user?.permissions?.includes("models") &&
+        !user?.permissions?.includes("admin")
+      ) {
+        return {
+          success: false,
+          error: "Insufficient permissions for model metadata",
+          required: ["models", "admin"],
         };
       }
 
@@ -310,11 +331,11 @@ export function setupRoutesWithSharedMiddleware(app: Elysia): Elysia {
       const { body, user } = context;
 
       // Require admin permission for model updates
-      if (!user?.permissions?.includes('admin')) {
-        return { 
-          success: false, 
-          error: 'Admin permission required for model updates',
-          required: ['admin'] 
+      if (!user?.permissions?.includes("admin")) {
+        return {
+          success: false,
+          error: "Admin permission required for model updates",
+          required: ["admin"],
         };
       }
 
@@ -332,11 +353,14 @@ export function setupRoutesWithSharedMiddleware(app: Elysia): Elysia {
       const { modelName } = context.params;
       const { user } = context;
 
-      if (!user?.permissions?.includes('models') && !user?.permissions?.includes('admin')) {
-        return { 
-          success: false, 
-          error: 'Insufficient permissions for model performance',
-          required: ['models', 'admin'] 
+      if (
+        !user?.permissions?.includes("models") &&
+        !user?.permissions?.includes("admin")
+      ) {
+        return {
+          success: false,
+          error: "Insufficient permissions for model performance",
+          required: ["models", "admin"],
         };
       }
 
@@ -354,11 +378,14 @@ export function setupRoutesWithSharedMiddleware(app: Elysia): Elysia {
       const { modelName } = context.params;
       const { user } = context;
 
-      if (!user?.permissions?.includes('models') && !user?.permissions?.includes('admin')) {
-        return { 
-          success: false, 
-          error: 'Insufficient permissions for A/B test data',
-          required: ['models', 'admin'] 
+      if (
+        !user?.permissions?.includes("models") &&
+        !user?.permissions?.includes("admin")
+      ) {
+        return {
+          success: false,
+          error: "Insufficient permissions for A/B test data",
+          required: ["models", "admin"],
         };
       }
 
@@ -379,12 +406,15 @@ export function setupRoutesWithSharedMiddleware(app: Elysia): Elysia {
     // Get cache statistics
     group.get("/stats", async (context: any) => {
       const { user } = context;
-      
-      if (!user?.permissions?.includes('cache_manage') && !user?.permissions?.includes('admin')) {
-        return { 
-          success: false, 
-          error: 'Insufficient permissions for cache statistics',
-          required: ['cache_manage', 'admin'] 
+
+      if (
+        !user?.permissions?.includes("cache_manage") &&
+        !user?.permissions?.includes("admin")
+      ) {
+        return {
+          success: false,
+          error: "Insufficient permissions for cache statistics",
+          required: ["cache_manage", "admin"],
         };
       }
 
@@ -401,18 +431,15 @@ export function setupRoutesWithSharedMiddleware(app: Elysia): Elysia {
     group.delete("/", async (context: any) => {
       const { body, user } = context;
 
-      if (!user?.permissions?.includes('admin')) {
-        return { 
-          success: false, 
-          error: 'Admin permission required for cache invalidation',
-          required: ['admin'] 
+      if (!user?.permissions?.includes("admin")) {
+        return {
+          success: false,
+          error: "Admin permission required for cache invalidation",
+          required: ["admin"],
         };
       }
 
-      await predictionService.invalidatePrediction(
-        body.cartId,
-        body.modelName
-      );
+      await predictionService.invalidatePrediction(body.cartId, body.modelName);
 
       return {
         success: true,
@@ -427,11 +454,11 @@ export function setupRoutesWithSharedMiddleware(app: Elysia): Elysia {
       const { modelName } = context.params;
       const { user } = context;
 
-      if (!user?.permissions?.includes('admin')) {
-        return { 
-          success: false, 
-          error: 'Admin permission required for cache clearing',
-          required: ['admin'] 
+      if (!user?.permissions?.includes("admin")) {
+        return {
+          success: false,
+          error: "Admin permission required for cache clearing",
+          required: ["admin"],
         };
       }
 
@@ -454,12 +481,15 @@ export function setupRoutesWithSharedMiddleware(app: Elysia): Elysia {
     // General service statistics
     group.get("/", async (context: any) => {
       const { user } = context;
-      
-      if (!user?.permissions?.includes('metrics') && !user?.permissions?.includes('admin')) {
-        return { 
-          success: false, 
-          error: 'Insufficient permissions for service statistics',
-          required: ['metrics', 'admin'] 
+
+      if (
+        !user?.permissions?.includes("metrics") &&
+        !user?.permissions?.includes("admin")
+      ) {
+        return {
+          success: false,
+          error: "Insufficient permissions for service statistics",
+          required: ["metrics", "admin"],
         };
       }
 

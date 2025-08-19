@@ -1,6 +1,6 @@
 import { Logger } from "@libs/monitoring";
 
-const logger = new Logger("event-pipeline-schema-validator");
+const logger = Logger.getInstance("event-pipeline-schema-validator");
 
 export class ValidatorService {
   validate(event: any, schema: any): boolean {

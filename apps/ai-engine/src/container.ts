@@ -75,7 +75,9 @@ export class AIEngineContainer {
    */
   private registerInfrastructure(): void {
     // Logger - singleton
-    this._registry.registerSingleton("logger", () => new Logger("ai-engine"));
+    this._registry.registerSingleton("logger", () =>
+      Logger.getInstance("ai-engine")
+    );
 
     // Metrics collector - singleton (using getInstance pattern)
     this._registry.registerSingleton("metricsCollector", () =>

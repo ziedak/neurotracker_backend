@@ -12,6 +12,7 @@
     { "path": "libs/messaging" },
     { "path": "libs/models" },
     { "path": "libs/monitoring" },
-    { "path": "libs/utils" }
+    { "path": "libs/utils" },
+    { "path": "libs/middleware" }
   ]
 }

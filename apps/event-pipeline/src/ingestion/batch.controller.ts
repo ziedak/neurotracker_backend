@@ -4,7 +4,7 @@ import { RedisClient, ClickHouseClient } from "@libs/database";
 import { Logger } from "@libs/monitoring";
 import { UserEvent } from "@libs/models";
 
-const logger = new Logger("event-pipeline-batch");
+const logger = Logger.getInstance("event-pipeline-batch");
 
 export class BatchController {
   private validationService = new ValidationService();

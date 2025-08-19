@@ -70,14 +70,18 @@ export class SecurityMiddleware {
    * Create Elysia middleware for security headers
    */
   elysia(config?: Partial<SecurityConfig>) {
-    const finalConfig = this.mergeConfig(this.defaultConfig, this.config, config);
+    const finalConfig = this.mergeConfig(
+      this.defaultConfig,
+      this.config,
+      config || {}
+    );
 
     return (app: any) => {
       return app.onBeforeHandle(async (context: any) => {
         const { set } = context;
-        
+
         this.setSecurityHeaders(set, finalConfig);
-        
+
         return context;
       });
     };
@@ -91,7 +95,9 @@ export class SecurityMiddleware {
 
     // Content Security Policy
     if (config.contentSecurityPolicy?.enabled) {
-      const cspValue = this.buildCSPHeader(config.contentSecurityPolicy.directives || {});
+      const cspValue = this.buildCSPHeader(
+        config.contentSecurityPolicy.directives || {}
+      );
       if (cspValue) {
         set.headers["Content-Security-Policy"] = cspValue;
       }
@@ -127,7 +133,10 @@ export class SecurityMiddleware {
         let xssValue = "1";
         if (config.xssFilter.mode === "block") {
           xssValue += "; mode=block";
-        } else if (config.xssFilter.mode === "report" && config.xssFilter.reportUri) {
+        } else if (
+          config.xssFilter.mode === "report" &&
+          config.xssFilter.reportUri
+        ) {
           xssValue += `; report=${config.xssFilter.reportUri}`;
         }
         set.headers["X-XSS-Protection"] = xssValue;
@@ -141,7 +150,9 @@ export class SecurityMiddleware {
 
     // Permissions Policy
     if (config.permissionsPolicy) {
-      const permissionsValue = this.buildPermissionsPolicyHeader(config.permissionsPolicy);
+      const permissionsValue = this.buildPermissionsPolicyHeader(
+        config.permissionsPolicy
+      );
       if (permissionsValue) {
         set.headers["Permissions-Policy"] = permissionsValue;
       }
@@ -171,7 +182,9 @@ export class SecurityMiddleware {
   /**
    * Build Permissions Policy header value
    */
-  private buildPermissionsPolicyHeader(policies: Record<string, string[]>): string {
+  private buildPermissionsPolicyHeader(
+    policies: Record<string, string[]>
+  ): string {
     return Object.entries(policies)
       .map(([feature, allowlist]) => `${feature}=(${allowlist.join(" ")})`)
       .join(", ");
@@ -182,11 +195,11 @@ export class SecurityMiddleware {
    */
   private mergeConfig(...configs: Partial<SecurityConfig>[]): SecurityConfig {
     const result: SecurityConfig = {};
-    
+
     for (const config of configs) {
       if (config) {
         Object.assign(result, config);
-        
+
         // Deep merge nested objects
         if (config.contentSecurityPolicy && result.contentSecurityPolicy) {
           result.contentSecurityPolicy = {
@@ -198,21 +211,27 @@ export class SecurityMiddleware {
             },
           };
         }
-        
+
         if (config.hsts && result.hsts) {
           result.hsts = { ...result.hsts, ...config.hsts };
         }
-        
+
         if (config.permissionsPolicy && result.permissionsPolicy) {
-          result.permissionsPolicy = { ...result.permissionsPolicy, ...config.permissionsPolicy };
+          result.permissionsPolicy = {
+            ...result.permissionsPolicy,
+            ...config.permissionsPolicy,
+          };
         }
-        
+
         if (config.customHeaders && result.customHeaders) {
-          result.customHeaders = { ...result.customHeaders, ...config.customHeaders };
+          result.customHeaders = {
+            ...result.customHeaders,
+            ...config.customHeaders,
+          };
         }
       }
     }
-    
+
     return result;
   }
 
@@ -287,7 +306,7 @@ export class SecurityMiddleware {
       referrerPolicy: "no-referrer",
       customHeaders: {
         "Cache-Control": "no-store, no-cache, must-revalidate",
-        "Pragma": "no-cache",
+        Pragma: "no-cache",
       },
     };
   }

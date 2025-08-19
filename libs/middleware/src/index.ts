@@ -1,66 +1,68 @@
 // Export all types
-export * from './types';
+export * from "./types";
 
 // Export base classes
-export * from './base';
+export * from "./base";
 
 // Export auth middleware
-export * from './auth';
+export * from "./auth";
 
 // Export rate limiting middleware
-export * from './rateLimit';
+export * from "./rateLimit";
 
 // Export validation middleware
-export * from './validation';
-
+export * from "./validation";
 
 // Export CORS middleware
-export * from './cors.middleware';
+export * from "./cors/cors.middleware";
 
 // Export security middleware
-export * from './security.middleware';
+export * from "./security/security.middleware";
 
-import { Logger, MetricsCollector } from '@libs/monitoring';
-import { RedisClient, ClickHouseClient } from '@libs/database';
-import { AuthConfig, RateLimitConfig, ValidationConfig } from './types';
-import { AuthMiddleware } from './auth';
-import { RateLimitMiddleware } from './rateLimit';
-import { ValidationMiddleware } from './validation';
-import { LoggingMiddleware, LoggingConfig } from './logging.middleware';
-import { ErrorMiddleware, ErrorConfig } from './error.middleware';
-import { AuditMiddleware, AuditConfig } from './audit.middleware';
-import { CorsMiddleware, CorsConfig } from './cors.middleware';
-import { SecurityMiddleware, SecurityConfig } from './security.middleware';
+import { Logger, MetricsCollector } from "@libs/monitoring";
+import { RedisClient, ClickHouseClient } from "@libs/database";
+import { AuthConfig, RateLimitConfig, ValidationConfig } from "./types";
+import { AuthMiddleware } from "./auth";
+import { RateLimitMiddleware } from "./rateLimit";
+import { ValidationMiddleware } from "./validation";
+import { LoggingMiddleware, LoggingConfig } from "./logging/logging.middleware";
+import { ErrorMiddleware, ErrorConfig } from "./error/error.middleware";
+import { AuditMiddleware, AuditConfig } from "./audit/audit.middleware";
+import { CorsMiddleware, CorsConfig } from "./cors/cors.middleware";
+import {
+  SecurityMiddleware,
+  SecurityConfig,
+} from "./security/security.middleware";
 
 /**
  * Factory functions for quick middleware creation
  */
 export const createAuthMiddleware = (config: AuthConfig) => {
-  const logger = Logger.getInstance();
+  const logger = Logger.getInstance("AuthMiddleware");
   const metrics = MetricsCollector.getInstance();
-  return new AuthMiddleware(config, logger, metrics).middleware();
+  return new AuthMiddleware(config, logger, metrics).elysia();
 };
 
 export const createRateLimitMiddleware = (config: RateLimitConfig) => {
-  const logger = Logger.getInstance();
+  const logger = Logger.getInstance("RateLimitMiddleware");
   const metrics = MetricsCollector.getInstance();
-  return new RateLimitMiddleware(config, logger, metrics).middleware();
+  return new RateLimitMiddleware(config, logger, metrics).elysia();
 };
 
 export const createValidationMiddleware = (config: ValidationConfig) => {
-  const logger = Logger.getInstance();
+  const logger = Logger.getInstance("ValidationMiddleware");
   const metrics = MetricsCollector.getInstance();
-  return new ValidationMiddleware(config, logger, metrics).middleware();
+  return new ValidationMiddleware(config, logger, metrics).elysia();
 };
 
 export const createLoggingMiddleware = (config?: LoggingConfig) => {
-  const logger = new Logger("Shared Logging Middleware");
+  const logger = Logger.getInstance("Shared Logging Middleware");
   const middleware = new LoggingMiddleware(logger);
   return middleware.elysia(config);
 };
 
 export const createErrorMiddleware = (config?: ErrorConfig) => {
-  const logger = new Logger("Shared Error Middleware");
+  const logger = Logger.getInstance("Shared Error Middleware");
   const middleware = new ErrorMiddleware(logger);
   return middleware.elysia(config);
 };
@@ -68,9 +70,9 @@ export const createErrorMiddleware = (config?: ErrorConfig) => {
 export const createAuditMiddleware = (config?: AuditConfig) => {
   const redis = RedisClient.getInstance();
   const clickhouse = ClickHouseClient.getInstance();
-  const logger = new Logger("Shared Audit Middleware");
-  const metrics = new MetricsCollector("audit");
-  
+  const logger = Logger.getInstance("Shared Audit Middleware");
+  const metrics = MetricsCollector.getInstance();
+
   const middleware = new AuditMiddleware(redis, clickhouse, logger, metrics);
   return middleware.elysia(config);
 };
@@ -92,78 +94,78 @@ export const commonConfigs = {
   auth: {
     apiGateway: {
       allowAnonymous: true,
-      bypassRoutes: ['/health', '/metrics', '/docs', '/swagger'],
-      skipPaths: ['/health', '/metrics'],
+      bypassRoutes: ["/health", "/metrics", "/docs", "/swagger"],
+      skipPaths: ["/health", "/metrics"],
     } as AuthConfig,
-    
+
     aiEngine: {
-      requiredPermissions: ['predict'],
-      apiKeys: new Set(['ai-engine-key-prod-2024', 'ai-engine-key-dev-2024']),
-      bypassRoutes: ['/health', '/metrics'],
+      requiredPermissions: ["predict"],
+      apiKeys: new Set(["ai-engine-key-prod-2024", "ai-engine-key-dev-2024"]),
+      bypassRoutes: ["/health", "/metrics"],
     } as AuthConfig,
-    
+
     dataIntelligence: {
-      requiredRoles: ['user', 'admin'],
-      bypassRoutes: ['/health', '/metrics'],
+      requiredRoles: ["user", "admin"],
+      bypassRoutes: ["/health", "/metrics"],
     } as AuthConfig,
-    
+
     eventPipeline: {
-      requiredPermissions: ['event_ingest'],
-      bypassRoutes: ['/health', '/metrics'],
+      requiredPermissions: ["event_ingest"],
+      bypassRoutes: ["/health", "/metrics"],
       allowAnonymous: false,
     } as AuthConfig,
   },
-  
+
   rateLimit: {
     general: {
       windowMs: 60000,
       maxRequests: 1000,
-      keyStrategy: 'ip' as const,
+      keyStrategy: "ip" as const,
       standardHeaders: true,
     } as RateLimitConfig,
-    
+
     strict: {
       windowMs: 60000,
       maxRequests: 100,
-      keyStrategy: 'user' as const,
+      keyStrategy: "user" as const,
       standardHeaders: true,
     } as RateLimitConfig,
-    
+
     api: {
       windowMs: 60000,
       maxRequests: 5000,
-      keyStrategy: 'apiKey' as const,
+      keyStrategy: "apiKey" as const,
       standardHeaders: true,
     } as RateLimitConfig,
-    
+
     aiPrediction: {
       windowMs: 60000,
       maxRequests: 1000,
-      keyStrategy: 'user' as const,
+      keyStrategy: "user" as const,
       skipFailedRequests: true,
       standardHeaders: true,
     } as RateLimitConfig,
-    
+
     dataExport: {
       windowMs: 300000, // 5 minutes
       maxRequests: 50,
-      keyStrategy: 'user' as const,
+      keyStrategy: "user" as const,
       standardHeaders: true,
     } as RateLimitConfig,
   },
-  
+
   validation: {
     aiEngine: {
-      engine: 'zod' as const,
+      engine: "zod" as const,
       strictMode: true,
       sanitizeInputs: true,
       maxRequestSize: 1024 * 1024,
       validateBody: true,
       validateQuery: true,
     } as ValidationConfig,
-    
+
     dataIntelligence: {
-      engine: 'rules' as const,
+      engine: "rules" as const,
       strictMode: true,
       sanitizeInputs: true,
       maxRequestSize: 10 * 1024 * 1024,
@@ -171,17 +173,17 @@ export const commonConfigs = {
       validateQuery: true,
       validateParams: true,
     } as ValidationConfig,
-    
+
     eventPipeline: {
-      engine: 'zod' as const,
+      engine: "zod" as const,
       strictMode: false,
       sanitizeInputs: false,
       maxRequestSize: 5 * 1024 * 1024,
       validateBody: true,
     } as ValidationConfig,
-    
+
     apiGateway: {
-      engine: 'rules' as const,
+      engine: "rules" as const,
       strictMode: false,
       sanitizeInputs: false,
       maxRequestSize: 2 * 1024 * 1024,
@@ -279,7 +281,12 @@ export const commonConfigs = {
       origin: ["https://yourdomain.com", "https://api.yourdomain.com"],
       credentials: true,
       methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-API-Key"],
+      allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "X-API-Key",
+      ],
       exposedHeaders: ["X-Total-Count", "X-Rate-Limit-Remaining"],
       maxAge: 86400,
     } as CorsConfig,
@@ -346,7 +353,7 @@ export const commonConfigs = {
       referrerPolicy: "no-referrer",
       customHeaders: {
         "Cache-Control": "no-store, no-cache, must-revalidate",
-        "Pragma": "no-cache",
+        Pragma: "no-cache",
       },
     } as SecurityConfig,
   },
@@ -356,9 +363,9 @@ export const commonConfigs = {
  * Middleware presets for specific services
  */
 export const servicePresets = {
-  apiGateway: (overrides?: { 
-    auth?: Partial<AuthConfig>; 
-    rateLimit?: Partial<RateLimitConfig>; 
+  apiGateway: (overrides?: {
+    auth?: Partial<AuthConfig>;
+    rateLimit?: Partial<RateLimitConfig>;
     validation?: Partial<ValidationConfig>;
     logging?: Partial<LoggingConfig>;
     error?: Partial<ErrorConfig>;
@@ -366,19 +373,43 @@ export const servicePresets = {
     cors?: Partial<CorsConfig>;
     security?: Partial<SecurityConfig>;
   }) => ({
-    cors: createCorsMiddleware({ ...commonConfigs.cors.production, ...overrides?.cors }),
-    security: createSecurityMiddleware({ ...commonConfigs.security.api, ...overrides?.security }),
-    auth: createAuthMiddleware({ ...commonConfigs.auth.apiGateway, ...overrides?.auth }),
-    rateLimit: createRateLimitMiddleware({ ...commonConfigs.rateLimit.general, ...overrides?.rateLimit }),
-    validation: createValidationMiddleware({ ...commonConfigs.validation.apiGateway, ...overrides?.validation }),
-    logging: createLoggingMiddleware({ ...commonConfigs.logging.production, ...overrides?.logging }),
-    error: createErrorMiddleware({ ...commonConfigs.error.production, ...overrides?.error }),
-    audit: createAuditMiddleware({ ...commonConfigs.audit.production, ...overrides?.audit }),
+    cors: createCorsMiddleware({
+      ...commonConfigs.cors.production,
+      ...overrides?.cors,
+    }),
+    security: createSecurityMiddleware({
+      ...commonConfigs.security.api,
+      ...overrides?.security,
+    }),
+    auth: createAuthMiddleware({
+      ...commonConfigs.auth.apiGateway,
+      ...overrides?.auth,
+    }),
+    rateLimit: createRateLimitMiddleware({
+      ...commonConfigs.rateLimit.general,
+      ...overrides?.rateLimit,
+    }),
+    validation: createValidationMiddleware({
+      ...commonConfigs.validation.apiGateway,
+      ...overrides?.validation,
+    }),
+    logging: createLoggingMiddleware({
+      ...commonConfigs.logging.production,
+      ...overrides?.logging,
+    }),
+    error: createErrorMiddleware({
+      ...commonConfigs.error.production,
+      ...overrides?.error,
+    }),
+    audit: createAuditMiddleware({
+      ...commonConfigs.audit.production,
+      ...overrides?.audit,
+    }),
   }),
-  
-  aiEngine: (overrides?: { 
-    auth?: Partial<AuthConfig>; 
-    rateLimit?: Partial<RateLimitConfig>; 
+
+  aiEngine: (overrides?: {
+    auth?: Partial<AuthConfig>;
+    rateLimit?: Partial<RateLimitConfig>;
     validation?: Partial<ValidationConfig>;
     logging?: Partial<LoggingConfig>;
     error?: Partial<ErrorConfig>;
@@ -386,19 +417,43 @@ export const servicePresets = {
     cors?: Partial<CorsConfig>;
     security?: Partial<SecurityConfig>;
   }) => ({
-    cors: createCorsMiddleware({ ...commonConfigs.cors.api, ...overrides?.cors }),
-    security: createSecurityMiddleware({ ...commonConfigs.security.api, ...overrides?.security }),
-    auth: createAuthMiddleware({ ...commonConfigs.auth.aiEngine, ...overrides?.auth }),
-    rateLimit: createRateLimitMiddleware({ ...commonConfigs.rateLimit.aiPrediction, ...overrides?.rateLimit }),
-    validation: createValidationMiddleware({ ...commonConfigs.validation.aiEngine, ...overrides?.validation }),
-    logging: createLoggingMiddleware({ ...commonConfigs.logging.production, ...overrides?.logging }),
-    error: createErrorMiddleware({ ...commonConfigs.error.production, ...overrides?.error }),
-    audit: createAuditMiddleware({ ...commonConfigs.audit.production, ...overrides?.audit }),
+    cors: createCorsMiddleware({
+      ...commonConfigs.cors.api,
+      ...overrides?.cors,
+    }),
+    security: createSecurityMiddleware({
+      ...commonConfigs.security.api,
+      ...overrides?.security,
+    }),
+    auth: createAuthMiddleware({
+      ...commonConfigs.auth.aiEngine,
+      ...overrides?.auth,
+    }),
+    rateLimit: createRateLimitMiddleware({
+      ...commonConfigs.rateLimit.aiPrediction,
+      ...overrides?.rateLimit,
+    }),
+    validation: createValidationMiddleware({
+      ...commonConfigs.validation.aiEngine,
+      ...overrides?.validation,
+    }),
+    logging: createLoggingMiddleware({
+      ...commonConfigs.logging.production,
+      ...overrides?.logging,
+    }),
+    error: createErrorMiddleware({
+      ...commonConfigs.error.production,
+      ...overrides?.error,
+    }),
+    audit: createAuditMiddleware({
+      ...commonConfigs.audit.production,
+      ...overrides?.audit,
+    }),
   }),
-  
-  dataIntelligence: (overrides?: { 
-    auth?: Partial<AuthConfig>; 
-    rateLimit?: Partial<RateLimitConfig>; 
+
+  dataIntelligence: (overrides?: {
+    auth?: Partial<AuthConfig>;
+    rateLimit?: Partial<RateLimitConfig>;
     validation?: Partial<ValidationConfig>;
     logging?: Partial<LoggingConfig>;
     error?: Partial<ErrorConfig>;
@@ -406,19 +461,43 @@ export const servicePresets = {
     cors?: Partial<CorsConfig>;
     security?: Partial<SecurityConfig>;
   }) => ({
-    cors: createCorsMiddleware({ ...commonConfigs.cors.production, ...overrides?.cors }),
-    security: createSecurityMiddleware({ ...commonConfigs.security.production, ...overrides?.security }),
-    auth: createAuthMiddleware({ ...commonConfigs.auth.dataIntelligence, ...overrides?.auth }),
-    rateLimit: createRateLimitMiddleware({ ...commonConfigs.rateLimit.strict, ...overrides?.rateLimit }),
-    validation: createValidationMiddleware({ ...commonConfigs.validation.dataIntelligence, ...overrides?.validation }),
-    logging: createLoggingMiddleware({ ...commonConfigs.logging.audit, ...overrides?.logging }),
-    error: createErrorMiddleware({ ...commonConfigs.error.production, ...overrides?.error }),
-    audit: createAuditMiddleware({ ...commonConfigs.audit.gdpr, ...overrides?.audit }),
+    cors: createCorsMiddleware({
+      ...commonConfigs.cors.production,
+      ...overrides?.cors,
+    }),
+    security: createSecurityMiddleware({
+      ...commonConfigs.security.production,
+      ...overrides?.security,
+    }),
+    auth: createAuthMiddleware({
+      ...commonConfigs.auth.dataIntelligence,
+      ...overrides?.auth,
+    }),
+    rateLimit: createRateLimitMiddleware({
+      ...commonConfigs.rateLimit.strict,
+      ...overrides?.rateLimit,
+    }),
+    validation: createValidationMiddleware({
+      ...commonConfigs.validation.dataIntelligence,
+      ...overrides?.validation,
+    }),
+    logging: createLoggingMiddleware({
+      ...commonConfigs.logging.audit,
+      ...overrides?.logging,
+    }),
+    error: createErrorMiddleware({
+      ...commonConfigs.error.production,
+      ...overrides?.error,
+    }),
+    audit: createAuditMiddleware({
+      ...commonConfigs.audit.gdpr,
+      ...overrides?.audit,
+    }),
   }),
-  
-  eventPipeline: (overrides?: { 
-    auth?: Partial<AuthConfig>; 
-    rateLimit?: Partial<RateLimitConfig>; 
+
+  eventPipeline: (overrides?: {
+    auth?: Partial<AuthConfig>;
+    rateLimit?: Partial<RateLimitConfig>;
     validation?: Partial<ValidationConfig>;
     logging?: Partial<LoggingConfig>;
     error?: Partial<ErrorConfig>;
@@ -426,14 +505,38 @@ export const servicePresets = {
     cors?: Partial<CorsConfig>;
     security?: Partial<SecurityConfig>;
   }) => ({
-    cors: createCorsMiddleware({ ...commonConfigs.cors.api, ...overrides?.cors }),
-    security: createSecurityMiddleware({ ...commonConfigs.security.api, ...overrides?.security }),
-    auth: createAuthMiddleware({ ...commonConfigs.auth.eventPipeline, ...overrides?.auth }),
-    rateLimit: createRateLimitMiddleware({ ...commonConfigs.rateLimit.general, ...overrides?.rateLimit }),
-    validation: createValidationMiddleware({ ...commonConfigs.validation.eventPipeline, ...overrides?.validation }),
-    logging: createLoggingMiddleware({ ...commonConfigs.logging.production, ...overrides?.logging }),
-    error: createErrorMiddleware({ ...commonConfigs.error.production, ...overrides?.error }),
-    audit: createAuditMiddleware({ ...commonConfigs.audit.production, ...overrides?.audit }),
+    cors: createCorsMiddleware({
+      ...commonConfigs.cors.api,
+      ...overrides?.cors,
+    }),
+    security: createSecurityMiddleware({
+      ...commonConfigs.security.api,
+      ...overrides?.security,
+    }),
+    auth: createAuthMiddleware({
+      ...commonConfigs.auth.eventPipeline,
+      ...overrides?.auth,
+    }),
+    rateLimit: createRateLimitMiddleware({
+      ...commonConfigs.rateLimit.general,
+      ...overrides?.rateLimit,
+    }),
+    validation: createValidationMiddleware({
+      ...commonConfigs.validation.eventPipeline,
+      ...overrides?.validation,
+    }),
+    logging: createLoggingMiddleware({
+      ...commonConfigs.logging.production,
+      ...overrides?.logging,
+    }),
+    error: createErrorMiddleware({
+      ...commonConfigs.error.production,
+      ...overrides?.error,
+    }),
+    audit: createAuditMiddleware({
+      ...commonConfigs.audit.production,
+      ...overrides?.audit,
+    }),
   }),
 };
 
@@ -454,7 +557,16 @@ export const quickSetup = {
    */
   full: (service: keyof typeof servicePresets) => {
     const preset = servicePresets[service]();
-    return [preset.cors, preset.security, preset.auth, preset.rateLimit, preset.validation, preset.logging, preset.error, preset.audit];
+    return [
+      preset.cors,
+      preset.security,
+      preset.auth,
+      preset.rateLimit,
+      preset.validation,
+      preset.logging,
+      preset.error,
+      preset.audit,
+    ];
   },
 
   /**
@@ -469,9 +581,18 @@ export const quickSetup = {
       error: { includeStackTrace: false },
       audit: { includeBody: true, includeResponse: true },
       cors: { origin: false, credentials: false },
-      security: { ...commonConfigs.security.production }
+      security: { ...commonConfigs.security.production },
     });
-    return [preset.cors, preset.security, preset.auth, preset.rateLimit, preset.validation, preset.logging, preset.error, preset.audit];
+    return [
+      preset.cors,
+      preset.security,
+      preset.auth,
+      preset.rateLimit,
+      preset.validation,
+      preset.logging,
+      preset.error,
+      preset.audit,
+    ];
   },
 
   /**
@@ -486,9 +607,18 @@ export const quickSetup = {
       error: { ...commonConfigs.error.development },
       audit: { ...commonConfigs.audit.development },
       cors: { ...commonConfigs.cors.development },
-      security: { ...commonConfigs.security.development }
+      security: { ...commonConfigs.security.development },
     });
-    return [preset.cors, preset.security, preset.auth, preset.rateLimit, preset.validation, preset.logging, preset.error, preset.audit];
+    return [
+      preset.cors,
+      preset.security,
+      preset.auth,
+      preset.rateLimit,
+      preset.validation,
+      preset.logging,
+      preset.error,
+      preset.audit,
+    ];
   },
 
   /**
@@ -500,9 +630,18 @@ export const quickSetup = {
       error: { ...commonConfigs.error.production },
       audit: { ...commonConfigs.audit.production },
       cors: { ...commonConfigs.cors.production },
-      security: { ...commonConfigs.security.production }
+      security: { ...commonConfigs.security.production },
     });
-    return [preset.cors, preset.security, preset.auth, preset.rateLimit, preset.validation, preset.logging, preset.error, preset.audit];
+    return [
+      preset.cors,
+      preset.security,
+      preset.auth,
+      preset.rateLimit,
+      preset.validation,
+      preset.logging,
+      preset.error,
+      preset.audit,
+    ];
   },
 
   /**
@@ -510,11 +649,17 @@ export const quickSetup = {
    */
   minimal: (service: keyof typeof servicePresets) => {
     const preset = servicePresets[service]({
-      logging: { logLevel: "error", excludePaths: ["/health", "/metrics", "/static"] },
+      logging: {
+        logLevel: "error",
+        excludePaths: ["/health", "/metrics", "/static"],
+      },
       error: { logErrors: false },
       audit: { storageStrategy: "redis", includeBody: false },
       cors: { origin: "*", credentials: false },
-      security: { contentSecurityPolicy: { enabled: false }, hsts: { enabled: false } }
+      security: {
+        contentSecurityPolicy: { enabled: false },
+        hsts: { enabled: false },
+      },
     });
     return [preset.cors, preset.auth, preset.rateLimit, preset.error];
   },

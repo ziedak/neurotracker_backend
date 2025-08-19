@@ -7,7 +7,7 @@ export class EnrichmentService {
 
   constructor() {
     this.db = PostgreSQLClient.getInstance();
-    this.logger = new Logger("EnrichmentService");
+    this.logger = Logger.getInstance("EnrichmentService");
   }
 
   async enrich(event: any): Promise<any> {

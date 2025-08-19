@@ -11,7 +11,7 @@ export class BatchedRedisOperations {
 
   constructor(redisClient?: any) {
     this.redis = redisClient || RedisClient.getInstance();
-    this.logger = new Logger("BatchedRedisOperations");
+    this.logger = Logger.getInstance("BatchedRedisOperations");
   }
 
   /**

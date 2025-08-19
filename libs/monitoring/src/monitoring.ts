@@ -18,64 +18,6 @@ export interface CounterMetric extends Metric {
 }
 
 // Logger utility
-export class Logger {
-  private service: string;
-
-  constructor(service: string) {
-    this.service = service;
-  }
-
-  private log(level: string, message: string, meta?: any) {
-    const timestamp = new Date().toISOString();
-    const logEntry = {
-      timestamp,
-      level,
-      service: this.service,
-      message,
-      ...(meta && { meta }),
-    };
-
-    console.log(JSON.stringify(logEntry));
-
-    // In production, send to centralized logging
-    this.sendToLoggingService(logEntry);
-  }
-
-  info(message: string, meta?: any) {
-    this.log("info", message, meta);
-  }
-
-  warn(message: string, meta?: any) {
-    this.log("warn", message, meta);
-  }
-
-  error(message: string, error?: Error, meta?: any) {
-    this.log("error", message, {
-      error: error?.message,
-      stack: error?.stack,
-      ...meta,
-    });
-  }
-
-  debug(message: string, meta?: any) {
-    if (getEnv("NODE_ENV") === "development") {
-      this.log("debug", message, meta);
-    }
-  }
-
-  private async sendToLoggingService(logEntry: any) {
-    // In production, implement actual logging service integration
-    // For now, we'll store in Redis for demonstration
-    try {
-      const redis = RedisClient.getInstance();
-      await redis.lpush(`logs:${this.service}`, JSON.stringify(logEntry));
-      await redis.ltrim(`logs:${this.service}`, 0, 999); // Keep last 1000 logs
-    } catch (error) {
-      // Don't throw on logging errors
-      console.error("Failed to send log to service:", error);
-    }
-  }
-}
 
 // Metrics collector
 export class MetricsCollector {

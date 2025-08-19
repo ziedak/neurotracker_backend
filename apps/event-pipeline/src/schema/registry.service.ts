@@ -1,6 +1,6 @@
 import { Logger } from "@libs/monitoring";
 
-const logger = new Logger("event-pipeline-schema-registry");
+const logger = Logger.getInstance("event-pipeline-schema-registry");
 
 interface SchemaVersion {
   version: string;

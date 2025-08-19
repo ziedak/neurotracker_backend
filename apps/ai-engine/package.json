@@ -28,6 +28,7 @@
     "@libs/database": "workspace:*",
     "@libs/elysia-server": "workspace:*",
     "@libs/monitoring": "workspace:*",
+    "@libs/middleware": "workspace:*",
     "zod": "^3.22.0"
   },
   "devDependencies": {

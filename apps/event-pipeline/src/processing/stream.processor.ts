@@ -5,7 +5,7 @@ export class StreamProcessor {
   private logger: Logger;
 
   constructor() {
-    this.logger = new Logger("StreamProcessor");
+    this.logger = Logger.getInstance("StreamProcessor");
   }
 
   async process(event: any): Promise<void> {

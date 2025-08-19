@@ -70,7 +70,11 @@ export class LoggingMiddleware {
           return context;
         })
         .onAfterHandle(async (context: any) => {
-          await this.logResponse(context.request, context.response, finalConfig);
+          await this.logResponse(
+            context.request,
+            context.response,
+            finalConfig
+          );
           return context;
         });
     };
@@ -480,7 +484,7 @@ export class LoggingMiddleware {
  * Factory function for easy middleware creation
  */
 export function createLoggingMiddleware(config?: Partial<LoggingConfig>) {
-  const logger = new Logger("Shared Logging Middleware");
+  const logger = Logger.getInstance("Shared Logging Middleware");
   const middleware = new LoggingMiddleware(logger);
   return middleware.elysia(config);
 }

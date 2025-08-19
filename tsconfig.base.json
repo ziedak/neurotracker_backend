@@ -8,9 +8,10 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "declaration": true,
-    "sourceMap": true,
     "incremental": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
     "baseUrl": ".",
     "paths": {
       "@libs/models": ["libs/models/src"],
@@ -20,7 +21,8 @@
       "@libs/database": ["libs/database/src"],
       "@libs/auth": ["libs/auth/src"],
       "@libs/monitoring": ["libs/monitoring/src"],
-      "@libs/elysia-server": ["libs/elysia-server/src"]
+      "@libs/elysia-server": ["libs/elysia-server/src"],
+      "@libs/middleware": ["libs/middleware/src"]
     }
   }
 }
