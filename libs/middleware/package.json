@@ -12,6 +12,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@libs/auth": "workspace:*",
     "@libs/monitoring": "workspace:*",
     "@libs/database": "workspace:*",
     "@libs/utils": "workspace:*",

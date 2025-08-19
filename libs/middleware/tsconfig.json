@@ -9,7 +9,8 @@
   "references": [
     { "path": "../../libs/config" },
     { "path": "../../libs/database" },
-    { "path": "../../libs/monitoring" }
+    { "path": "../../libs/monitoring" },
+    { "path": "../../libs/auth" }
   ],
   "include": ["src"],
   "exclude": ["dist", "node_modules", "**/*.test.ts", "**/*.spec.ts"]

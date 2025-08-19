@@ -9,7 +9,9 @@
   "references": [
     { "path": "../../libs/models" },
     { "path": "../../libs/utils" },
-    { "path": "../../libs/config" }
+    { "path": "../../libs/config" },
+    { "path": "../../libs/database" },
+    { "path": "../../libs/monitoring" }
   ],
   "include": ["src/**/*"],
   "exclude": ["node_modules"]

@@ -208,9 +208,13 @@ export class JWTService {
   /**
    * Generate a new access token from a valid refresh token
    * @param refreshToken - JWT refresh token
+   * @param userService - UserService instance for database lookup
    * @returns { accessToken, expiresIn } or null
    */
-  public async refreshAccessToken(refreshToken: string): Promise<{
+  public async refreshAccessToken(
+    refreshToken: string,
+    userService: import("./services/user.service").UserService
+  ): Promise<{
     accessToken: string;
     expiresIn: number;
   } | null> {
@@ -218,18 +222,91 @@ export class JWTService {
     if (!refreshPayload) {
       return null;
     }
-    // TODO: Fetch user data from database for real implementation
-    // This is a stub for demonstration; must be replaced with DB lookup
-    const userPayload: Omit<JWTPayload, "iat" | "exp"> = {
-      sub: refreshPayload.sub,
-      email: "", // Should be fetched from DB
-      role: "customer",
-      permissions: [],
-    };
-    const tokens = await this.generateTokens(userPayload);
-    return {
-      accessToken: tokens.accessToken,
-      expiresIn: tokens.expiresIn,
-    };
+
+    try {
+      // Fetch user data from database
+      const user = await userService.getUserById(refreshPayload.sub);
+      if (!user) {
+        return null; // User not found or deleted
+      }
+
+      // Check if user is active
+      if (user.status !== "active") {
+        return null; // User is inactive, suspended, or pending
+      }
+
+      // Get user roles for permissions
+      const roles = await userService.getUserRoles(refreshPayload.sub);
+
+      // Build permissions based on roles
+      const permissions = this.buildPermissionsFromRoles(roles);
+
+      const userPayload: Omit<JWTPayload, "iat" | "exp"> = {
+        sub: user.id,
+        email: user.email,
+        storeId: user.storeId,
+        role: user.role,
+        permissions,
+      };
+
+      const tokens = await this.generateTokens(userPayload);
+      return {
+        accessToken: tokens.accessToken,
+        expiresIn: tokens.expiresIn,
+      };
+    } catch (error) {
+      // Log error for observability but don't expose internal details
+      return null;
+    }
+  }
+
+  /**
+   * Build permissions array from user roles
+   * @param roles - Array of user roles
+   * @returns Array of permission strings
+   */
+  private buildPermissionsFromRoles(roles: string[]): string[] {
+    const permissions: Set<string> = new Set();
+
+    for (const role of roles) {
+      switch (role) {
+        case "admin":
+          permissions.add("user:read");
+          permissions.add("user:write");
+          permissions.add("user:delete");
+          permissions.add("store:read");
+          permissions.add("store:write");
+          permissions.add("store:delete");
+          permissions.add("system:admin");
+          permissions.add("analytics:read");
+          permissions.add("settings:write");
+          break;
+
+        case "store_owner":
+          permissions.add("user:read");
+          permissions.add("user:write");
+          permissions.add("store:read");
+          permissions.add("store:write");
+          permissions.add("analytics:read");
+          permissions.add("settings:write");
+          break;
+
+        case "api_user":
+          permissions.add("api:read");
+          permissions.add("api:write");
+          permissions.add("user:read");
+          permissions.add("store:read");
+          break;
+
+        case "customer":
+        default:
+          permissions.add("profile:read");
+          permissions.add("profile:write");
+          permissions.add("orders:read");
+          break;
+      }
+    }
+
+    return Array.from(permissions);
   }
 }

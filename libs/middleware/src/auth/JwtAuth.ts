@@ -1,6 +1,6 @@
-import { Logger } from '@libs/monitoring';
-import { AuthConfig, MiddlewareContext } from '../types';
-import { AuthResult } from './AuthMiddleware';
+import { Logger } from "@libs/monitoring";
+import { AuthConfig, MiddlewareContext } from "../types";
+import { AuthResult } from "./types";
 
 /**
  * JWT payload interface
@@ -24,13 +24,16 @@ export class JwtAuth {
 
   constructor(config: AuthConfig, logger: Logger) {
     this.config = config;
-    this.logger = logger.child({ component: 'JwtAuth' });
+    this.logger = logger.child({ component: "JwtAuth" });
   }
 
   /**
    * Authenticate using JWT token
    */
-  async authenticate(authHeader: string, context: MiddlewareContext): Promise<AuthResult> {
+  async authenticate(
+    authHeader: string,
+    context: MiddlewareContext
+  ): Promise<AuthResult> {
     const startTime = performance.now();
 
     try {
@@ -39,27 +42,28 @@ export class JwtAuth {
       if (!tokenMatch) {
         return {
           authenticated: false,
-          error: 'Invalid Authorization header format - expected "Bearer <token>"'
+          error:
+            'Invalid Authorization header format - expected "Bearer <token>"',
         };
       }
 
       const token = tokenMatch[1];
-      
+
       // Basic token validation
       if (token.length < 20) {
         return {
           authenticated: false,
-          error: 'Invalid token format'
+          error: "Invalid token format",
         };
       }
 
       // Validate and decode token
       const payload = await this.validateToken(token);
-      
+
       if (!payload) {
         return {
           authenticated: false,
-          error: 'Invalid or expired token'
+          error: "Invalid or expired token",
         };
       }
 
@@ -67,16 +71,16 @@ export class JwtAuth {
       if (!this.isValidPayload(payload)) {
         return {
           authenticated: false,
-          error: 'Invalid token payload'
+          error: "Invalid token payload",
         };
       }
 
       const duration = performance.now() - startTime;
-      this.logger.debug('JWT authentication successful', {
+      this.logger.debug("JWT authentication successful", {
         userId: payload.userId,
         permissions: payload.permissions?.length || 0,
         roles: payload.roles?.length || 0,
-        duration: Math.round(duration)
+        duration: Math.round(duration),
       });
 
       return {
@@ -85,17 +89,15 @@ export class JwtAuth {
           id: payload.userId,
           roles: payload.roles || [],
           permissions: payload.permissions || [],
-          authMethod: 'jwt',
+          authMethod: "jwt",
           tokenIssued: payload.iat ? new Date(payload.iat * 1000) : undefined,
-          tokenExpires: payload.exp ? new Date(payload.exp * 1000) : undefined
-        }
+        },
       };
-
     } catch (error) {
-      this.logger.error('JWT authentication error', error as Error);
+      this.logger.error("JWT authentication error", error as Error);
       return {
         authenticated: false,
-        error: 'Token validation failed'
+        error: "Token validation failed",
       };
     }
   }
@@ -107,30 +109,29 @@ export class JwtAuth {
   private async validateToken(token: string): Promise<JwtPayload | null> {
     try {
       // Basic JWT structure check
-      const parts = token.split('.');
+      const parts = token.split(".");
       if (parts.length !== 3) {
-        throw new Error('Invalid JWT format');
+        throw new Error("Invalid JWT format");
       }
 
       // Decode payload (in production, verify signature first)
       const payload = this.decodeTokenPayload(token);
-      
+
       // Check expiration
       if (payload.exp && payload.exp < Date.now() / 1000) {
-        throw new Error('Token expired');
+        throw new Error("Token expired");
       }
 
       // Check issuer if configured
-      if (this.config.jwtSecret && payload.iss !== 'neurotracker-backend') {
-        throw new Error('Invalid token issuer');
+      if (this.config.jwtSecret && payload.iss !== "neurotracker-backend") {
+        throw new Error("Invalid token issuer");
       }
 
       return payload;
-
     } catch (error) {
-      this.logger.warn('Token validation failed', {
+      this.logger.warn("Token validation failed", {
         error: (error as Error).message,
-        tokenPrefix: token.substring(0, 20) + '...'
+        tokenPrefix: token.substring(0, 20) + "...",
       });
       return null;
     }
@@ -142,14 +143,14 @@ export class JwtAuth {
    */
   private decodeTokenPayload(token: string): JwtPayload {
     try {
-      const parts = token.split('.');
+      const parts = token.split(".");
       const payload = JSON.parse(
-        Buffer.from(parts[1], 'base64url').toString('utf8')
+        Buffer.from(parts[1], "base64url").toString("utf8")
       );
-      
+
       return payload;
     } catch (error) {
-      throw new Error('Failed to decode token payload');
+      throw new Error("Failed to decode token payload");
     }
   }
 
@@ -158,11 +159,13 @@ export class JwtAuth {
    */
   private isValidPayload(payload: any): payload is JwtPayload {
     return (
-      typeof payload === 'object' &&
+      typeof payload === "object" &&
       payload !== null &&
-      (typeof payload.userId === 'string' || typeof payload.userId === 'undefined') &&
-      (Array.isArray(payload.permissions) || typeof payload.permissions === 'undefined') &&
-      (Array.isArray(payload.roles) || typeof payload.roles === 'undefined')
+      (typeof payload.userId === "string" ||
+        typeof payload.userId === "undefined") &&
+      (Array.isArray(payload.permissions) ||
+        typeof payload.permissions === "undefined") &&
+      (Array.isArray(payload.roles) || typeof payload.roles === "undefined")
     );
   }
 
@@ -170,7 +173,7 @@ export class JwtAuth {
    * Create a JWT token (for testing purposes)
    * In production, use proper JWT library with signing
    */
-  public createToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
+  public createToken(payload: Omit<JwtPayload, "iat" | "exp">): string {
     const now = Math.floor(Date.now() / 1000);
     const expiry = this.config.tokenExpiry || 3600; // 1 hour default
 
@@ -178,13 +181,17 @@ export class JwtAuth {
       ...payload,
       iat: now,
       exp: now + expiry,
-      iss: 'neurotracker-backend'
+      iss: "neurotracker-backend",
     };
 
     // Simple base64 encoding (in production, use proper JWT signing)
-    const header = Buffer.from(JSON.stringify({ typ: 'JWT', alg: 'HS256' })).toString('base64url');
-    const payloadB64 = Buffer.from(JSON.stringify(fullPayload)).toString('base64url');
-    const signature = Buffer.from('mock-signature').toString('base64url');
+    const header = Buffer.from(
+      JSON.stringify({ typ: "JWT", alg: "HS256" })
+    ).toString("base64url");
+    const payloadB64 = Buffer.from(JSON.stringify(fullPayload)).toString(
+      "base64url"
+    );
+    const signature = Buffer.from("mock-signature").toString("base64url");
 
     return `${header}.${payloadB64}.${signature}`;
   }
@@ -203,12 +210,12 @@ export class JwtAuth {
       const newPayload = {
         userId: payload.userId,
         permissions: payload.permissions,
-        roles: payload.roles
+        roles: payload.roles,
       };
 
       return this.createToken(newPayload);
     } catch (error) {
-      this.logger.error('Token refresh failed', error as Error);
+      this.logger.error("Token refresh failed", error as Error);
       return null;
     }
   }

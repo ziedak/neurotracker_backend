@@ -4,6 +4,11 @@ export * from "./types";
 // Export base classes
 export * from "./base";
 
+// Export WebSocket middleware
+export { BaseWebSocketMiddleware } from "./websocket/BaseWebSocketMiddleware";
+export { WebSocketAuthMiddleware } from "./websocket/WebSocketAuthMiddleware";
+export { WebSocketRateLimitMiddleware } from "./websocket/WebSocketRateLimitMiddleware";
+
 // Export auth middleware
 export * from "./auth";
 
@@ -21,7 +26,13 @@ export * from "./security/security.middleware";
 
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { RedisClient, ClickHouseClient } from "@libs/database";
-import { AuthConfig, RateLimitConfig, ValidationConfig } from "./types";
+import {
+  AuthConfig,
+  RateLimitConfig,
+  ValidationConfig,
+  WebSocketAuthConfig,
+  WebSocketRateLimitConfig,
+} from "./types";
 import { AuthMiddleware } from "./auth";
 import { RateLimitMiddleware } from "./rateLimit";
 import { ValidationMiddleware } from "./validation";
@@ -33,6 +44,8 @@ import {
   SecurityMiddleware,
   SecurityConfig,
 } from "./security/security.middleware";
+import { WebSocketAuthMiddleware } from "./websocket/WebSocketAuthMiddleware";
+import { WebSocketRateLimitMiddleware } from "./websocket/WebSocketRateLimitMiddleware";
 
 /**
  * Factory functions for quick middleware creation
@@ -85,6 +98,23 @@ export const createCorsMiddleware = (config?: CorsConfig) => {
 export const createSecurityMiddleware = (config?: SecurityConfig) => {
   const middleware = new SecurityMiddleware(config);
   return middleware.elysia();
+};
+
+/**
+ * WebSocket middleware factory functions
+ */
+export const createWebSocketAuthMiddleware = (config: WebSocketAuthConfig) => {
+  const logger = Logger.getInstance("WSAuthMiddleware");
+  const metrics = MetricsCollector.getInstance();
+  return WebSocketAuthMiddleware.create(config, logger, metrics);
+};
+
+export const createWebSocketRateLimitMiddleware = (
+  config: WebSocketRateLimitConfig
+) => {
+  const logger = Logger.getInstance("WSRateLimitMiddleware");
+  const metrics = MetricsCollector.getInstance();
+  return WebSocketRateLimitMiddleware.create(config, logger, metrics);
 };
 
 /**

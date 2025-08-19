@@ -1,41 +1,42 @@
 import { BaseMiddleware } from "../base";
 import { MiddlewareContext, AuthConfig } from "../types";
 import { Logger, MetricsCollector } from "@libs/monitoring";
-import { ApiKeyAuth } from "./ApiKeyAuth";
-import { JwtAuth } from "./JwtAuth";
-import { RoleBasedAuth } from "./RoleBasedAuth";
+import {
+  MiddlewareAuthGuard,
+  MiddlewareAuthResult,
+  AuthorizationRequirements,
+  PermissionService,
+  UserService,
+  SessionManager,
+  AuthenticationService,
+} from "@libs/auth";
 
 /**
- * Authentication result interface
- */
-export interface AuthResult {
-  authenticated: boolean;
-  user?: {
-    id?: string;
-    roles?: string[];
-    permissions?: string[];
-    anonymous?: boolean;
-    [key: string]: any;
-  };
-  error?: string;
-  rateLimitRemaining?: number;
-}
-
-/**
- * Main authentication middleware
- * Supports API key, JWT token, and anonymous authentication
+ * Production-ready AuthMiddleware using enhanced MiddlewareAuthGuard
+ * No stub implementations - uses proper dependency injection pattern
  */
 export class AuthMiddleware extends BaseMiddleware<AuthConfig> {
-  private readonly apiKeyAuth: ApiKeyAuth;
-  private readonly jwtAuth: JwtAuth;
-  private readonly roleAuth: RoleBasedAuth;
+  private readonly middlewareAuthGuard: MiddlewareAuthGuard;
 
-  constructor(config: AuthConfig, logger: Logger, metrics?: MetricsCollector) {
+  constructor(
+    config: AuthConfig,
+    logger: Logger,
+    metrics?: MetricsCollector,
+    services?: {
+      permissionService?: PermissionService;
+      userService?: UserService;
+      sessionManager?: SessionManager;
+      authService?: AuthenticationService;
+    }
+  ) {
     super("auth", config, logger, metrics);
 
-    this.apiKeyAuth = new ApiKeyAuth(config, logger);
-    this.jwtAuth = new JwtAuth(config, logger);
-    this.roleAuth = new RoleBasedAuth(config, logger);
+    // Create MiddlewareAuthGuard with optional service injection
+    this.middlewareAuthGuard = new MiddlewareAuthGuard(
+      logger,
+      metrics,
+      services
+    );
   }
 
   async execute(
@@ -59,67 +60,70 @@ export class AuthMiddleware extends BaseMiddleware<AuthConfig> {
         return next();
       }
 
-      // Attempt authentication
-      const authResult = await this.authenticate(context);
+      // Build authorization requirements from config
+      const requirements: AuthorizationRequirements = {
+        roles: this.config.requiredRoles,
+        permissions: this.config.requiredPermissions,
+        allowAnonymous: this.config.allowAnonymous,
+      };
 
-      if (!authResult.authenticated) {
-        context.set.status = 401;
-        await this.recordMetric("auth_failed");
+      // Authenticate and authorize using MiddlewareAuthGuard
+      const authResult =
+        await this.middlewareAuthGuard.authenticateAndAuthorize(
+          this.convertToAuthContext(context),
+          requirements
+        );
 
-        this.logger.warn("Authentication failed", {
+      if (!authResult.success) {
+        const statusCode = this.getStatusCodeFromError(authResult.errorCode);
+        context.set.status = statusCode;
+
+        await this.recordMetric(
+          statusCode === 401 ? "auth_failed" : "auth_forbidden"
+        );
+
+        this.logger.warn("Authentication/Authorization failed", {
           path: context.request.url,
           error: authResult.error,
+          errorCode: authResult.errorCode,
           requestId,
           clientIp: this.getClientIp(context),
         });
 
         return {
-          error: "Authentication failed",
-          message: authResult.error || "Invalid credentials",
-          code: "AUTH_FAILED",
-          requestId,
-        };
-      }
-
-      // Check authorization (roles and permissions)
-      const authzResult = await this.authorize(authResult, context);
-      if (!authzResult.authorized) {
-        context.set.status = 403;
-        await this.recordMetric("auth_forbidden");
-
-        this.logger.warn("Authorization failed", {
-          path: context.request.url,
-          userId: authResult.user?.id,
-          requiredRoles: this.config.requiredRoles,
-          requiredPermissions: this.config.requiredPermissions,
-          userRoles: authResult.user?.roles,
-          userPermissions: authResult.user?.permissions,
-          requestId,
-        });
-
-        return {
-          error: "Insufficient permissions",
-          message: authzResult.error || "Access denied",
-          code: "INSUFFICIENT_PERMISSIONS",
+          error:
+            authResult.errorCode === "AUTH_REQUIRED"
+              ? "Authentication required"
+              : "Access denied",
+          message: authResult.error || "Authentication/Authorization failed",
+          code: authResult.errorCode || "AUTH_FAILED",
           requestId,
         };
       }
 
       // Attach user info to context
       context.user = authResult.user;
+      context.session = authResult.session;
 
-      // Add rate limit info if available
-      if (authResult.rateLimitRemaining !== undefined) {
-        context.set.headers["X-RateLimit-Remaining"] =
-          authResult.rateLimitRemaining.toString();
+      // Add security headers
+      if (authResult.session) {
+        context.set.headers["X-Session-ID"] = authResult.session.sessionId;
+        context.set.headers["X-Session-Expires"] =
+          authResult.session.expiresAt.toISOString();
+      }
+
+      if (authResult.payload) {
+        context.set.headers["X-User-ID"] = authResult.payload.sub;
+        context.set.headers["X-User-Role"] = authResult.payload.role;
       }
 
       await this.recordMetric("auth_success");
       this.logger.debug("Authentication successful", {
         path: context.request.url,
         userId: authResult.user?.id,
-        roles: authResult.user?.roles?.length || 0,
-        permissions: authResult.user?.permissions?.length || 0,
+        email: authResult.user?.email,
+        roles: authResult.user?.roles.length || 0,
+        permissions: authResult.user?.permissions.length || 0,
         requestId,
       });
 
@@ -163,57 +167,31 @@ export class AuthMiddleware extends BaseMiddleware<AuthConfig> {
   }
 
   /**
-   * Authenticate the request using available methods
+   * Convert middleware context to auth context
    */
-  private async authenticate(context: MiddlewareContext): Promise<AuthResult> {
-    const authHeader = context.request.headers.authorization;
-    const apiKey = context.request.headers["x-api-key"];
-
-    // Allow anonymous access if configured and no credentials provided
-    if (this.config.allowAnonymous && !authHeader && !apiKey) {
-      return {
-        authenticated: true,
-        user: {
-          anonymous: true,
-          roles: [],
-          permissions: [],
-        },
-      };
-    }
-
-    // Try API key authentication first
-    if (apiKey) {
-      return this.apiKeyAuth.authenticate(apiKey, context);
-    }
-
-    // Try JWT authentication
-    if (authHeader) {
-      return this.jwtAuth.authenticate(authHeader, context);
-    }
-
+  private convertToAuthContext(context: MiddlewareContext) {
+    // Ensure status is defined for AuthContext compatibility
     return {
-      authenticated: false,
-      error: "No authentication credentials provided",
+      headers: context.request.headers,
+      set: {
+        status: context.set.status || 200,
+        headers: context.set.headers,
+      },
     };
   }
 
   /**
-   * Check authorization (roles and permissions)
+   * Map error codes to HTTP status codes
    */
-  private async authorize(
-    authResult: AuthResult,
-    context: MiddlewareContext
-  ): Promise<{ authorized: boolean; error?: string }> {
-    if (!authResult.user || authResult.user.anonymous) {
-      return {
-        authorized: this.config.allowAnonymous || false,
-        error: this.config.allowAnonymous
-          ? undefined
-          : "Anonymous access not allowed",
-      };
+  private getStatusCodeFromError(errorCode?: string): number {
+    switch (errorCode) {
+      case "AUTH_REQUIRED":
+        return 401;
+      case "AUTHORIZATION_FAILED":
+        return 403;
+      default:
+        return 401;
     }
-
-    return this.roleAuth.checkAuthorization(authResult.user, context);
   }
 
   /**
@@ -228,7 +206,9 @@ export class AuthMiddleware extends BaseMiddleware<AuthConfig> {
     );
 
     return (app: any) => {
-      return app.onBeforeHandle(middleware.middleware());
+      return app.onBeforeHandle(async (context: any) => {
+        return middleware.execute(context, () => Promise.resolve());
+      });
     };
   }
 
@@ -237,35 +217,59 @@ export class AuthMiddleware extends BaseMiddleware<AuthConfig> {
    */
   public static create(
     type: "api-gateway" | "ai-engine" | "data-intelligence" | "event-pipeline",
+    services?: {
+      permissionService?: PermissionService;
+      userService?: UserService;
+      sessionManager?: SessionManager;
+      authService?: AuthenticationService;
+    },
     overrides?: Partial<AuthConfig>
   ): AuthMiddleware {
     const configs = {
       "api-gateway": {
         allowAnonymous: true,
-        bypassRoutes: ["/health", "/metrics", "/docs", "/swagger"],
-        skipPaths: ["/health", "/metrics"],
-      },
+        bypassRoutes: ["/health", "/metrics", "/docs", "/swagger", "/auth/*"],
+      } as AuthConfig,
       "ai-engine": {
-        requiredPermissions: ["predict"],
-        apiKeys: new Set(["ai-engine-key-prod-2024", "ai-engine-key-dev-2024"]),
-        bypassRoutes: ["/health", "/metrics"],
-      },
-      "data-intelligence": {
-        requiredRoles: ["user", "admin"],
-        bypassRoutes: ["/health", "/metrics"],
-        strictMode: true,
-      },
-      "event-pipeline": {
-        requiredPermissions: ["event_ingest"],
+        requiredPermissions: ["ai:predict", "api:access"],
         bypassRoutes: ["/health", "/metrics"],
         allowAnonymous: false,
-      },
+      } as AuthConfig,
+      "data-intelligence": {
+        requiredRoles: ["user", "admin", "store_owner"],
+        requiredPermissions: ["data:read"],
+        bypassRoutes: ["/health", "/metrics"],
+        allowAnonymous: false,
+      } as AuthConfig,
+      "event-pipeline": {
+        requiredPermissions: ["events:ingest", "api:access"],
+        bypassRoutes: ["/health", "/metrics"],
+        allowAnonymous: false,
+      } as AuthConfig,
     };
 
     const config = { ...configs[type], ...overrides };
     const logger = Logger.getInstance("authMiddleware");
     const metrics = MetricsCollector.getInstance();
 
-    return new AuthMiddleware(config, logger, metrics);
+    return new AuthMiddleware(config, logger, metrics, services);
+  }
+
+  /**
+   * Create middleware with full service integration
+   */
+  public static createWithServices(
+    config: AuthConfig,
+    services: {
+      permissionService: PermissionService;
+      userService: UserService;
+      sessionManager: SessionManager;
+      authService: AuthenticationService;
+    }
+  ): AuthMiddleware {
+    const logger = Logger.getInstance("authMiddleware");
+    const metrics = MetricsCollector.getInstance();
+
+    return new AuthMiddleware(config, logger, metrics, services);
   }
 }
