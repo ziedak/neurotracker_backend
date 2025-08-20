@@ -10,7 +10,7 @@ import { setupApiRoutes } from "./routes/api-routes";
 import { EndpointRegistryService } from "./services/EndpointRegistryService";
 
 // DI Container Setup (Logger only)
-const logger = new Logger("api-gateway");
+const logger = Logger.getInstance("api-gateway");
 const endpointRegistryService = new EndpointRegistryService(logger);
 
 // Register services

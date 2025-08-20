@@ -3,7 +3,7 @@ import { Logger } from "@libs/monitoring";
 import { generateId, AppError } from "@libs/utils";
 import { handleError } from "../types";
 
-const logger = new Logger("api-gateway");
+const logger = Logger.getInstance("api-gateway");
 
 export function setupErrorHandling(app: Elysia) {
   return app.onError(({ error, set, request }) => {

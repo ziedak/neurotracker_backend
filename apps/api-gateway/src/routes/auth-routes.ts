@@ -1,5 +1,5 @@
 import { Elysia, t } from "@libs/elysia-server";
-import { createJWTPlugin, JWTService } from "@libs/auth";
+import { EnhancedJWTService } from "@libs/auth";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 
 const LoginSchema = t.Object({
@@ -28,10 +28,9 @@ export function setupAuthRoutes(app: Elysia, logger: Logger): any {
   const authService = new AuthService(
     logger,
     MetricsCollector.getInstance(),
-    JWTService.getInstance()
+    EnhancedJWTService.getInstance()
   );
   return app
-    .use(createJWTPlugin())
     .post("/auth/login", async (context: any) => authService.login(context), {
       body: LoginSchema,
     })

@@ -1,5 +1,9 @@
 import { AuthGuard, type AuthContext } from "./guards";
-import { type JWTPayload, JWTService } from "./jwt";
+import { type JWTPayload } from "./types/jwt-types";
+import {
+  EnhancedJWTService,
+  type TokenVerificationResult,
+} from "./services/enhanced-jwt-service-v2";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import {
   PermissionService,
@@ -91,7 +95,7 @@ export class MiddlewareAuthGuard extends AuthGuard {
       const baseUser = {
         id: payload.sub,
         email: payload.email,
-        roles: [payload.role],
+        roles: payload.role ? [payload.role] : [],
         permissions: payload.permissions || [],
         storeId: payload.storeId,
         metadata: {},

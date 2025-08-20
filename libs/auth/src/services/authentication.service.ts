@@ -9,7 +9,11 @@ import { UserService } from "./user.service";
 import { SessionManager } from "./session.service";
 import { PermissionService } from "./permission.service";
 import { PasswordService } from "../password";
-import { JWTService } from "../jwt";
+import {
+  EnhancedJWTService,
+  type TokenGenerationResult,
+} from "./enhanced-jwt-service-v2";
+import { type JWTPayload } from "../types/jwt-types";
 import { UserIdentity, UserRole, UserStatus } from "../unified-context";
 
 export interface LoginCredentials {
@@ -61,7 +65,7 @@ export class AuthenticationService {
   private readonly userService: UserService;
   private readonly sessionManager: SessionManager;
   private readonly permissionService: PermissionService;
-  private readonly jwtService: JWTService;
+  private readonly jwtService: EnhancedJWTService;
   private readonly logger: Logger;
   private readonly metrics: MetricsCollector;
 
@@ -75,7 +79,7 @@ export class AuthenticationService {
     this.userService = userService;
     this.sessionManager = sessionManager;
     this.permissionService = permissionService;
-    this.jwtService = JWTService.getInstance();
+    this.jwtService = EnhancedJWTService.getInstance();
     this.logger = logger;
     this.metrics = metrics;
   }
@@ -385,7 +389,7 @@ export class AuthenticationService {
 
       return {
         success: true,
-        accessToken: result.accessToken,
+        accessToken: result.newAccessToken,
         expiresIn: result.expiresIn,
       };
     } catch (error) {

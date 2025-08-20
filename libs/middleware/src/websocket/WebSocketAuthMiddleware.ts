@@ -5,7 +5,11 @@ import {
 } from "../types";
 import { BaseWebSocketMiddleware } from "./BaseWebSocketMiddleware";
 import { Logger, MetricsCollector } from "@libs/monitoring";
-import { JWTService, type JWTPayload } from "@libs/auth";
+import {
+  EnhancedJWTService,
+  type TokenVerificationResult,
+  type JWTPayload,
+} from "@libs/auth";
 import { DatabaseUtils } from "@libs/database";
 
 /**
@@ -13,16 +17,15 @@ import { DatabaseUtils } from "@libs/database";
  * Integrates with existing auth infrastructure for secure WebSocket connections
  */
 export class WebSocketAuthMiddleware extends BaseWebSocketMiddleware<WebSocketAuthConfig> {
-  private readonly jwtService: JWTService;
+  private readonly jwtService: EnhancedJWTService;
 
   constructor(
     config: WebSocketAuthConfig,
-    logger: Logger,
+    logger: Logger = Logger.getInstance("WebSocketAuthMiddleware"),
     metrics?: MetricsCollector
   ) {
-    super("ws-auth", config, logger, metrics);
-
-    this.jwtService = JWTService.getInstance();
+    super("websocket-auth", config, logger, metrics);
+    this.jwtService = EnhancedJWTService.getInstance();
   }
 
   /**
@@ -59,8 +62,10 @@ export class WebSocketAuthMiddleware extends BaseWebSocketMiddleware<WebSocketAu
       if (authResult.authenticated && authResult.payload) {
         context.authenticated = true;
         context.userId = authResult.payload.sub;
-        context.userRoles = [authResult.payload.role];
-        context.userPermissions = authResult.payload.permissions;
+        context.userRoles = authResult.payload.role
+          ? [authResult.payload.role]
+          : [];
+        context.userPermissions = authResult.payload.permissions || [];
 
         // Check message authorization after successful authentication
         await this.checkMessageAuthorization(context);
@@ -101,13 +106,16 @@ export class WebSocketAuthMiddleware extends BaseWebSocketMiddleware<WebSocketAu
       // Try JWT token authentication first
       const token = this.extractBearerToken(headers, query);
       if (token) {
-        const payload = await this.jwtService.verifyToken(token);
-        if (payload) {
+        const verificationResult = await this.jwtService.verifyAccessToken(
+          token
+        );
+        if (verificationResult.valid && verificationResult.payload) {
+          const payload = verificationResult.payload;
           this.logger.debug("WebSocket connection authenticated via JWT", {
             connectionId: context.connectionId,
             userId: payload.sub,
             role: payload.role,
-            permissions: payload.permissions.length,
+            permissions: payload.permissions?.length || 0,
           });
 
           return {

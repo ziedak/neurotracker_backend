@@ -1,5 +1,5 @@
 import { Context } from "elysia";
-import { requireAuth, JWTService } from "@libs/auth";
+import { requireAuth, EnhancedJWTService } from "@libs/auth";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { generateId, AppError } from "@libs/utils";
 import {
@@ -18,7 +18,7 @@ export class AuthService {
   constructor(
     private readonly logger: Logger,
     private readonly metrics: MetricsCollector,
-    private readonly jwtService: JWTService
+    private readonly jwtService: EnhancedJWTService
   ) {}
 
   /**

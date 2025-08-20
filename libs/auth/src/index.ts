@@ -74,6 +74,65 @@ export {
 } from "./services/permission-cache";
 
 // ===================================================================
+// AUTHENTICATION GUARDS AND MIDDLEWARE
+// ===================================================================
+
+// Core Guards
+export {
+  AuthGuard,
+  requireAuth,
+  requireRole,
+  requirePermission,
+  optionalAuth,
+} from "./guards";
+export type { AuthContext } from "./guards";
+
+// Middleware Guards
+export {
+  MiddlewareAuthGuard,
+  type MiddlewareAuthResult,
+  type AuthorizationRequirements,
+} from "./middleware-guard";
+
+// Context System
+export {
+  UnifiedAuthContextBuilder,
+  type WebSocketContextInput,
+} from "./context-builder";
+
+export {
+  AuthContextFactory,
+  type AuthResult,
+  type PermissionService as IPermissionServiceInterface,
+  type UserService as IUserServiceInterface,
+  type SessionManager as ISessionManagerInterface,
+} from "./context-factory";
+
+export {
+  UnifiedAuthContext,
+  UnifiedAuthContextImpl,
+  type HTTPAuthContext,
+  type WebSocketAuthContext,
+  type SerializableAuthContext,
+  type ContextValidationResult,
+  type ContextCreateOptions,
+  type SessionData,
+  type TokenInfo,
+  type AuthMethod,
+  type SessionProtocol,
+} from "./unified-context";
+
+// Authentication Service
+export {
+  AuthenticationService,
+  type LoginCredentials,
+  type LoginResult,
+  type RegisterUserData,
+  type RegisterResult,
+  type RefreshTokenResult,
+} from "./services/authentication.service";
+
+// ===================================================================
 // CORE SERVICES
 // ===================================================================
 

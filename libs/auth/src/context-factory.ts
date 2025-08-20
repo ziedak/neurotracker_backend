@@ -1,9 +1,13 @@
 /**
  * Factory for creating UnifiedAuthContext from various authentication sources
- * Integrates with existing JWT service and will integrate with SessionManager
+ * Integrates with Enterprise JWT Services for production-grade authentication
  */
 
-import { JWTService, type JWTPayload } from "./jwt";
+import {
+  EnhancedJWTService,
+  type TokenVerificationResult,
+} from "./services/enhanced-jwt-service-v2";
+import { type JWTPayload } from "./types/jwt-types";
 import {
   UnifiedAuthContext,
   UserIdentity,
@@ -58,7 +62,7 @@ export interface SessionManager {
  */
 export class AuthContextFactory {
   constructor(
-    private jwtService: JWTService,
+    private jwtService: EnhancedJWTService,
     private permissionService: PermissionService,
     private userService: UserService,
     private sessionManager?: SessionManager,
@@ -75,15 +79,17 @@ export class AuthContextFactory {
     options?: ContextCreateOptions
   ): Promise<AuthResult> {
     try {
-      // Verify JWT token
-      const payload = await this.jwtService.verifyToken(token);
-      if (!payload) {
+      // Verify JWT token using EnhancedJWTService
+      const verificationResult = await this.jwtService.verifyAccessToken(token);
+      if (!verificationResult.valid || !verificationResult.payload) {
         return {
           success: false,
           error: "Invalid JWT token",
           errorCode: "INVALID_TOKEN",
         };
       }
+
+      const payload = verificationResult.payload;
 
       // Get user permissions
       const permissions = await this.permissionService.getUserPermissions(
@@ -93,9 +99,9 @@ export class AuthContextFactory {
       // Create user identity from JWT payload
       const user: UserIdentity = {
         id: payload.sub,
-        email: payload.email,
+        email: payload.email || "",
         storeId: payload.storeId,
-        role: payload.role,
+        role: (payload.role as any) || "customer",
         status: "active", // Assume active if JWT is valid
       };
 
@@ -113,12 +119,17 @@ export class AuthContextFactory {
       } else {
         // Create temporary session data if no SessionManager
         const now = new Date();
+        const issuedAt = payload.iat ? new Date(payload.iat * 1000) : now;
+        const expiresAt = payload.exp
+          ? new Date(payload.exp * 1000)
+          : new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
         session = {
           sessionId: `temp_${payload.sub}_${now.getTime()}`,
           userId: payload.sub,
-          createdAt: new Date(payload.iat * 1000),
+          createdAt: issuedAt,
           lastActivity: now,
-          expiresAt: new Date(payload.exp * 1000),
+          expiresAt: expiresAt,
           protocol: this.detectProtocol(protocolContext),
           authMethod: "jwt",
           refreshCount: 0,
@@ -138,7 +149,9 @@ export class AuthContextFactory {
         .setTokens({
           accessToken: token,
           tokenType: "Bearer",
-          expiresAt: new Date(payload.exp * 1000),
+          expiresAt: payload.exp
+            ? new Date(payload.exp * 1000)
+            : new Date(Date.now() + 24 * 60 * 60 * 1000),
         });
 
       if (options) {
@@ -495,7 +508,7 @@ export class AuthContextFactory {
    * Create a lightweight factory instance for basic usage
    */
   static create(
-    jwtService: JWTService,
+    jwtService: EnhancedJWTService,
     permissionService: PermissionService,
     userService: UserService,
     logger?: any,
@@ -515,7 +528,7 @@ export class AuthContextFactory {
    * Create a full-featured factory instance with session management
    */
   static createWithSessionManager(
-    jwtService: JWTService,
+    jwtService: EnhancedJWTService,
     permissionService: PermissionService,
     userService: UserService,
     sessionManager: SessionManager,

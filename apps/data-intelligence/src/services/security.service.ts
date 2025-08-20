@@ -1,6 +1,6 @@
 import { RedisClient, PostgreSQLClient } from "@libs/database";
 import { Logger, MetricsCollector } from "@libs/monitoring";
-import { PasswordService, JWTService } from "@libs/auth";
+import { PasswordService, EnhancedJWTService } from "@libs/auth";
 import { performance } from "perf_hooks";
 
 export interface AuthRequest {
@@ -102,9 +102,15 @@ export class SecurityService {
   async refreshToken(refreshToken: string) {
     const redis = RedisClient.getInstance();
     try {
-      const jwtService = JWTService.getInstance();
-      const payload = await jwtService.verifyRefreshToken(refreshToken);
-      if (!payload) return { success: false, error: "Invalid refresh token" };
+      const jwtService = EnhancedJWTService.getInstance();
+      const verificationResult = await jwtService.verifyRefreshToken(
+        refreshToken
+      );
+      if (!verificationResult.valid || !verificationResult.payload) {
+        return { success: false, error: "Invalid refresh token" };
+      }
+
+      const payload = verificationResult.payload;
       const revoked = await redis.get(`revoked_token:${refreshToken}`);
       if (revoked) return { success: false, error: "Token revoked" };
       const prisma = PostgreSQLClient.getInstance();
@@ -473,12 +479,14 @@ export class SecurityService {
       if (isRevoked) {
         return { authenticated: false, error: "Token has been revoked" };
       }
-      const jwtService = JWTService.getInstance();
-      // Use the actual method name from your JWTService
-      const payload = await jwtService.verifyToken(token);
-      if (!payload || !payload.sub) {
+      const jwtService = EnhancedJWTService.getInstance();
+      // Use the enterprise JWT service
+      const verificationResult = await jwtService.verifyAccessToken(token);
+      if (!verificationResult.valid || !verificationResult.payload) {
         return { authenticated: false, error: "Invalid or expired token" };
       }
+
+      const payload = verificationResult.payload;
       const userId = payload.sub;
       const userRoles = await this.getUserRoles(userId);
       return {

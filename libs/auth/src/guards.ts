@@ -1,4 +1,8 @@
-import { type JWTPayload, JWTService } from "./jwt";
+import {
+  EnhancedJWTService,
+  type TokenVerificationResult,
+} from "./services/enhanced-jwt-service-v2";
+import { type JWTPayload } from "./types/jwt-types";
 
 /**
  * Context for authentication and authorization checks
@@ -13,12 +17,13 @@ export interface AuthContext {
 
 /**
  * AuthGuard: Secure authentication and authorization logic
+ * Uses enterprise JWT services with blacklist checking and comprehensive security
  */
 export class AuthGuard {
-  private readonly jwtService: JWTService;
+  private readonly jwtService: EnhancedJWTService;
 
   constructor() {
-    this.jwtService = JWTService.getInstance();
+    this.jwtService = EnhancedJWTService.getInstance();
   }
 
   /**
@@ -32,12 +37,15 @@ export class AuthGuard {
       throw new Error("Authorization header required");
     }
     const token = authHeader.slice(7);
-    const payload = await this.jwtService.verifyToken(token);
-    if (!payload) {
+
+    // Use enterprise JWT service for verification
+    const verificationResult = await this.jwtService.verifyAccessToken(token);
+    if (!verificationResult.valid || !verificationResult.payload) {
       context.set.status = 401;
       throw new Error("Invalid or expired token");
     }
-    return payload;
+
+    return verificationResult.payload;
   }
 
   /**
@@ -52,6 +60,12 @@ export class AuthGuard {
     const allowedRoles = Array.isArray(requiredRole)
       ? requiredRole
       : [requiredRole];
+
+    if (!payload.role) {
+      context.set.status = 403;
+      throw new Error("No role information in token");
+    }
+
     if (payload.role === "admin" || allowedRoles.includes(payload.role)) {
       return payload;
     }
@@ -71,12 +85,27 @@ export class AuthGuard {
     const allowedPermissions = Array.isArray(requiredPermission)
       ? requiredPermission
       : [requiredPermission];
+
+    if (!payload.role) {
+      context.set.status = 403;
+      throw new Error("No role information in token");
+    }
+
+    if (payload.role === "admin") {
+      return payload;
+    }
+
+    if (!payload.permissions || payload.permissions.length === 0) {
+      context.set.status = 403;
+      throw new Error("No permissions in token");
+    }
+
     if (
-      payload.role === "admin" ||
-      allowedPermissions.some((perm) => payload.permissions.includes(perm))
+      allowedPermissions.some((perm) => payload.permissions!.includes(perm))
     ) {
       return payload;
     }
+
     context.set.status = 403;
     throw new Error("Insufficient permissions");
   }

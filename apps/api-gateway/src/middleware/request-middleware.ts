@@ -3,7 +3,7 @@ import { Logger, RateLimiter } from "@libs/monitoring";
 import { generateId } from "@libs/utils";
 import { APP_CONFIG } from "../config/app-config";
 
-const logger = new Logger("api-gateway");
+const logger = Logger.getInstance("api-gateway");
 const rateLimiter = new RateLimiter();
 
 export function setupMiddleware(app: Elysia) {

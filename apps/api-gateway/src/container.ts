@@ -1,7 +1,7 @@
 import { ServiceRegistry, IServiceRegistry } from "@libs/utils";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { AuthService } from "./services/authService";
-import { JWTService } from "@libs/auth";
+import { EnhancedJWTService } from "@libs/auth";
 import { EndpointRegistryService } from "./services/EndpointRegistryService";
 // Import middleware factories if needed
 // import { RequestMiddleware } from "./middleware/request-middleware";
@@ -26,7 +26,9 @@ export class GatewayContainer {
     if (this._initialized) return;
 
     // Logger - singleton
-    this._registry.registerSingleton("logger", () => new Logger("api-gateway"));
+    this._registry.registerSingleton("logger", () =>
+      Logger.getInstance("api-gateway")
+    );
 
     // Metrics collector - singleton (using getInstance pattern)
     this._registry.registerSingleton("metricsCollector", () =>
@@ -35,7 +37,7 @@ export class GatewayContainer {
 
     // JWT Service - singleton
     this._registry.registerSingleton("JWTService", () =>
-      JWTService.getInstance()
+      EnhancedJWTService.getInstance()
     );
 
     // Auth Service - singleton
@@ -43,7 +45,8 @@ export class GatewayContainer {
       const logger = this._registry.resolve<Logger>("logger");
       const metrics =
         this._registry.resolve<MetricsCollector>("metricsCollector");
-      const jwtService = this._registry.resolve<JWTService>("JWTService");
+      const jwtService =
+        this._registry.resolve<EnhancedJWTService>("JWTService");
 
       return new AuthService(logger, metrics, jwtService);
     });

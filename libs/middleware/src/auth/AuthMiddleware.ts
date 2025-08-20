@@ -114,7 +114,9 @@ export class AuthMiddleware extends BaseMiddleware<AuthConfig> {
 
       if (authResult.payload) {
         context.set.headers["X-User-ID"] = authResult.payload.sub;
-        context.set.headers["X-User-Role"] = authResult.payload.role;
+        if (authResult.payload.role) {
+          context.set.headers["X-User-Role"] = authResult.payload.role;
+        }
       }
 
       await this.recordMetric("auth_success");
