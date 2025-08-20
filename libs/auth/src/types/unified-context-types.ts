@@ -4,12 +4,11 @@
  */
 
 export interface UserIdentity {
-  id?: string; // Add id field
-  sub: string;
+  id: string; // Required id field
   email?: string;
-  name?: string;
-  storeId?: string; // Add storeId field
-  role?: UserRole; // Single role field for compatibility
+  name?: string; // Optional name field
+  storeId?: string; // Optional storeId field
+  role?: UserRole; // Optional single role field for compatibility
   roles: UserRole[];
   status: UserStatus;
   metadata?: Record<string, any>;

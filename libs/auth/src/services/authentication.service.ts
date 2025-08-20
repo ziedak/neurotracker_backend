@@ -5,9 +5,9 @@
 
 import { PostgreSQLClient } from "@libs/database";
 import { Logger, MetricsCollector } from "@libs/monitoring";
-import { UserService } from "./user.service";
+import { UserService } from "./user-service";
 import { SessionManager } from "./session.service";
-import { PermissionService } from "./permission.service";
+import { PermissionService } from "./permission-service";
 import { PasswordService } from "../password";
 import {
   EnhancedJWTService,
@@ -15,6 +15,7 @@ import {
 } from "./enhanced-jwt-service-v2";
 import { type JWTPayload } from "../types/jwt-types";
 import { UserIdentity, UserRole, UserStatus } from "../unified-context";
+import { Role } from "../models";
 
 export interface LoginCredentials {
   email: string;
@@ -118,6 +119,20 @@ export class AuthenticationService {
         };
       }
 
+      // Check if user has active role (not revoked or expired)
+      if (!this.hasActiveRole(user)) {
+        await this.metrics.recordCounter("auth_login_role_inactive");
+        await this.logAuthEvent(user.id, "login_failed", {
+          reason: "role_revoked_or_expired",
+          roleRevokedAt: user.roleRevokedAt?.toISOString(),
+          roleExpiresAt: user.roleExpiresAt?.toISOString(),
+        });
+        return {
+          success: false,
+          error: "Access has been revoked or expired",
+        };
+      }
+
       // Get user's password from database
       const userWithPassword = await this.getUserWithPassword(user.id);
       if (!userWithPassword?.password) {
@@ -158,8 +173,8 @@ export class AuthenticationService {
       const tokens = await this.jwtService.generateTokens({
         sub: user.id,
         email: user.email,
-        storeId: user.storeId,
-        role: user.role,
+        storeId: user.metadata?.storeId as string, // Extract from metadata
+        role: this.getPrimaryRoleId(user.role), // Use role ID from single Role object
         permissions: permissionStrings,
       });
 
@@ -190,7 +205,15 @@ export class AuthenticationService {
 
       return {
         success: true,
-        user,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: `${user.firstName} ${user.lastName}`,
+          storeId: user.metadata?.storeId as string, // Extract from metadata
+          role: this.getPrimaryRoleId(user.role), // Use role ID from single Role object
+          status: user.status as any, // Map status
+          metadata: user.metadata,
+        },
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         expiresIn: tokens.expiresIn,
@@ -238,30 +261,45 @@ export class AuthenticationService {
       // Hash password
       const hashedPassword = await PasswordService.hash(userData.password);
 
-      // Create user
+      // Create user - map RegisterUserData to CreateUserData format
       const user = await this.userService.createUser({
-        ...userData,
+        email: userData.email,
         password: hashedPassword,
-        status: "active" as UserStatus,
+        username: userData.email, // Use email as username if not provided
+        firstName: userData.name?.split(" ")[0] || "",
+        lastName: userData.name?.split(" ").slice(1).join(" ") || "",
+        role: userData.role || "customer", // Single role assignment
+        metadata: {
+          ...userData.metadata,
+          storeId: userData.storeId,
+        },
       });
 
       // Log registration
       await this.logAuthEvent(user.id, "user_registered", {
         email: user.email,
-        role: user.role,
+        role: this.getPrimaryRoleId(user.role), // Use role ID from single Role object
       });
 
       this.logger.info("User registered successfully", {
         userId: user.id,
         email: user.email,
-        role: user.role,
+        role: this.getPrimaryRoleId(user.role), // Use role ID from single Role object
       });
 
       await this.metrics.recordCounter("auth_register_success");
 
       return {
         success: true,
-        user,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: `${user.firstName} ${user.lastName}`,
+          storeId: user.metadata?.storeId as string, // Extract from metadata
+          role: this.getPrimaryRoleId(user.role), // Use role ID from single Role object
+          status: user.status as any, // Map status
+          metadata: user.metadata,
+        },
       };
     } catch (error) {
       this.logger.error("Registration failed", error as Error, {
@@ -440,7 +478,15 @@ export class AuthenticationService {
 
       return {
         valid: true,
-        user,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: `${user.firstName} ${user.lastName}`,
+          storeId: user.metadata?.storeId as string, // Extract from metadata
+          role: this.getPrimaryRoleId(user.role), // Use role ID from single Role object
+          status: user.status as any, // Map status
+          metadata: user.metadata,
+        },
         session: validation.session,
       };
     } catch (error) {
@@ -532,6 +578,46 @@ export class AuthenticationService {
 
   // Private helper methods
 
+  /**
+   * Check if user has active (non-revoked, non-expired) role
+   */
+  private hasActiveRole(user: any): boolean {
+    return !!(
+      user.role &&
+      !user.roleRevokedAt &&
+      (!user.roleExpiresAt || new Date(user.roleExpiresAt) > new Date())
+    );
+  }
+
+  /**
+   * Get primary role from user role according to Phase 3A architecture
+   * Now that users have a single Role object, just extract the role ID
+   */
+  private getPrimaryRoleId(role: Role): string {
+    return role.id;
+  }
+
+  /**
+   * Legacy support for role extraction from role arrays (for transition period)
+   * TODO: Remove this method once database migration to single role is complete
+   */
+  private getPrimaryRole(roles: string[]): string {
+    if (!roles || roles.length === 0) {
+      return "customer"; // Default role
+    }
+
+    // Phase 3A business logic: Priority order for role selection
+    const rolePriority = ["admin", "store_owner", "api_user", "customer"];
+
+    for (const priority of rolePriority) {
+      if (roles.includes(priority)) {
+        return priority;
+      }
+    }
+
+    // Fallback: return first role if none match priority
+    return roles[0];
+  }
   private validateLoginCredentials(credentials: LoginCredentials): boolean {
     if (!credentials || typeof credentials !== "object") {
       return false;

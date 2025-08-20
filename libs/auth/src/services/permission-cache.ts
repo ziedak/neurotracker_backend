@@ -12,118 +12,15 @@
  * Follows Clean Architecture principles with enterprise-grade error handling,
  * performance optimization, and comprehensive monitoring.
  *
- * @version 2.2.0
+ * @version 2.3.0 - Phase 3A Infrastructure Fix
  */
 
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { CircuitBreaker, LRUCache } from "@libs/utils";
+import { RedisClient } from "@libs/database";
 
-// Import permission types (temporary inline definitions until module resolution is fixed)
-interface Permission {
-  readonly id: string;
-  readonly name: string;
-  readonly resource: string;
-  readonly action: string;
-  readonly conditions?: unknown[];
-  readonly metadata: unknown;
-  readonly createdAt: Date;
-  readonly updatedAt: Date;
-  readonly version: string;
-}
-
-interface Role {
-  readonly id: string;
-  readonly name: string;
-  readonly displayName: string;
-  readonly description: string;
-  readonly permissions: Permission[];
-  readonly parentRoles: string[];
-  readonly childRoles: string[];
-  readonly metadata: unknown;
-  readonly isActive: boolean;
-  readonly createdAt: Date;
-  readonly updatedAt: Date;
-  readonly version: string;
-}
-
-// Mock Redis interface for now - will be replaced with actual implementation
-interface RedisInterface {
-  setex(key: string, ttl: number, value: string): Promise<string>;
-  get(key: string): Promise<string | null>;
-  del(key: string): Promise<number>;
-  pipeline(): RedisPipeline;
-  ping(): Promise<string>;
-}
-
-interface RedisPipeline {
-  setex(key: string, ttl: number, value: string): RedisPipeline;
-  exec(): Promise<Array<[Error | null, unknown]> | null>;
-}
-
-// Redis client stub - will be replaced with actual implementation
-class RedisClientStub implements RedisInterface {
-  private static instance: RedisClientStub;
-  private data = new Map<string, { value: string; expires: number }>();
-
-  static getInstance(): RedisClientStub {
-    if (!this.instance) {
-      this.instance = new RedisClientStub();
-    }
-    return this.instance;
-  }
-
-  async setex(key: string, ttl: number, value: string): Promise<string> {
-    this.data.set(key, { value, expires: Date.now() + ttl * 1000 });
-    return "OK";
-  }
-
-  async get(key: string): Promise<string | null> {
-    const entry = this.data.get(key);
-    if (!entry || Date.now() > entry.expires) {
-      this.data.delete(key);
-      return null;
-    }
-    return entry.value;
-  }
-
-  async del(key: string): Promise<number> {
-    return this.data.delete(key) ? 1 : 0;
-  }
-
-  pipeline(): RedisPipeline {
-    return new RedisPipelineStub(this);
-  }
-
-  async ping(): Promise<string> {
-    return "PONG";
-  }
-}
-
-class RedisPipelineStub implements RedisPipeline {
-  private commands: Array<() => Promise<unknown>> = [];
-
-  constructor(private redis: RedisClientStub) {}
-
-  setex(key: string, ttl: number, value: string): RedisPipeline {
-    this.commands.push(() => this.redis.setex(key, ttl, value));
-    return this;
-  }
-
-  async exec(): Promise<Array<[Error | null, unknown]> | null> {
-    const results: Array<[Error | null, unknown]> = [];
-
-    for (const command of this.commands) {
-      try {
-        const result = await command();
-        results.push([null, result]);
-      } catch (error) {
-        results.push([error as Error, null]);
-      }
-    }
-
-    return results;
-  }
-}
+// Import canonical types from unified models
+import type { Permission, Role, PermissionId, RoleId, UserId } from "../models";
 
 /**
  * Cache configuration for permission caching system
@@ -221,7 +118,7 @@ interface CacheAnalytics {
  */
 export class PermissionCache {
   private readonly config: PermissionCacheConfig;
-  private readonly redis: RedisInterface;
+  private readonly redis: ReturnType<typeof RedisClient.getInstance>;
   private readonly logger: Logger;
   private readonly metrics: MetricsCollector;
   private readonly circuitBreaker: CircuitBreaker;
@@ -255,8 +152,8 @@ export class PermissionCache {
     this.logger = logger.child({ component: "PermissionCache" });
     this.metrics = metrics;
 
-    // Initialize Redis client
-    this.redis = RedisClientStub.getInstance();
+    // Initialize Redis client - Use enterprise infrastructure
+    this.redis = RedisClient.getInstance();
 
     // Initialize circuit breaker
     this.circuitBreaker = new CircuitBreaker({

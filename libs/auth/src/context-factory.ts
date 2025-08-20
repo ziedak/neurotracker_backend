@@ -20,6 +20,7 @@ import {
   UnifiedAuthContextBuilder,
   WebSocketContextInput,
 } from "./context-builder";
+import { Permission, PermissionMetadata, PermissionPriority } from "./models";
 
 /**
  * Authentication result from various sources
@@ -35,8 +36,8 @@ export interface AuthResult {
  * Permission service interface (to be implemented)
  */
 export interface PermissionService {
-  getUserPermissions(userId: string): Promise<string[]>;
-  getRolePermissions(role: string): Promise<string[]>;
+  getUserPermissions(userId: string): Promise<Permission[]>;
+  getRolePermissions(role: string): Promise<Permission[]>;
 }
 
 /**
@@ -334,10 +335,30 @@ export class AuthContextFactory {
       }
 
       // Build anonymous context
+      const now = new Date();
+      const publicPermission: Permission = {
+        id: "public-read",
+        name: "Public Read Access",
+        resource: "public",
+        action: "read",
+        conditions: [],
+        metadata: {
+          description: "Basic public read access",
+          category: "public",
+          priority: "LOW" as PermissionPriority,
+          tags: ["public", "read"],
+          owner: "system",
+          department: "system",
+        },
+        createdAt: now,
+        updatedAt: now,
+        version: "1.0.0",
+      };
+
       const builder = this.createBuilder(protocolContext)
         .setAuthenticated(false)
         .setSession(session)
-        .setPermissions(["public:read"]); // Default anonymous permissions
+        .setPermissions([publicPermission]); // Default anonymous permissions as Permission objects
 
       if (options) {
         builder.setOptions(options);

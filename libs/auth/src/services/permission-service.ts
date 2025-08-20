@@ -13,7 +13,7 @@
  * and follows Clean Architecture principles with enterprise-grade
  * error handling, monitoring, and performance optimization.
  *
- * @version 2.2.0
+ * @version 2.3.0 - Phase 3A Type Unification
  */
 
 import { Logger, MetricsCollector } from "@libs/monitoring";
@@ -23,109 +23,25 @@ import {
   type PermissionCacheConfig,
 } from "./permission-cache";
 
-// Temporary inline types until module resolution is fixed
-interface Permission {
-  readonly id: string;
-  readonly name: string;
-  readonly resource: string;
-  readonly action: string;
-  readonly conditions?: PermissionCondition[];
-  readonly metadata: PermissionMetadata;
-  readonly createdAt: Date;
-  readonly updatedAt: Date;
-  readonly version: string;
-}
+// Import canonical types from unified models
+import type {
+  Permission,
+  Role,
+  User,
+  PermissionCondition,
+  PermissionMetadata,
+  RoleMetadata,
+  ComplianceInfo,
+  AuditEntry,
+  PermissionId,
+  RoleId,
+  UserId,
+  PermissionCheck,
+  PermissionServiceInterface,
+} from "../models";
 
-interface PermissionCondition {
-  readonly type: "attribute" | "time" | "location" | "custom";
-  readonly field: string;
-  readonly operator:
-    | "eq"
-    | "ne"
-    | "gt"
-    | "lt"
-    | "in"
-    | "nin"
-    | "contains"
-    | "starts_with"
-    | "ends_with"
-    | "matches";
-  readonly value: string | number | boolean | string[];
-  readonly metadata?: Record<string, unknown>;
-}
-
-interface PermissionMetadata {
-  readonly description: string;
-  readonly category: string;
-  readonly priority: "critical" | "high" | "medium" | "low";
-  readonly tags: string[];
-  readonly owner: string;
-  readonly department: string;
-  readonly compliance?: ComplianceInfo;
-  readonly customAttributes?: Record<string, unknown>;
-}
-
-interface Role {
-  readonly id: string;
-  readonly name: string;
-  readonly displayName: string;
-  readonly description: string;
-  readonly permissions: Permission[];
-  readonly parentRoles: string[];
-  readonly childRoles: string[];
-  readonly metadata: RoleMetadata;
-  readonly isActive: boolean;
-  readonly createdAt: Date;
-  readonly updatedAt: Date;
-  readonly version: string;
-}
-
-interface RoleMetadata {
-  readonly category:
-    | "system"
-    | "administrative"
-    | "operational"
-    | "functional"
-    | "custom";
-  readonly level: number;
-  readonly department: string;
-  readonly owner: string;
-  readonly maxUsers?: number;
-  readonly expiresAt?: Date;
-  readonly compliance?: ComplianceInfo;
-  readonly customAttributes?: Record<string, unknown>;
-}
-
-interface ComplianceInfo {
-  readonly framework: string;
-  readonly requirements: string[];
-  readonly lastAudit?: Date;
-  readonly nextAudit?: Date;
-  readonly auditTrail: AuditEntry[];
-}
-
-interface AuditEntry {
-  readonly timestamp: Date;
-  readonly userId: string;
-  readonly action:
-    | "created"
-    | "updated"
-    | "deleted"
-    | "assigned"
-    | "revoked"
-    | "activated"
-    | "deactivated";
-  readonly details: string;
-  readonly metadata?: Record<string, unknown>;
-}
-
-interface User {
-  readonly id: string;
-  readonly email: string;
-  readonly roles: string[];
-  readonly isActive: boolean;
-  readonly metadata?: Record<string, unknown>;
-}
+// Import enums separately (not as types)
+import { AuditAction } from "../models";
 
 /**
  * Permission service configuration
@@ -733,7 +649,7 @@ export class PermissionService {
       if (this.config.enableAuditLog) {
         await this.database.createAuditEntry({
           userId,
-          action: "updated", // Using 'updated' as the closest match for permission_check
+          action: AuditAction.UPDATED, // Using 'updated' as the closest match for permission_check
           details: `Permission: ${permission}, Result: ${
             allowed ? "allowed" : "denied"
           }`,
@@ -944,7 +860,7 @@ export class PermissionService {
       // Create audit entry
       const auditId = await this.database.createAuditEntry({
         userId: assignedBy,
-        action: "assigned",
+        action: AuditAction.ASSIGNED,
         details: `Assigned role ${roleId} to user ${userId}`,
         metadata: {
           targetUserId: userId,
@@ -1045,7 +961,7 @@ export class PermissionService {
       // Create audit entry
       const auditId = await this.database.createAuditEntry({
         userId: revokedBy,
-        action: "revoked",
+        action: AuditAction.REVOKED,
         details: `Revoked role ${roleId} from user ${userId}`,
         metadata: {
           targetUserId: userId,

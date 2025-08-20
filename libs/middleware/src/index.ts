@@ -6,8 +6,29 @@ export * from "./base";
 
 // Export WebSocket middleware
 export { BaseWebSocketMiddleware } from "./websocket/BaseWebSocketMiddleware";
-export { WebSocketAuthMiddleware } from "./websocket/WebSocketAuthMiddleware";
+export {
+  WebSocketAuthMiddleware,
+  type WebSocketSessionContext,
+} from "./websocket/WebSocketAuthMiddleware";
 export { WebSocketRateLimitMiddleware } from "./websocket/WebSocketRateLimitMiddleware";
+export {
+  WebSocketSessionSynchronizer,
+  type SessionUpdateEvent,
+  type SessionSyncEvents,
+  type WebSocketConnection,
+} from "./websocket/WebSocketSessionSynchronizer";
+export {
+  WebSocketMiddlewareChain,
+  MiddlewarePriority,
+  type MiddlewareConfig,
+  type CircuitBreakerConfig,
+  type RetryConfig,
+} from "./websocket/WebSocketMiddlewareChain";
+export {
+  WebSocketMiddlewareChainFactory,
+  type WebSocketMiddlewareChainConfig,
+  WEBSOCKET_CHAIN_PRESETS,
+} from "./websocket/WebSocketMiddlewareChainFactory";
 
 // Export auth middleware
 export * from "./auth";
@@ -103,10 +124,24 @@ export const createSecurityMiddleware = (config?: SecurityConfig) => {
 /**
  * WebSocket middleware factory functions
  */
-export const createWebSocketAuthMiddleware = (config: WebSocketAuthConfig) => {
+export const createWebSocketAuthMiddleware = (
+  config: WebSocketAuthConfig,
+  sessionManager?: any // Import type if needed, for now use any to avoid circular dependency
+) => {
+  if (!sessionManager) {
+    throw new Error(
+      "UnifiedSessionManager is required for WebSocket authentication middleware"
+    );
+  }
+
   const logger = Logger.getInstance("WSAuthMiddleware");
   const metrics = MetricsCollector.getInstance();
-  return WebSocketAuthMiddleware.create(config, logger, metrics);
+  return WebSocketAuthMiddleware.create(
+    config,
+    sessionManager,
+    logger,
+    metrics
+  );
 };
 
 export const createWebSocketRateLimitMiddleware = (

@@ -15,6 +15,7 @@ import {
   SessionProtocol,
   ContextCreateOptions,
 } from "./unified-context";
+import { Permission, PermissionMetadata, PermissionPriority } from "./models";
 
 /**
  * WebSocket context structure for builder input
@@ -34,8 +35,8 @@ export interface WebSocketContextInput {
   };
   authenticated?: boolean;
   userId?: string;
-  userRoles?: string[];
-  userPermissions?: string[];
+  userRole?: string; // Single role per Phase 3A architecture
+  userPermissions?: string[]; // String permissions that get converted to Permission[]
   session?: any;
 }
 
@@ -49,7 +50,7 @@ export class UnifiedAuthContextBuilder {
     userId?: string;
     user?: UserIdentity;
     roles?: readonly string[];
-    permissions?: readonly string[];
+    permissions?: readonly Permission[];
     session?: SessionData;
     authMethod?: AuthMethod;
     lastActivity?: Date;
@@ -110,7 +111,7 @@ export class UnifiedAuthContextBuilder {
   /**
    * Set user permissions
    */
-  setPermissions(permissions: string[]): this {
+  setPermissions(permissions: Permission[]): this {
     this.data.permissions = Object.freeze([...permissions]);
     return this;
   }
@@ -247,11 +248,15 @@ export class UnifiedAuthContextBuilder {
     if (wsContext.userId) {
       this.data.userId = wsContext.userId;
     }
-    if (wsContext.userRoles) {
-      this.data.roles = Object.freeze([...wsContext.userRoles]);
+    if (wsContext.userRole) {
+      this.data.roles = Object.freeze([wsContext.userRole]); // Single role to array
     }
     if (wsContext.userPermissions) {
-      this.data.permissions = Object.freeze([...wsContext.userPermissions]);
+      // TODO: Convert string permissions to Permission[] objects when permission service is available
+      // For now, this will cause a type error that needs to be resolved in Phase 3A.3
+      this.data.permissions = Object.freeze([
+        ...wsContext.userPermissions,
+      ] as any);
     }
 
     return this;
@@ -320,7 +325,27 @@ export class UnifiedAuthContextBuilder {
       undefined, // no userId for anonymous
       undefined, // no user for anonymous
       Object.freeze([]), // no roles for anonymous
-      Object.freeze(["public:read"]), // basic public permissions
+      Object.freeze([
+        {
+          // basic public permissions as Permission objects
+          id: "public-read",
+          name: "Public Read Access",
+          resource: "public",
+          action: "read",
+          conditions: [],
+          metadata: {
+            description: "Basic public read access",
+            category: "public",
+            priority: "LOW" as PermissionPriority,
+            tags: ["public", "read"],
+            owner: "system",
+            department: "system",
+          },
+          createdAt: now,
+          updatedAt: now,
+          version: "1.0.0",
+        },
+      ]),
       undefined, // no tokens for anonymous
       this.data.http,
       this.data.websocket,
@@ -374,7 +399,7 @@ export class UnifiedAuthContextBuilder {
       jwtPayload.sub,
       user,
       Object.freeze([jwtPayload.role]),
-      Object.freeze(jwtPayload.permissions || []),
+      Object.freeze(jwtPayload.permissions || ([] as any)), // TODO: Convert to Permission[] objects in Phase 3A.3
       tokens,
       this.data.http,
       this.data.websocket,

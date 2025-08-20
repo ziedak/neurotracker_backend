@@ -4,6 +4,7 @@
  */
 
 import { EventEmitter } from "events";
+import { Permission } from "./models";
 
 // Core type definitions
 export type UserRole = "admin" | "store_owner" | "api_user" | "customer";
@@ -17,8 +18,9 @@ export type SessionProtocol = "http" | "websocket" | "both";
 export interface UserIdentity {
   readonly id: string;
   readonly email: string;
+  readonly name?: string;
   readonly storeId?: string;
-  readonly role: UserRole;
+  readonly role: string; // Single role per Phase 3A architecture
   readonly status: UserStatus;
   readonly metadata?: Record<string, unknown>;
 }
@@ -108,7 +110,7 @@ export interface SerializableAuthContext {
   readonly userId?: string;
   readonly user?: UserIdentity;
   readonly roles: readonly string[];
-  readonly permissions: readonly string[];
+  readonly permissions: readonly Permission[]; // Enterprise Permission objects
   readonly authMethod: AuthMethod;
   readonly lastActivity: string; // ISO string
   readonly tokens?: {
@@ -130,7 +132,7 @@ export interface UnifiedAuthContext {
   // User attributes
   readonly user?: UserIdentity;
   readonly roles: readonly string[];
-  readonly permissions: readonly string[];
+  readonly permissions: readonly Permission[]; // Enterprise Permission objects
 
   // Session management
   readonly session: SessionData;
@@ -200,7 +202,7 @@ export class UnifiedAuthContextImpl implements UnifiedAuthContext {
     public readonly userId?: string,
     public readonly user?: UserIdentity,
     public readonly roles: readonly string[] = [],
-    public readonly permissions: readonly string[] = [],
+    public readonly permissions: readonly Permission[] = [],
     public readonly tokens?: TokenInfo,
     public readonly http?: HTTPAuthContext,
     public readonly websocket?: WebSocketAuthContext,
@@ -257,12 +259,11 @@ export class UnifiedAuthContextImpl implements UnifiedAuthContext {
   canAccess(resource: string, action: string): boolean {
     if (!this.authenticated) return false;
 
-    // Admin has access to everything
-    if (this.roles.includes("admin")) return true;
-
-    // Check specific permissions
-    const requiredPermission = `${action}:${resource}`;
-    return this.permissions.includes(requiredPermission);
+    // Check if user has the specific permission from their resolved permissions array
+    return this.permissions.some(
+      (permission) =>
+        permission.resource === resource && permission.action === action
+    );
   }
 
   hasRole(role: string | string[]): boolean {
@@ -278,7 +279,12 @@ export class UnifiedAuthContextImpl implements UnifiedAuthContext {
     const requiredPermissions = Array.isArray(permission)
       ? permission
       : [permission];
-    return requiredPermissions.some((p) => this.permissions.includes(p));
+
+    return requiredPermissions.some((requiredPerm) =>
+      this.permissions.some(
+        (userPerm) => `${userPerm.resource}:${userPerm.action}` === requiredPerm
+      )
+    );
   }
 
   async refreshSession(): Promise<UnifiedAuthContext> {
@@ -370,7 +376,7 @@ export class UnifiedAuthContextImpl implements UnifiedAuthContext {
       authenticated: boolean;
       user: UserIdentity;
       roles: string[];
-      permissions: string[];
+      permissions: Permission[];
       tokens: TokenInfo;
       session: SessionData;
     }>

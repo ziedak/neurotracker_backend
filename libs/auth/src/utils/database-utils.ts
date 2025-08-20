@@ -88,7 +88,11 @@ export class AuthDatabaseUtils {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       include: {
-        roles: { where: { revokedAt: null } },
+        role: {
+          include: {
+            permissions: true,
+          },
+        },
         sessions: { where: { isActive: true } },
       },
     });
@@ -113,7 +117,11 @@ export class AuthDatabaseUtils {
     return prisma.user.findUnique({
       where: { email },
       include: {
-        roles: { where: { revokedAt: null } },
+        role: {
+          include: {
+            permissions: true,
+          },
+        },
         sessions: { where: { isActive: true } },
       },
     });
@@ -133,7 +141,11 @@ export class AuthDatabaseUtils {
         updatedAt: new Date(),
       },
       include: {
-        roles: { where: { revokedAt: null } },
+        role: {
+          include: {
+            permissions: true,
+          },
+        },
         sessions: { where: { isActive: true } },
       },
     });

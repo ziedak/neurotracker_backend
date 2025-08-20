@@ -1,15 +1,23 @@
 /**
  * @fileoverview Auth Library - Production-Ready Enhanced JWT Services
- * @version 2.0.0
+ * @version 3.0.0 - Phase 3A RBAC Unification
  *
  * This library provides enterprise-grade JWT authentication services:
  * - Enhanced JWT Service with comprehensive token management
  * - JWT Blacklist Manager for token revocation
+ * - Unified RBAC models with single source of truth
  * - Type definitions for JWT and user identity
  */
 
 // ===================================================================
-// TYPE DEFINITIONS
+// UNIFIED RBAC MODELS - SINGLE SOURCE OF TRUTH (Phase 3A)
+// ===================================================================
+
+// Export all canonical RBAC types from unified models
+export * from "./models";
+
+// ===================================================================
+// TYPE DEFINITIONS (Legacy - maintained for backward compatibility)
 // ===================================================================
 
 // JWT Types
@@ -178,11 +186,11 @@ export {
 } from "./models/user-models";
 
 // Legacy User Service (keeping for compatibility)
-export { UserService as LegacyUserService } from "./services/user.service";
-export type {
-  User as LegacyUser,
-  UserWithRoles,
-} from "./services/user.service";
+// export { UserService as LegacyUserService } from "./services/user.service.ts.old";
+// export type {
+//   User as LegacyUser,
+//   UserWithRoles,
+// } from "./services/user.service.ts.old";
 
 // Permission Service - Step 3.3
 export {
@@ -196,10 +204,10 @@ export {
   type PermissionAnalytics,
   DEFAULT_PERMISSION_SERVICE_CONFIG,
 } from "./services/permission-service";
-export type {
-  Permission,
-  RolePermissions,
-} from "./services/permission.service";
+// export type {
+//   Permission,
+//   RolePermissions,
+// } from "./services/permission.service.ts.old";
 
 // Core Session Management - alias for UnifiedSessionManager
 export { UnifiedSessionManager as SessionManager } from "./services/unified-session-manager";

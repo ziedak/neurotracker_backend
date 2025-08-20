@@ -28,6 +28,7 @@ import {
   UserStatus,
   UserSecurityProfile,
 } from "../models/user-models";
+import { Role } from "../models/permission-models";
 
 // Re-export UserSecurityProfile for external use
 export type { UserSecurityProfile } from "../models/user-models";
@@ -317,7 +318,12 @@ export class UserService implements IUserService {
         updatedAt: new Date(),
         lastLoginAt: null,
         loginCount: 0,
-        roles: userData.roles || [],
+        role: await this.resolveRoleFromId(userData.role || "customer"), // Resolve role ID to Role object
+        roleAssignedAt: new Date(), // Track when role was assigned
+        roleRevokedAt: null, // Active role
+        roleAssignedBy: null, // System assignment for new users
+        roleRevokedBy: null,
+        roleExpiresAt: null, // No expiration by default
         metadata: userData.metadata || {},
       };
 
@@ -336,7 +342,7 @@ export class UserService implements IUserService {
       // Log audit event
       await this.logSecurityEvent(userId, "user_created", {
         email: userData.email,
-        roles: userData.roles,
+        role: userData.role,
         duration: Date.now() - startTime,
       });
 
@@ -484,12 +490,22 @@ export class UserService implements IUserService {
         }
       }
 
-      // Create updated user object
+      // Create updated user object - handle role updates properly
+      const { role: roleUpdate, ...otherUpdates } = updates;
+
       const updatedUser: User = {
         ...currentUser,
-        ...updates,
+        ...otherUpdates,
         updatedAt: new Date(),
       };
+
+      // If role is being updated, resolve role ID to Role object and track assignment
+      if (roleUpdate && typeof roleUpdate === "string") {
+        updatedUser.role = await this.resolveRoleFromId(roleUpdate);
+        updatedUser.roleAssignedAt = new Date(); // Track when new role was assigned
+        updatedUser.roleRevokedAt = null; // Clear any previous revocation
+        // Note: roleAssignedBy should be set by the calling service with the current user's ID
+      }
 
       // Update in database
       await this.updateUserInDatabase(updatedUser);
@@ -780,6 +796,104 @@ export class UserService implements IUserService {
       });
       throw error;
     }
+  }
+
+  /**
+   * Revoke user role for security purposes
+   */
+  async revokeUserRole(
+    userId: string,
+    revokedBy: string,
+    reason?: string
+  ): Promise<User> {
+    const startTime = Date.now();
+
+    try {
+      this.logger.debug("Revoking user role", { userId, revokedBy, reason });
+
+      const user = await this.getUserById(userId);
+      if (!user) {
+        throw new UserNotFoundError(userId);
+      }
+
+      if (!user.role || user.roleRevokedAt) {
+        throw new UserServiceError(
+          "User has no active role to revoke",
+          "NO_ACTIVE_ROLE",
+          userId
+        );
+      }
+
+      // Update user with revocation details
+      const updatedUser = await this.updateUser(userId, {
+        roleRevokedAt: new Date(),
+        roleRevokedBy: revokedBy,
+        metadata: {
+          ...user.metadata,
+          lastRoleRevocationReason: reason,
+        },
+      });
+
+      // Invalidate all user sessions since access has been revoked
+      try {
+        const userSessions = await this.sessionManager.getUserSessions(userId);
+        for (const sessionId of userSessions) {
+          await this.sessionManager.deleteSession(sessionId);
+        }
+      } catch (sessionError) {
+        this.logger.warn(
+          "Failed to invalidate user sessions during role revocation",
+          {
+            userId,
+            error: sessionError,
+          }
+        );
+      }
+
+      await this.logSecurityEvent(userId, "role_revoked", {
+        roleId: user.role.id,
+        roleName: user.role.name,
+        revokedBy,
+        reason,
+        duration: Date.now() - startTime,
+      });
+
+      this.logger.warn("User role revoked", {
+        userId,
+        roleId: user.role.id,
+        revokedBy,
+        reason,
+        duration: Date.now() - startTime,
+      });
+
+      return updatedUser;
+    } catch (error) {
+      this.logger.error("Failed to revoke user role", {
+        userId,
+        revokedBy,
+        error: this.getErrorMessage(error),
+        duration: Date.now() - startTime,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Check if user has active (non-revoked) role
+   */
+  hasActiveRole(user: User): boolean {
+    return !!(
+      user.role &&
+      !user.roleRevokedAt &&
+      (!user.roleExpiresAt || user.roleExpiresAt > new Date())
+    );
+  }
+
+  /**
+   * Check if user role has expired
+   */
+  isRoleExpired(user: User): boolean {
+    return !!(user.roleExpiresAt && user.roleExpiresAt <= new Date());
   }
 
   /**
@@ -1321,14 +1435,84 @@ export class UserService implements IUserService {
     user: User,
     hashedPassword: string
   ): Promise<void> {
-    // Mock implementation - would store in actual database
-    this.logger.debug("Storing user in database", { userId: user.id });
+    // Mock implementation - in production would use Prisma client
+    try {
+      // Example of how this would work with the new schema:
+      // const db = PostgreSQLClient.getInstance();
+      // await db.user.create({
+      //   data: {
+      //     id: user.id,
+      //     email: user.email,
+      //     password: hashedPassword,
+      //     username: user.username,
+      //     firstName: user.firstName,
+      //     lastName: user.lastName,
+      //     phone: user.phone,
+      //     status: user.status,
+      //     emailVerified: user.emailVerified,
+      //     phoneVerified: user.phoneVerified,
+      //     lastLoginAt: user.lastLoginAt,
+      //     loginCount: user.loginCount,
+      //     roleId: user.role.id, // Store role ID, role object populated on read
+      //     metadata: user.metadata,
+      //   }
+      // });
+
+      this.logger.debug("Storing user in database", { userId: user.id });
+    } catch (error) {
+      this.logger.error("Failed to store user in database", {
+        userId: user.id,
+        error: this.getErrorMessage(error),
+      });
+      throw error;
+    }
   }
 
   private async fetchUserFromDatabase(userId: string): Promise<User | null> {
-    // Mock implementation - would query actual database
-    this.logger.debug("Fetching user from database", { userId });
-    return null; // Mock: user not found
+    // Mock implementation - in production would use Prisma client with role population
+    try {
+      // Example of how this would work with the new schema:
+      // const db = PostgreSQLClient.getInstance();
+      // const userData = await db.user.findUnique({
+      //   where: { id: userId },
+      //   include: {
+      //     role: {
+      //       include: {
+      //         permissions: true
+      //       }
+      //     }
+      //   }
+      // });
+      //
+      // if (!userData) return null;
+      //
+      // return {
+      //   id: userData.id,
+      //   email: userData.email,
+      //   username: userData.username,
+      //   firstName: userData.firstName,
+      //   lastName: userData.lastName,
+      //   phone: userData.phone,
+      //   status: userData.status,
+      //   emailVerified: userData.emailVerified,
+      //   phoneVerified: userData.phoneVerified,
+      //   lastLoginAt: userData.lastLoginAt,
+      //   loginCount: userData.loginCount,
+      //   role: userData.role, // Full role object with permissions
+      //   metadata: userData.metadata,
+      //   createdAt: userData.createdAt,
+      //   updatedAt: userData.updatedAt,
+      // };
+
+      this.logger.debug("Fetching user from database", { userId });
+      return null; // Mock: user not found
+    } catch (error) {
+      this.logger.error("Failed to fetch user from database", {
+        userId,
+        error: this.getErrorMessage(error),
+      });
+      return null;
+    }
   }
 
   private async fetchUserByEmailFromDatabase(
@@ -1383,6 +1567,61 @@ export class UserService implements IUserService {
       limit,
     });
     return []; // Mock: no history found
+  }
+
+  /**
+   * Resolve role ID to Role object
+   * In production, this would query the role from database/service
+   */
+  private async resolveRoleFromId(roleId: string): Promise<Role> {
+    try {
+      // Mock implementation - in real system would query role service
+      const mockRole: Role = {
+        id: roleId,
+        name: roleId,
+        displayName: roleId.charAt(0).toUpperCase() + roleId.slice(1),
+        description: `${roleId} role`,
+        permissions: [], // Would be populated from actual role service
+        parentRoles: [],
+        childRoles: [],
+        metadata: {
+          category: "functional" as any,
+          level: 5 as any,
+          department: "general",
+          owner: "system",
+        },
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        version: "1.0.0",
+      };
+
+      this.logger.debug("Role resolved", { roleId, role: mockRole.name });
+      return mockRole;
+    } catch (error) {
+      this.logger.error("Failed to resolve role", { roleId, error });
+
+      // Return default customer role on failure
+      return {
+        id: "customer",
+        name: "customer",
+        displayName: "Customer",
+        description: "Default customer role",
+        permissions: [],
+        parentRoles: [],
+        childRoles: [],
+        metadata: {
+          category: "functional" as any,
+          level: 5 as any,
+          department: "general",
+          owner: "system",
+        },
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        version: "1.0.0",
+      };
+    }
   }
 }
 

@@ -13,6 +13,8 @@
  * @author Enterprise Auth Foundation
  */
 
+import { Role } from "./permission-models";
+
 /**
  * User Status Enumeration
  */
@@ -26,7 +28,7 @@ export enum UserStatus {
 }
 
 /**
- * Core User Entity
+ * Core User Entity - Phase 3A Architecture with Role Tracking
  */
 export interface User {
   id: string;
@@ -42,12 +44,20 @@ export interface User {
   updatedAt: Date;
   lastLoginAt: Date | null;
   loginCount: number;
-  roles: string[];
+  role: Role; // Single role per Phase 3A architecture
+
+  // Role assignment tracking for security audit
+  roleAssignedAt: Date | null;
+  roleRevokedAt: Date | null; // null means role is active
+  roleAssignedBy: string | null; // User ID who assigned the role
+  roleRevokedBy: string | null; // User ID who revoked the role
+  roleExpiresAt: Date | null; // Optional role expiration
+
   metadata: Record<string, any>;
 }
 
 /**
- * Create User Data Transfer Object
+ * Create User Data Transfer Object - Phase 3A Architecture
  */
 export interface CreateUserData {
   email: string;
@@ -56,12 +66,12 @@ export interface CreateUserData {
   firstName: string;
   lastName: string;
   phone?: string;
-  roles?: string[];
+  role?: string; // Role ID for assignment - will be resolved to Role object
   metadata?: Record<string, any>;
 }
 
 /**
- * Update User Data Transfer Object
+ * Update User Data Transfer Object - Phase 3A Architecture with Role Tracking
  */
 export interface UpdateUserData {
   email?: string;
@@ -74,7 +84,15 @@ export interface UpdateUserData {
   phoneVerified?: boolean;
   lastLoginAt?: Date;
   loginCount?: number;
-  roles?: string[];
+  role?: string; // Role ID for assignment - will be resolved to Role object
+
+  // Role assignment tracking fields
+  roleAssignedAt?: Date;
+  roleRevokedAt?: Date;
+  roleAssignedBy?: string;
+  roleRevokedBy?: string;
+  roleExpiresAt?: Date;
+
   metadata?: Record<string, any>;
 }
 

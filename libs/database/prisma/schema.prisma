@@ -165,16 +165,6 @@ model SessionActivity {
   @@map("session_activities")
 }
 
-model Permission {
-  id          String   @id @default(cuid())
-  name        String   @unique @db.VarChar(64)
-  description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@map("permissions")
-}
-
 model Webhook {
   id            String    @id @default(cuid())
   storeId       String
@@ -192,13 +182,74 @@ model Webhook {
   @@map("webhooks")
 }
 
-// Example models for cart recovery system
+// Enterprise RBAC Role Model - Phase 3A Architecture
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique @db.VarChar(128)
+  displayName String   @db.VarChar(255)
+  description String?
+  category    String   @default("functional") @db.VarChar(64)
+  level       Int      @default(5) // RoleLevel enum as integer
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  version     String   @default("1.0.0") @db.VarChar(32)
+  metadata    Json?
+
+  // Role hierarchy relations
+  parentRoleIds String[] // Array of parent role IDs for inheritance
+  childRoleIds  String[] // Array of child role IDs for delegation
+
+  // Relations
+  users       User[]
+  permissions RolePermission[]
+
+  @@index([name])
+  @@index([category])
+  @@index([isActive])
+  @@map("roles")
+}
+
+// Permission model for RBAC
+model RolePermission {
+  id       String @id @default(cuid())
+  roleId   String
+  resource String @db.VarChar(128)
+  action   String @db.VarChar(128)
+
+  // Permission metadata
+  name        String  @db.VarChar(128)
+  description String?
+  conditions  Json? // PermissionCondition[] serialized
+  metadata    Json? // PermissionMetadata serialized
+  priority    String  @default("medium") @db.VarChar(32)
+  version     String  @default("1.0.0") @db.VarChar(32)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, resource, action])
+  @@index([resource])
+  @@index([action])
+  @@map("role_permissions")
+}
+
+// Updated User model for Phase 3A single role architecture
 model User {
   id             String     @id @default(cuid())
   email          String     @unique @db.VarChar(255)
   password       String     @db.VarChar(255)
-  name           String?    @db.VarChar(255)
+  username       String     @unique @db.VarChar(255)
+  firstName      String?    @db.VarChar(255)
+  lastName       String?    @db.VarChar(255)
+  phone          String?    @db.VarChar(32)
   status         UserStatus @default(ACTIVE)
+  emailVerified  Boolean    @default(false)
+  phoneVerified  Boolean    @default(false)
+  lastLoginAt    DateTime?
+  loginCount     Int        @default(0)
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   deletedAt      DateTime?
@@ -208,11 +259,22 @@ model User {
   organizationId String?
   auditLog       Json? // Audit field for compliance
 
+  // Phase 3A: Single role architecture with audit tracking
+  roleId         String?
+  role           Role?     @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  roleAssignedAt DateTime? // When current role was assigned
+  roleRevokedAt  DateTime? // When role was revoked (null = active)
+  roleAssignedBy String? // User ID who assigned the role
+  roleRevokedBy  String? // User ID who revoked the role
+  roleExpiresAt  DateTime? // Optional role expiration
+
+  // Additional metadata
+  metadata Json? // Store custom attributes and storeId
+
   // Relations
   sessions       UserSession[]
   events         UserEvent[]
   carts          Cart[]
-  roles          UserRole[]
   notifications  Notification[]
   orders         Order[]
   storeId        String?
@@ -221,7 +283,9 @@ model User {
   activities     SessionActivity[]
 
   @@index([email])
+  @@index([username])
   @@index([status])
+  @@index([roleId])
   @@map("users")
 }
 
@@ -230,19 +294,6 @@ enum UserStatus {
   BANNED
   INACTIVE
   DELETED
-}
-
-model UserRole {
-  id         String    @id @default(cuid())
-  userId     String
-  role       String    @db.VarChar(64)
-  assignedAt DateTime  @default(now())
-  revokedAt  DateTime?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([role])
-  @@map("user_roles")
 }
 
 model UserSession {
