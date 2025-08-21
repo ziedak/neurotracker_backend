@@ -1,7 +1,20 @@
 {
   "current_work": {
-    "updated": "2025-01-03T10:30:00Z",
-    "status": "completed"
+    "updated": "2025-08-20T12:00:00Z",
+    "status": "active",
+    "active_tasks": [
+      {
+        "id": "create-authv2-library",
+        "name": "Create libs/authV2 - Enterprise Authentication Library",
+        "started": "2025-08-20",
+        "priority": "high",
+        "status": "phase1-complete",
+        "progress": 0,
+        "directory": ".memory-bank/tasks/2025-08-20-create-authv2-library/",
+        "objective": "Create enterprise-grade authentication library replacing libs/auth with zero legacy code",
+        "risk_level": "low-medium"
+      }
+    ]
   },
   "completed_task": {
     "id": "websocket-session-auth-integration",

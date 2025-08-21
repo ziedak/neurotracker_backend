@@ -15,7 +15,7 @@
  * @author Enterprise Auth Foundation
  */
 
-import { Logger } from "../utils/logger";
+import { Logger } from "@libs/monitoring";
 import { DatabaseUtils } from "../utils/database-utils";
 
 /**
