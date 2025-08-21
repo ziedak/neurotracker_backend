@@ -305,9 +305,12 @@ export class AuthenticationMetrics {
       .map((sample) => sample.responseTime)
       .sort((a, b) => a - b);
 
-    const min = times[0];
-    const max = times[times.length - 1];
-    const average = times.reduce((sum, time) => sum + time, 0) / times.length;
+    const min = times[0] ?? 0;
+    const max = times[times.length - 1] ?? 0;
+    const average =
+      times.length > 0
+        ? times.reduce((sum, time) => sum + time, 0) / times.length
+        : 0;
     const median = this.calculatePercentile(times, 50);
     const p95 = this.calculatePercentile(times, 95);
     const p99 = this.calculatePercentile(times, 99);
@@ -501,9 +504,14 @@ export class AuthenticationMetrics {
     const upper = Math.ceil(index);
     const weight = index % 1;
 
-    if (upper >= sortedArray.length) return sortedArray[sortedArray.length - 1];
+    if (sortedArray.length === 0) return 0;
 
-    return sortedArray[lower] * (1 - weight) + sortedArray[upper] * weight;
+    if (upper >= sortedArray.length)
+      return sortedArray[sortedArray.length - 1] ?? 0;
+
+    const lowerValue = sortedArray[lower] ?? 0;
+    const upperValue = sortedArray[upper] ?? 0;
+    return lowerValue * (1 - weight) + upperValue * weight;
   }
 
   private async calculateTrends(): Promise<IMetricsSnapshot["trends"]> {
@@ -530,7 +538,7 @@ export class AuthenticationMetrics {
           .toString()
           .padStart(2, "0")}`;
       case "daily":
-        return now.toISOString().split("T")[0];
+        return now.toISOString().split("T")[0] ?? "";
       case "weekly":
         const weekStart = new Date(now);
         weekStart.setDate(now.getDate() - now.getDay());
@@ -540,7 +548,7 @@ export class AuthenticationMetrics {
           .toString()
           .padStart(2, "0")}`;
       default:
-        return now.toISOString().split("T")[0];
+        return now.toISOString().split("T")[0] ?? "";
     }
   }
 

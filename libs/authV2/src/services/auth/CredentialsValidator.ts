@@ -6,12 +6,12 @@
  * @description Specialized service for validating authentication credentials and registration data
  */
 
-import type {
+import {
   IAuthenticationCredentials,
   IRegistrationData,
   IPasswordChangeData,
 } from "../../contracts/services";
-import { ValidationError } from "../../errors/core";
+import { ValidationError, IValidationFieldError } from "../../errors/core";
 
 /**
  * Password strength requirements
@@ -49,6 +49,17 @@ const DEFAULT_PASSWORD_REQUIREMENTS: IPasswordRequirements = {
 export class CredentialsValidator {
   private readonly passwordRequirements: IPasswordRequirements;
 
+  /**
+   * Create validation field error with code
+   */
+  private createFieldError(
+    field: string,
+    message: string,
+    code: string = "VALIDATION_FAILED"
+  ): IValidationFieldError {
+    return { field, message, code };
+  }
+
   constructor(
     passwordRequirements: IPasswordRequirements = DEFAULT_PASSWORD_REQUIREMENTS
   ) {
@@ -62,13 +73,21 @@ export class CredentialsValidator {
     credentials: IAuthenticationCredentials
   ): void {
     if (!credentials.type || !credentials.identifier) {
-      throw new ValidationError("Missing authentication type or identifier", [
-        { field: "type", message: "Authentication type is required" },
-        {
-          field: "identifier",
-          message: "Authentication identifier is required",
-        },
-      ]);
+      throw new ValidationError(
+        "Authentication credentials validation failed",
+        [
+          {
+            field: "type",
+            message: "Authentication type is required",
+            code: "MISSING_TYPE",
+          },
+          {
+            field: "identifier",
+            message: "Authentication identifier is required",
+            code: "MISSING_IDENTIFIER",
+          },
+        ]
+      );
     }
 
     // Validate based on authentication type
@@ -82,6 +101,7 @@ export class CredentialsValidator {
               {
                 field: "password",
                 message: "Password is required for email authentication",
+                code: "MISSING_PASSWORD",
               },
             ]
           );
@@ -97,6 +117,7 @@ export class CredentialsValidator {
               {
                 field: "password",
                 message: "Password is required for username authentication",
+                code: "MISSING_PASSWORD",
               },
             ]
           );
@@ -111,6 +132,7 @@ export class CredentialsValidator {
               {
                 field: "apiKey",
                 message: "API key is required for API key authentication",
+                code: "MISSING_APIKEY",
               },
             ]
           );
@@ -123,6 +145,7 @@ export class CredentialsValidator {
           {
             field: "type",
             message: `Authentication type '${credentials.type}' is not supported`,
+            code: "UNSUPPORTED_TYPE",
           },
         ]);
     }
@@ -137,65 +160,94 @@ export class CredentialsValidator {
    * Validate user registration data with comprehensive checks
    */
   validateRegistrationData(data: IRegistrationData): void {
-    const errors: Array<{ field: string; message: string }> = [];
+    const errors: Array<{ field: string; message: string; code: string }> = [];
 
     // Validate required fields
     if (!data.email) {
-      errors.push({ field: "email", message: "Email is required" });
+      errors.push(
+        this.createFieldError("email", "Email is required", "MISSING_EMAIL")
+      );
     } else {
       try {
         this.validateEmail(data.email);
       } catch (error) {
         if (error instanceof ValidationError) {
-          errors.push({ field: "email", message: error.message });
+          errors.push(
+            this.createFieldError("email", error.message, "INVALID_EMAIL")
+          );
         }
       }
     }
 
     if (!data.username) {
-      errors.push({ field: "username", message: "Username is required" });
+      errors.push(
+        this.createFieldError(
+          "username",
+          "Username is required",
+          "MISSING_USERNAME"
+        )
+      );
     } else {
       try {
         this.validateUsername(data.username);
       } catch (error) {
         if (error instanceof ValidationError) {
-          errors.push({ field: "username", message: error.message });
+          errors.push(
+            this.createFieldError("username", error.message, "INVALID_USERNAME")
+          );
         }
       }
     }
 
     if (!data.password) {
-      errors.push({ field: "password", message: "Password is required" });
+      errors.push(
+        this.createFieldError(
+          "password",
+          "Password is required",
+          "MISSING_PASSWORD"
+        )
+      );
     } else {
       try {
         this.validatePasswordStrength(data.password);
       } catch (error) {
         if (error instanceof ValidationError) {
-          errors.push({ field: "password", message: error.message });
+          errors.push(
+            this.createFieldError("password", error.message, "WEAK_PASSWORD")
+          );
         }
       }
     }
 
     if (!data.acceptedTerms) {
-      errors.push({
-        field: "acceptedTerms",
-        message: "Terms and conditions must be accepted",
-      });
+      errors.push(
+        this.createFieldError(
+          "acceptedTerms",
+          "Terms and conditions must be accepted",
+          "TERMS_NOT_ACCEPTED"
+        )
+      );
     }
 
     // Validate optional fields if provided
     if (data.firstName && data.firstName.length < 2) {
-      errors.push({
-        field: "firstName",
-        message: "First name must be at least 2 characters",
-      });
+      errors.push(
+        this.createFieldError(
+          "firstName",
+          "First name must be at least 2 characters",
+          "INVALID_FIRSTNAME"
+        )
+      );
     }
 
     if (data.lastName && data.lastName.length < 2) {
-      errors.push({
-        field: "lastName",
-        message: "Last name must be at least 2 characters",
-      });
+      errors.push(
+        this.createFieldError(
+          "lastName",
+          "Last name must be at least 2 characters",
+          "INVALID_LASTNAME"
+        )
+      );
     }
 
     if (data.deviceInfo) {
@@ -203,7 +255,9 @@ export class CredentialsValidator {
         this.validateDeviceInfo(data.deviceInfo);
       } catch (error) {
         if (error instanceof ValidationError) {
-          errors.push({ field: "deviceInfo", message: error.message });
+          errors.push(
+            this.createFieldError("deviceInfo", error.message, "INVALID_DEVICE")
+          );
         }
       }
     }
@@ -217,47 +271,68 @@ export class CredentialsValidator {
    * Validate password change data
    */
   validatePasswordChangeData(data: IPasswordChangeData): void {
-    const errors: Array<{ field: string; message: string }> = [];
+    const errors: IValidationFieldError[] = [];
 
     if (!data.currentPassword) {
-      errors.push({
-        field: "currentPassword",
-        message: "Current password is required",
-      });
+      errors.push(
+        this.createFieldError(
+          "currentPassword",
+          "Current password is required",
+          "MISSING_CURRENT_PASSWORD"
+        )
+      );
     }
 
     if (!data.newPassword) {
-      errors.push({
-        field: "newPassword",
-        message: "New password is required",
-      });
+      errors.push(
+        this.createFieldError(
+          "newPassword",
+          "New password is required",
+          "MISSING_NEW_PASSWORD"
+        )
+      );
     } else {
       try {
         this.validatePasswordStrength(data.newPassword);
       } catch (error) {
         if (error instanceof ValidationError) {
-          errors.push({ field: "newPassword", message: error.message });
+          errors.push(
+            this.createFieldError(
+              "newPassword",
+              error.message,
+              "WEAK_NEW_PASSWORD"
+            )
+          );
         }
       }
     }
 
     if (!data.confirmNewPassword) {
-      errors.push({
-        field: "confirmNewPassword",
-        message: "Password confirmation is required",
-      });
+      errors.push(
+        this.createFieldError(
+          "confirmNewPassword",
+          "Password confirmation is required",
+          "MISSING_CONFIRMATION"
+        )
+      );
     } else if (data.newPassword !== data.confirmNewPassword) {
-      errors.push({
-        field: "confirmNewPassword",
-        message: "Password confirmation does not match new password",
-      });
+      errors.push(
+        this.createFieldError(
+          "confirmNewPassword",
+          "Password confirmation does not match new password",
+          "PASSWORD_MISMATCH"
+        )
+      );
     }
 
     if (data.currentPassword === data.newPassword) {
-      errors.push({
-        field: "newPassword",
-        message: "New password must be different from current password",
-      });
+      errors.push(
+        this.createFieldError(
+          "newPassword",
+          "New password must be different from current password",
+          "PASSWORD_UNCHANGED"
+        )
+      );
     }
 
     if (errors.length > 0) {
@@ -289,8 +364,8 @@ export class CredentialsValidator {
 
     // Domain validation
     const domain = email.split("@")[1];
-    if (domain.length > 253) {
-      throw new ValidationError("Email domain too long");
+    if (!domain || domain.length > 253) {
+      throw new ValidationError("Invalid email domain");
     }
 
     // Check for dangerous patterns
@@ -394,7 +469,9 @@ export class CredentialsValidator {
     if (errors.length > 0) {
       throw new ValidationError(
         "Password does not meet security requirements",
-        errors.map((message) => ({ field: "password", message }))
+        errors.map((message) =>
+          this.createFieldError("password", message, "PASSWORD_WEAK")
+        )
       );
     }
   }
