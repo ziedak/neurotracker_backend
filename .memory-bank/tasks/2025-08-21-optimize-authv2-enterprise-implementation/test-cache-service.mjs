@@ -4,7 +4,7 @@
  * Quick test for CacheServiceV2 implementation
  */
 
-import { CacheServiceV2 } from "./dist/services/CacheService.js";
+import { CacheServiceV2 } from "../../../libs/authV2/dist/services/CacheService.js";
 
 async function testCacheService() {
   console.log("🧪 Testing CacheServiceV2 Implementation...\n");

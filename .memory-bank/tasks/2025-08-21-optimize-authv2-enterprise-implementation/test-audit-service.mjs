@@ -4,8 +4,8 @@
  * Quick test for AuditServiceV2 implementation
  */
 
-import { AuditServiceV2 } from "./dist/services/AuditService.js";
-import { createEntityId } from "./dist/types/core.js";
+import { AuditServiceV2 } from "../../../libs/authV2/dist/services/AuditService.js";
+import { createEntityId } from "../../../libs/authV2/dist/types/core.js";
 
 async function testAuditService() {
   console.log("🧪 Testing AuditServiceV2 Implementation...\n");
