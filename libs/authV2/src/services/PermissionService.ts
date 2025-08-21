@@ -20,6 +20,13 @@ import type {
   IBatchOperationResult,
 } from "../contracts/services";
 import { ValidationError } from "../errors/core";
+import {
+  UserRepository,
+  RoleRepository,
+  getRepositoryFactory,
+} from "../repositories";
+import { RedisCacheService } from "./RedisCacheService";
+import type { IPermissionScope } from "../types/enhanced";
 
 /**
  * Permission check result with caching metadata
@@ -77,6 +84,10 @@ interface IRoleHierarchyCacheEntry {
  * - Health monitoring and metrics collection
  */
 export class PermissionServiceV2 implements IPermissionService {
+  private readonly userRepository: UserRepository;
+  private readonly roleRepository: RoleRepository;
+  private readonly redisCache: RedisCacheService;
+
   private readonly userPermissionCache = new Map<
     EntityId,
     IUserPermissionCacheEntry
@@ -89,7 +100,8 @@ export class PermissionServiceV2 implements IPermissionService {
     EntityId,
     IRoleHierarchyCacheEntry
   >();
-  private readonly userRolesStore = new Map<EntityId, Set<EntityId>>();
+  // Remove unused in-memory store - replaced with database operations
+  // private readonly userRolesStore = new Map<EntityId, Set<EntityId>>();
   private readonly rolePermissionsStore = new Map<EntityId, Set<string>>();
   private readonly roleHierarchyStore = new Map<EntityId, IRoleHierarchy>();
   private readonly metrics: IPermissionMetrics;
@@ -103,6 +115,11 @@ export class PermissionServiceV2 implements IPermissionService {
   private readonly cacheCleanupThreshold = 0.8;
 
   constructor() {
+    const repositoryFactory = getRepositoryFactory();
+    this.userRepository = repositoryFactory.getUserRepository();
+    this.roleRepository = repositoryFactory.getRoleRepository();
+    this.redisCache = new RedisCacheService();
+
     this.startTime = Date.now();
     this.metrics = {
       permissionChecks: 0,
@@ -116,8 +133,8 @@ export class PermissionServiceV2 implements IPermissionService {
       errorsTotal: 0,
     };
 
-    // Initialize with basic roles for demo
-    this.initializeBasicRoles();
+    // Initialize metrics and cache
+    // Note: Role data is now managed entirely through the database
 
     // Start background maintenance
     this.startCacheMaintenanceJob();
@@ -287,7 +304,7 @@ export class PermissionServiceV2 implements IPermissionService {
   }
 
   /**
-   * Get user permissions
+   * Get user permissions with Redis distributed caching
    */
   async getUserPermissions(
     userId: EntityId
@@ -295,27 +312,44 @@ export class PermissionServiceV2 implements IPermissionService {
     try {
       this.metrics.operationsTotal++;
 
-      // Get user roles
-      const userRoles = await this.getUserRoles(userId);
-
-      // Collect all permissions from roles
-      const permissions: IEnhancedPermission[] = [];
-
-      for (const role of userRoles) {
-        permissions.push(...role.computedPermissions);
+      // Try Redis cache first for distributed caching
+      const redisCached = await this.redisCache.getUserPermissions(userId);
+      if (redisCached) {
+        this.metrics.cacheHits++;
+        return Object.freeze(redisCached);
       }
 
-      // Remove duplicates based on resource:action combination
-      const uniquePermissions = permissions.filter(
-        (permission, index, array) =>
-          array.findIndex(
-            (p) =>
-              p.resource === permission.resource &&
-              p.action === permission.action
-          ) === index
+      // Fallback to local cache
+      const cached = this.getUserFromCache(userId);
+      if (cached) {
+        this.metrics.cacheHits++;
+        // Return fresh data from database to ensure consistency
+        const enhancedPermissions = await this.getUserPermissionsFromDatabase(
+          userId
+        );
+
+        // Update Redis cache with fresh data
+        await this.redisCache.cacheUserPermissions(userId, enhancedPermissions);
+
+        return Object.freeze(enhancedPermissions);
+      }
+
+      this.metrics.cacheMisses++;
+
+      // Get permissions from database
+      const enhancedPermissions = await this.getUserPermissionsFromDatabase(
+        userId
       );
 
-      return Object.freeze(uniquePermissions);
+      // Cache in both Redis and local cache
+      await this.redisCache.cacheUserPermissions(userId, enhancedPermissions);
+
+      const permissionStrings = enhancedPermissions.map(
+        (p) => `${p.resource}:${p.action}`
+      );
+      this.cacheUserPermissions(userId, permissionStrings, []);
+
+      return Object.freeze(enhancedPermissions);
     } catch (error) {
       this.metrics.errorsTotal++;
       throw new ValidationError(
@@ -339,17 +373,17 @@ export class PermissionServiceV2 implements IPermissionService {
         return cached.roles;
       }
 
-      // Get user role IDs
-      const roleIds = Array.from(this.userRolesStore.get(userId) || new Set());
+      // Get user with role from database using repositories
+      const user = await this.userRepository.findById(userId);
+      if (!user || !user.roleId) {
+        return Object.freeze([]);
+      }
 
       // Build enhanced roles
       const roles: IEnhancedRole[] = [];
-
-      for (const roleId of roleIds) {
-        const role = await this.buildEnhancedRole(roleId as EntityId);
-        if (role) {
-          roles.push(role);
-        }
+      const role = await this.buildEnhancedRole(user.roleId as EntityId);
+      if (role) {
+        roles.push(role);
       }
 
       // Cache the result
@@ -375,26 +409,32 @@ export class PermissionServiceV2 implements IPermissionService {
       this.metrics.roleAssignments++;
 
       // Validate role exists
-      if (!this.roleHierarchyStore.has(roleId)) {
+      const role = await this.roleRepository.findById(roleId);
+      if (!role) {
         throw new ValidationError(`Role not found: ${roleId}`);
       }
 
-      // Get or create user role set
-      if (!this.userRolesStore.has(userId)) {
-        this.userRolesStore.set(userId, new Set());
+      // Get current user
+      const user = await this.userRepository.findById(userId);
+      if (!user) {
+        throw new ValidationError(`User not found: ${userId}`);
       }
 
-      const userRoles = this.userRolesStore.get(userId)!;
-
       // Check if already assigned
-      if (userRoles.has(roleId)) {
+      if (user.roleId === roleId) {
         return false; // Already assigned
       }
 
-      // Assign role
-      userRoles.add(roleId);
+      // Update user's role
+      await this.userRepository.update(userId, {
+        ...user,
+        roleId,
+        roleAssignedAt: new Date(),
+        // Note: roleAssignedBy would need to be passed as parameter in real implementation
+      });
 
-      // Clear user cache
+      // Clear both Redis and local caches
+      await this.redisCache.invalidateUserPermissions(userId);
       this.clearUserPermissionCache(userId);
 
       return true;
@@ -419,25 +459,30 @@ export class PermissionServiceV2 implements IPermissionService {
       this.metrics.operationsTotal++;
       this.metrics.roleRemovals++;
 
-      const userRoles = this.userRolesStore.get(userId);
-      if (!userRoles || !userRoles.has(roleId)) {
-        return false; // Role not assigned
+      // Get current user
+      const user = await this.userRepository.findById(userId);
+      if (!user || user.roleId !== roleId) {
+        return false; // Role not assigned to this user
       }
 
-      // Remove role
-      userRoles.delete(roleId);
+      // Remove role by setting roleId to null
+      await this.userRepository.update(userId, {
+        ...user,
+        roleId: null,
+        roleRevokedAt: new Date(),
+        // Note: roleRevokedBy would need to be passed as parameter in real implementation
+      });
 
-      // Clean up empty set
-      if (userRoles.size === 0) {
-        this.userRolesStore.delete(userId);
-      }
-
-      // Clear user cache
+      // Clear both Redis and local caches
+      await this.redisCache.invalidateUserPermissions(userId);
       await this.clearUserPermissionCache(userId);
 
       return true;
     } catch (error) {
       this.metrics.errorsTotal++;
+      if (error instanceof ValidationError) {
+        throw error;
+      }
       throw new ValidationError(
         `Failed to remove role: ${
           error instanceof Error ? error.message : "Unknown error"
@@ -515,24 +560,25 @@ export class PermissionServiceV2 implements IPermissionService {
         return cached.permissions;
       }
 
-      // Get user roles
-      const roleIds = Array.from(this.userRolesStore.get(userId) || new Set());
+      // Get user from database using repository
+      const user = await this.userRepository.findById(userId);
+      if (!user || !user.roleId) {
+        return Object.freeze([]);
+      }
 
       // Collect all permissions with inheritance
       const allPermissions = new Set<string>();
 
-      for (const roleId of roleIds) {
-        // Get role hierarchy info
-        const hierarchyInfo = await this.getRoleHierarchy(roleId as EntityId);
+      // Get role hierarchy info
+      const hierarchyInfo = await this.getRoleHierarchy(
+        user.roleId as EntityId
+      );
 
-        // Add direct permissions
-        hierarchyInfo.directPermissions.forEach((p) => allPermissions.add(p));
+      // Add direct permissions
+      hierarchyInfo.directPermissions.forEach((p) => allPermissions.add(p));
 
-        // Add inherited permissions
-        hierarchyInfo.inheritedPermissions.forEach((p) =>
-          allPermissions.add(p)
-        );
-      }
+      // Add inherited permissions
+      hierarchyInfo.inheritedPermissions.forEach((p) => allPermissions.add(p));
 
       const permissions = Array.from(allPermissions);
 
@@ -585,43 +631,62 @@ export class PermissionServiceV2 implements IPermissionService {
    */
   async getPermissionAnalytics(
     userId: EntityId,
-    _days: number = 30
+    days: number = 30
   ): Promise<IPermissionAnalytics> {
     try {
       this.metrics.operationsTotal++;
 
-      // In a real implementation, this would query audit logs
-      // For now, provide basic analytics from cache
+      // Get analytics data from cache analysis
+      // Future enhancement: integrate with audit logging system for data older than cache TTL
 
-      // Count permission checks from cache (simplified)
+      // Calculate analysis time window (used for future audit log queries)
+      const analysisWindow = days * 24 * 60 * 60 * 1000;
+      const currentTime = Date.now();
+      const oldestRelevantTime = currentTime - analysisWindow;
+
+      // Get user's current permissions for analysis
+      const userPermissions = await this.getUserPermissions(userId);
+
       let totalChecks = 0;
       let deniedChecks = 0;
       const resourceCounts: { [resource: string]: number } = {};
       const actionCounts: { [action: string]: number } = {};
 
-      // Analyze cached permission checks for this user
+      // Analyze cached permission checks for this user (within analysis window)
       for (const [key, result] of this.permissionCheckCache) {
         if (key.startsWith(`${userId}:`)) {
-          totalChecks++;
-          if (!result.result) {
-            deniedChecks++;
-          }
-
-          // Parse resource and action from cache key
-          const parts = key.split(":");
-          if (parts.length >= 3) {
-            const resource = parts[1];
-            const action = parts[2];
-
-            if (resource) {
-              resourceCounts[resource] = (resourceCounts[resource] || 0) + 1;
+          // Filter by time window for more accurate analytics
+          if (result.cachedAt.getTime() >= oldestRelevantTime) {
+            totalChecks++;
+            if (!result.result) {
+              deniedChecks++;
             }
-            if (action) {
-              actionCounts[action] = (actionCounts[action] || 0) + 1;
+
+            // Parse resource and action from cache key
+            const parts = key.split(":");
+            if (parts.length >= 3) {
+              const resource = parts[1];
+              const action = parts[2];
+
+              if (resource) {
+                resourceCounts[resource] = (resourceCounts[resource] || 0) + 1;
+              }
+              if (action) {
+                actionCounts[action] = (actionCounts[action] || 0) + 1;
+              }
             }
           }
         }
       }
+
+      // Include user's current permissions in resource analysis
+      userPermissions.forEach((permission) => {
+        const resource = permission.resource;
+        const action = permission.action;
+
+        resourceCounts[resource] = resourceCounts[resource] || 0;
+        actionCounts[action] = actionCounts[action] || 0;
+      });
 
       // Sort and limit top resources/actions
       const topResources = Object.entries(resourceCounts)
@@ -652,16 +717,190 @@ export class PermissionServiceV2 implements IPermissionService {
   }
 
   /**
-   * Health check
+   * Cache warming for frequently accessed permissions
+   * Optimizes performance by pre-loading popular user permissions
+   */
+  async warmPermissionCache(userIds: ReadonlyArray<EntityId>): Promise<{
+    warmedCount: number;
+    failedCount: number;
+    totalTime: number;
+  }> {
+    const startTime = Date.now();
+    let warmedCount = 0;
+    let failedCount = 0;
+
+    try {
+      // Use Redis cache warming
+      warmedCount = await this.redisCache.warmUserPermissionsCache(userIds);
+
+      // Also warm local cache for immediate access
+      for (const userId of userIds) {
+        try {
+          const cached = await this.redisCache.getUserPermissions(userId);
+          if (cached) {
+            const permissionStrings = cached.map(
+              (p) => `${p.resource}:${p.action}`
+            );
+            this.cacheUserPermissions(userId, permissionStrings, []);
+          }
+        } catch (error) {
+          failedCount++;
+          console.warn(`Failed to warm local cache for user ${userId}:`, error);
+        }
+      }
+
+      return {
+        warmedCount,
+        failedCount,
+        totalTime: Date.now() - startTime,
+      };
+    } catch (error) {
+      throw new ValidationError(
+        `Cache warming failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    }
+  }
+
+  /**
+   * Optimize permission queries with batch loading
+   * Reduces database load by batching permission lookups
+   */
+  async batchLoadPermissions(
+    userIds: ReadonlyArray<EntityId>,
+    options?: {
+      useCache?: boolean;
+      cacheResults?: boolean;
+    }
+  ): Promise<Map<EntityId, ReadonlyArray<IEnhancedPermission>>> {
+    const { useCache = true, cacheResults = true } = options || {};
+    const results = new Map<EntityId, ReadonlyArray<IEnhancedPermission>>();
+    const uncachedUserIds: EntityId[] = [];
+
+    try {
+      this.metrics.batchPermissionChecks++;
+
+      // First, check cache for all requested users
+      if (useCache) {
+        for (const userId of userIds) {
+          const cached = await this.redisCache.getUserPermissions(userId);
+          if (cached) {
+            results.set(userId, cached);
+            this.metrics.cacheHits++;
+          } else {
+            uncachedUserIds.push(userId);
+            this.metrics.cacheMisses++;
+          }
+        }
+      } else {
+        uncachedUserIds.push(...userIds);
+      }
+
+      // Batch load uncached permissions from database
+      if (uncachedUserIds.length > 0) {
+        for (const userId of uncachedUserIds) {
+          const permissions = await this.getUserPermissionsFromDatabase(userId);
+          results.set(userId, permissions);
+
+          // Cache the results if enabled
+          if (cacheResults) {
+            await this.redisCache.cacheUserPermissions(userId, permissions);
+            const permissionStrings = permissions.map(
+              (p) => `${p.resource}:${p.action}`
+            );
+            this.cacheUserPermissions(userId, permissionStrings, []);
+          }
+        }
+      }
+
+      return results;
+    } catch (error) {
+      this.metrics.errorsTotal++;
+      throw new ValidationError(
+        `Batch permission loading failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    }
+  }
+
+  /**
+   * Get cache performance statistics
+   */
+  async getCacheStats(): Promise<{
+    redis: {
+      hitRate: number;
+      missRate: number;
+      totalEntries: number;
+      memoryUsage: number;
+      averageAccessTime: number;
+    };
+    local: {
+      hitRate: number;
+      missRate: number;
+      userCacheSize: number;
+      permissionCheckCacheSize: number;
+      hierarchyCacheSize: number;
+    };
+  }> {
+    const redisStats = await this.redisCache.getCacheStats();
+
+    const localHitRate =
+      this.metrics.cacheHits /
+        (this.metrics.cacheHits + this.metrics.cacheMisses) || 0;
+    const localMissRate =
+      this.metrics.cacheMisses /
+        (this.metrics.cacheHits + this.metrics.cacheMisses) || 0;
+
+    return {
+      redis: redisStats,
+      local: {
+        hitRate: localHitRate,
+        missRate: localMissRate,
+        userCacheSize: this.userPermissionCache.size,
+        permissionCheckCacheSize: this.permissionCheckCache.size,
+        hierarchyCacheSize: this.roleHierarchyCache.size,
+      },
+    };
+  }
+
+  /**
+   * Health check with Redis cache status
    */
   async getHealth(): Promise<IServiceHealth> {
     try {
+      const redisHealthy = await this.redisCache.healthCheck();
+      const now = new Date().toISOString() as Timestamp;
+
       return {
         service: "PermissionServiceV2",
-        status: "healthy",
+        status: redisHealthy ? "healthy" : "degraded",
         uptime: Date.now() - this.startTime,
-        lastCheck: new Date().toISOString() as Timestamp,
-        dependencies: [],
+        lastCheck: now,
+        dependencies: [
+          {
+            name: "Redis Cache",
+            status: redisHealthy ? "healthy" : "unhealthy",
+            responseTime: 0, // Would be measured in production
+            lastCheck: now,
+            error: redisHealthy ? null : "Redis cache connection failed",
+          },
+          {
+            name: "User Repository",
+            status: "healthy", // Would check repository health
+            responseTime: 0,
+            lastCheck: now,
+            error: null,
+          },
+          {
+            name: "Role Repository",
+            status: "healthy", // Would check repository health
+            responseTime: 0,
+            lastCheck: now,
+            error: null,
+          },
+        ],
         metrics: {
           operationsTotal: this.metrics.operationsTotal,
           errorsTotal: this.metrics.errorsTotal,
@@ -675,7 +914,7 @@ export class PermissionServiceV2 implements IPermissionService {
           userCacheSize: this.userPermissionCache.size,
           permissionCheckCacheSize: this.permissionCheckCache.size,
           roleHierarchyCacheSize: this.roleHierarchyCache.size,
-          totalUsers: this.userRolesStore.size,
+          totalUsers: await this.getUserCount(),
           totalRoles: this.roleHierarchyStore.size,
         },
       };
@@ -691,6 +930,18 @@ export class PermissionServiceV2 implements IPermissionService {
           errorsTotal: this.metrics.errorsTotal,
         },
       };
+    }
+  }
+
+  /**
+   * Get total user count from database
+   */
+  private async getUserCount(): Promise<number> {
+    try {
+      return await this.userRepository.count();
+    } catch (error) {
+      console.error("Failed to get user count:", error);
+      return 0;
     }
   }
 
@@ -801,89 +1052,163 @@ export class PermissionServiceV2 implements IPermissionService {
   private async buildEnhancedRole(
     roleId: EntityId
   ): Promise<IEnhancedRole | null> {
-    const hierarchy = this.roleHierarchyStore.get(roleId);
-    const permissions = this.rolePermissionsStore.get(roleId);
+    try {
+      // Get role data from repository
+      const role = await this.roleRepository.findById(roleId);
+      if (!role) {
+        return null;
+      }
 
-    if (!hierarchy || !permissions) {
-      return null;
-    }
+      // Get permissions via transaction to ensure data consistency
+      const enhancedPermissions = await this.getUserPermissionsFromDatabase(
+        roleId
+      );
 
-    // Build enhanced permissions
-    const enhancedPermissions: IEnhancedPermission[] = Array.from(
-      permissions
-    ).map((permission) => {
-      const [resource, action] = permission.split(":");
+      // Get role hierarchy info from database
+      const hierarchy = await this.getRoleHierarchy(roleId);
+
       return {
-        id: roleId as EntityId,
-        roleId,
-        resource: resource || "",
-        action: action || "",
-        name: permission,
-        priority: "medium",
-        version: "1.0.0",
-        createdAt: new Date().toISOString() as Timestamp,
-        updatedAt: new Date().toISOString() as Timestamp,
-        compiledConditions: {
-          timeRestrictions: null,
-          ipRestrictions: [],
-          contextRequirements: [],
-          customRules: [],
-        },
-        scope: {
-          resourceType: resource || "",
-          resourceIds: [],
-          actions: [action || ""],
-          filters: [],
+        id: roleId,
+        name: role.name,
+        displayName: role.displayName,
+        description: role.description || "",
+        category: role.category,
+        level: role.level,
+        isActive: role.isActive,
+        version: role.version,
+        createdAt: role.createdAt.toISOString() as Timestamp,
+        updatedAt: role.updatedAt.toISOString() as Timestamp,
+        metadata: role.metadata
+          ? JSON.parse(JSON.stringify(role.metadata))
+          : null,
+        parentRoleIds: role.parentRoleIds || [],
+        childRoleIds: role.childRoleIds || [],
+        computedPermissions: Object.freeze(enhancedPermissions),
+        hierarchy: {
+          level: role.level,
+          parentRoles: (role.parentRoleIds || []).map(
+            (id: any) => id as EntityId
+          ),
+          childRoles: (role.childRoleIds || []).map(
+            (id: any) => id as EntityId
+          ),
+          inheritedPermissions: hierarchy.inheritedPermissions.map(
+            (perm) => perm as EntityId
+          ),
+          effectivePermissions: [
+            ...(role.parentRoleIds || []).map((id: any) => id as EntityId),
+            roleId,
+          ],
         },
       };
-    });
-
-    return {
-      id: roleId,
-      name: `Role_${roleId}`, // Simplified for demo
-      displayName: `Role ${roleId} Display Name`,
-      description: `Role ${roleId} description`,
-      category: "functional",
-      level: hierarchy.level,
-      isActive: true,
-      version: "1.0.0",
-      createdAt: new Date().toISOString() as Timestamp,
-      updatedAt: new Date().toISOString() as Timestamp,
-      metadata: null,
-      parentRoleIds: [...hierarchy.parentRoles],
-      childRoleIds: [...hierarchy.childRoles],
-      computedPermissions: Object.freeze(enhancedPermissions),
-      hierarchy: hierarchy,
-    };
+    } catch (error) {
+      console.error(`Failed to build enhanced role ${roleId}:`, error);
+      return null;
+    }
   }
 
   private async evaluateContextPermission(
-    _userId: EntityId,
-    _resource: string,
-    _action: string,
+    userId: EntityId,
+    resource: string,
+    action: string,
     context: Record<string, unknown>,
-    _userPermissions: ReadonlyArray<string>
+    userPermissions: ReadonlyArray<string>
   ): Promise<boolean> {
-    // Simplified context evaluation
-    // In a real implementation, this would evaluate complex context rules
+    try {
+      // Get user with enhanced permissions from database via transaction
+      const enhancedPermissions = await this.getUserPermissionsFromDatabase(
+        userId
+      );
 
-    // Example: time-based permissions
-    if (context["timeRestricted"] === true) {
-      const hour = new Date().getHours();
-      if (hour < 9 || hour > 17) {
-        return false; // Outside business hours
+      // Filter permissions by resource and action
+      const relevantPermissions = enhancedPermissions.filter(
+        (perm) => perm.resource === resource && perm.action === action
+      );
+
+      if (relevantPermissions.length === 0) {
+        return false;
       }
-    }
 
-    // Example: IP-based permissions
-    if (context["ipAddress"] && typeof context["ipAddress"] === "string") {
-      const ip = context["ipAddress"];
-      if (ip.startsWith("192.168.")) {
-        return true; // Local network access
+      // Evaluate context-specific permissions
+      for (const permission of relevantPermissions) {
+        if (permission.compiledConditions) {
+          const conditions = permission.compiledConditions;
+
+          // Time-based restrictions
+          if (conditions.timeRestrictions) {
+            const hour = new Date().getHours();
+            const day = new Date().getDay();
+
+            if (
+              conditions.timeRestrictions.allowedHours &&
+              !conditions.timeRestrictions.allowedHours.includes(hour)
+            ) {
+              continue;
+            }
+            if (
+              conditions.timeRestrictions.allowedDays &&
+              !conditions.timeRestrictions.allowedDays.includes(day)
+            ) {
+              continue;
+            }
+          }
+
+          // IP-based restrictions
+          if (conditions.ipRestrictions && context["ipAddress"]) {
+            const ip = context["ipAddress"] as string;
+            const allowed = conditions.ipRestrictions.some((range: string) => {
+              if (range.includes("/")) {
+                // CIDR notation support would be implemented here
+                const baseIp = range.split("/")[0];
+                return baseIp ? ip.startsWith(baseIp) : false;
+              }
+              return ip === range || ip.startsWith(range);
+            });
+            if (!allowed) {
+              continue;
+            }
+          }
+
+          // Context requirements
+          if (conditions.contextRequirements) {
+            const meetsRequirements = conditions.contextRequirements.every(
+              (req: any) => {
+                const contextValue = context[req.field];
+                switch (req.operator) {
+                  case "equals":
+                    return contextValue === req.value;
+                  case "contains":
+                    return (
+                      typeof contextValue === "string" &&
+                      contextValue.includes(req.value)
+                    );
+                  case "in":
+                    return (
+                      Array.isArray(req.value) &&
+                      req.value.includes(contextValue)
+                    );
+                  default:
+                    return false;
+                }
+              }
+            );
+            if (!meetsRequirements) {
+              continue;
+            }
+          }
+
+          // If we reach here, all conditions are satisfied
+          return true;
+        }
       }
-    }
 
-    return false;
+      // Check if user has base permission without conditions
+      const basePermission = `${resource}:${action}`;
+      return userPermissions.includes(basePermission);
+    } catch (error) {
+      console.error("Context permission evaluation failed:", error);
+      return false;
+    }
   }
 
   private resolveInheritedPermissions(roleId: EntityId): ReadonlyArray<string> {
@@ -909,49 +1234,6 @@ export class PermissionServiceV2 implements IPermissionService {
     return Array.from(inherited);
   }
 
-  private initializeBasicRoles(): void {
-    // Create basic role hierarchy for demo
-    const adminRoleId = "admin" as EntityId;
-    const userRoleId = "user" as EntityId;
-    const guestRoleId = "guest" as EntityId;
-
-    // Admin role
-    this.roleHierarchyStore.set(adminRoleId, {
-      level: 1,
-      parentRoles: [],
-      childRoles: [userRoleId],
-      inheritedPermissions: [],
-      effectivePermissions: [adminRoleId],
-    });
-    this.rolePermissionsStore.set(
-      adminRoleId,
-      new Set(["*:*", "users:*", "system:*", "reports:*"])
-    );
-
-    // User role
-    this.roleHierarchyStore.set(userRoleId, {
-      level: 2,
-      parentRoles: [adminRoleId],
-      childRoles: [guestRoleId],
-      inheritedPermissions: [adminRoleId],
-      effectivePermissions: [userRoleId, adminRoleId],
-    });
-    this.rolePermissionsStore.set(
-      userRoleId,
-      new Set(["profile:read", "profile:update", "data:read", "dashboard:read"])
-    );
-
-    // Guest role
-    this.roleHierarchyStore.set(guestRoleId, {
-      level: 3,
-      parentRoles: [userRoleId],
-      childRoles: [],
-      inheritedPermissions: [userRoleId, adminRoleId],
-      effectivePermissions: [guestRoleId, userRoleId, adminRoleId],
-    });
-    this.rolePermissionsStore.set(guestRoleId, new Set(["public:read"]));
-  }
-
   private cleanupPermissionCheckCache(): void {
     // Remove oldest entries
     const entries = Array.from(this.permissionCheckCache.entries());
@@ -964,6 +1246,67 @@ export class PermissionServiceV2 implements IPermissionService {
         this.permissionCheckCache.delete(entry[0]);
       }
     }
+  }
+
+  /**
+   * Helper method to get user permissions from database using repositories
+   */
+  private async getUserPermissionsFromDatabase(
+    userId: EntityId
+  ): Promise<IEnhancedPermission[]> {
+    // Get user with roleId from repository
+    const user = await this.userRepository.findById(userId);
+    if (!user || !user.roleId) {
+      return [];
+    }
+
+    // Query role permissions using raw database query since repository doesn't expose permissions
+    // This is a temporary implementation - in production, we'd add a getRoleWithPermissions method to repository
+    const repositoryFactory = getRepositoryFactory();
+    const result = await repositoryFactory.executeInTransaction(
+      async ({ userRepo }) => {
+        // Access the underlying prisma client through repository transaction
+        const prisma = (userRepo as any).prisma;
+
+        const roleWithPermissions = await prisma.role.findUnique({
+          where: { id: user.roleId },
+          include: {
+            permissions: true,
+          },
+        });
+
+        if (!roleWithPermissions || !roleWithPermissions.permissions) {
+          return [];
+        }
+
+        // Transform to enhanced permissions
+        return roleWithPermissions.permissions.map(
+          (permission: any): IEnhancedPermission => ({
+            id: permission.id as EntityId,
+            roleId: permission.roleId as EntityId,
+            resource: permission.resource,
+            action: permission.action,
+            name: permission.name,
+            description: permission.description || "",
+            priority: permission.priority,
+            version: permission.version,
+            createdAt: permission.createdAt.toISOString() as Timestamp,
+            updatedAt: permission.updatedAt.toISOString() as Timestamp,
+            compiledConditions: permission.conditions
+              ? JSON.parse(JSON.stringify(permission.conditions))
+              : {},
+            scope: {
+              resourceType: permission.resource,
+              resourceIds: [],
+              actions: [permission.action],
+              filters: [],
+            } as IPermissionScope,
+          })
+        );
+      }
+    );
+
+    return result;
   }
 
   private startCacheMaintenanceJob(): void {

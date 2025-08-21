@@ -11,8 +11,9 @@ export { SessionServiceV2 } from "./SessionService";
 export { PermissionServiceV2 } from "./PermissionService";
 export { APIKeyServiceV2 } from "./APIKeyService";
 
-// Infrastructure Services - Phase 4 Complete (2/2)
+// Infrastructure Services - Phase 4 Complete (3/3)
 export { CacheServiceV2 } from "./CacheService";
+export { RedisCacheService } from "./RedisCacheService";
 export { AuditServiceV2 } from "./AuditService";
 
 // Orchestration Services - Phase 4 Complete (1/1)

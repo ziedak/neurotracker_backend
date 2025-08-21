@@ -9,12 +9,20 @@ import {
 } from "../types/core";
 
 import {
+  IEnhancedUser,
+  IEnhancedSession,
+  ModelTransformers,
+  EnhancedTypeGuards,
+} from "../types/enhanced";
+
+import {
   IJWTService,
   ISessionService,
   IPermissionService,
   IAPIKeyService,
   ICacheService,
   IAuditService,
+  IUserService,
   IAuthenticationService,
   IAuthenticationCredentials,
   IRegistrationData,
@@ -92,6 +100,7 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
   private readonly apiKeyService: IAPIKeyService;
   private readonly cacheService: ICacheService;
   private readonly auditService: IAuditService;
+  private readonly userService: IUserService;
 
   // Specialized authentication components
   private readonly credentialsValidator: CredentialsValidator;
@@ -141,6 +150,7 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
     apiKeyService: IAPIKeyService,
     cacheService: ICacheService,
     auditService: IAuditService,
+    userService: IUserService,
     config?: Partial<IAuthenticationServiceConfig>
   ) {
     this.jwtService = jwtService;
@@ -149,6 +159,7 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
     this.apiKeyService = apiKeyService;
     this.cacheService = cacheService;
     this.auditService = auditService;
+    this.userService = userService;
 
     // Merge configuration with enterprise defaults
     this.config = {
@@ -170,7 +181,8 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
       sessionService,
       permissionService,
       apiKeyService,
-      auditService
+      auditService,
+      userService
     );
 
     this.metrics = new AuthenticationMetrics(cacheService);
@@ -356,94 +368,374 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
   async getContextBySession(
     sessionId: SessionId
   ): Promise<IAuthenticationContext | null> {
-    const session = await this.sessionService.findById(sessionId);
-    if (!session) return null;
+    try {
+      const session = await this.sessionService.findById(sessionId);
+      if (!session) return null;
 
-    // Mock context for now
-    return {
-      user: {
-        id: session.userId,
-        email: "",
-        password: "",
-        username: "",
-        status: "ACTIVE" as any,
-        emailVerified: false,
-        phoneVerified: false,
-        loginCount: 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        isDeleted: false,
-      },
-      session: null,
-      permissions: [],
-      roles: [],
-      ipAddress: "0.0.0.0",
-      userAgent: "unknown",
-      timestamp: createTimestamp(),
-      metadata: {},
-    };
+      // Get user details
+      const user = await this.userService.findById(session.userId);
+      if (!user) return null;
+
+      // Transform to enhanced user with enterprise features
+      const enhancedUser = ModelTransformers.toEnhancedUser(user);
+
+      // Validate enhanced user structure
+      if (!EnhancedTypeGuards.isEnhancedUser(enhancedUser)) {
+        console.warn(
+          "Failed to create valid enhanced user for session context"
+        );
+        return null;
+      }
+
+      // Get user permissions
+      const permissions = await this.permissionService.getUserPermissions(
+        user.id
+      );
+
+      return {
+        user: {
+          id: user.id,
+          email: user.email,
+          password: "", // Never expose password in context
+          username: user.username,
+          status: user.status,
+          emailVerified: user.emailVerified || false,
+          phoneVerified: user.phoneVerified || false,
+          loginCount: user.loginCount || 0,
+          createdAt: new Date(user.createdAt), // Convert Timestamp to Date
+          updatedAt: new Date(user.updatedAt), // Convert Timestamp to Date
+          isDeleted: user.isDeleted || false,
+          // Core user fields (ensuring compatibility)
+          firstName: user.firstName || null,
+          lastName: user.lastName || null,
+          phone: user.phone || null,
+          lastLoginAt: user.lastLoginAt ? new Date(user.lastLoginAt) : null,
+          deletedAt: user.deletedAt ? new Date(user.deletedAt) : null,
+          metadata: user.metadata || null,
+          // Enterprise fields
+          roleId: user.roleId || null,
+          storeId: user.storeId || null,
+          organizationId: user.organizationId || null,
+          roleAssignedAt: user.roleAssignedAt
+            ? new Date(user.roleAssignedAt)
+            : null,
+          roleRevokedAt: user.roleRevokedAt
+            ? new Date(user.roleRevokedAt)
+            : null,
+          roleAssignedBy: user.roleAssignedBy || null,
+          roleRevokedBy: user.roleRevokedBy || null,
+          roleExpiresAt: user.roleExpiresAt
+            ? new Date(user.roleExpiresAt)
+            : null,
+          createdBy: user.createdBy || null,
+          updatedBy: user.updatedBy || null,
+          auditLog: user.auditLog || null,
+        },
+        session: {
+          id: session.id,
+          userId: session.userId,
+          sessionId: session.sessionId,
+          isActive: session.isActive,
+          ipAddress: session.ipAddress || null,
+          userAgent: session.userAgent || null,
+          createdAt: new Date(session.createdAt), // Convert Timestamp to Date
+          updatedAt: new Date(session.updatedAt), // Convert Timestamp to Date
+          expiresAt: session.expiresAt ? new Date(session.expiresAt) : null, // Convert Timestamp to Date
+          metadata: session.metadata || null,
+          endedAt: session.endedAt || null,
+        },
+        permissions: permissions.map((p) => p.name),
+        roles: [], // TODO: Get user roles
+        ipAddress:
+          (session.metadata?.["ipAddress"] as string) ||
+          session.ipAddress ||
+          "0.0.0.0",
+        userAgent:
+          (session.metadata?.["userAgent"] as string) ||
+          session.userAgent ||
+          "unknown",
+        timestamp: createTimestamp(),
+        metadata: {
+          ...(session.metadata || {}),
+          // Add enhanced user security metadata
+          enhancedSecurity: {
+            failedLoginAttempts:
+              enhancedUser.securityMetadata.failedLoginAttempts,
+            mfaEnabled: enhancedUser.securityMetadata.mfaEnabled,
+            trustedDevicesCount:
+              enhancedUser.securityMetadata.trustedDevices.length,
+            suspiciousActivitiesCount:
+              enhancedUser.securityMetadata.suspiciousActivities.length,
+          },
+          userPreferences: {
+            theme: enhancedUser.preferences.theme,
+            language: enhancedUser.preferences.language,
+            timezone: enhancedUser.preferences.timezone,
+          },
+        },
+      };
+    } catch (error) {
+      return null;
+    }
   }
 
   async getContextByJWT(
     token: JWTToken
   ): Promise<IAuthenticationContext | null> {
-    const validation = await this.jwtService.verify(token);
-    if (!validation.isValid || !validation.payload) return null;
+    try {
+      const validation = await this.jwtService.verify(token);
+      if (!validation.isValid || !validation.payload) return null;
 
-    // Mock context for now
-    return {
-      user: {
-        id: validation.payload.sub as EntityId,
-        email: validation.payload.email || "",
-        password: "",
-        username: validation.payload.username || "",
-        status: "ACTIVE" as any,
-        emailVerified: false,
-        phoneVerified: false,
-        loginCount: 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        isDeleted: false,
-      },
-      session: null,
-      permissions: validation.payload.permissions || [],
-      roles: [],
-      ipAddress: "0.0.0.0",
-      userAgent: "unknown",
-      timestamp: createTimestamp(),
-      metadata: {},
-    };
+      // Get user details from payload
+      const userId = validation.payload.sub || validation.payload.userId;
+      if (!userId) return null;
+
+      const user = await this.userService.findById(userId as EntityId);
+      if (!user) return null;
+
+      // Transform to enhanced user with enterprise features
+      const enhancedUser = ModelTransformers.toEnhancedUser(user);
+
+      // Validate enhanced user structure
+      if (!EnhancedTypeGuards.isEnhancedUser(enhancedUser)) {
+        console.warn("Failed to create valid enhanced user for JWT context");
+        return null;
+      }
+
+      // Get user permissions (either from token or service)
+      const permissions =
+        validation.payload.permissions ||
+        (await this.permissionService.getUserPermissions(user.id)).map(
+          (p) => p.name
+        );
+
+      return {
+        user: {
+          id: user.id,
+          email: user.email,
+          password: "", // Never expose password
+          username: user.username,
+          status: user.status,
+          emailVerified: user.emailVerified || false,
+          phoneVerified: user.phoneVerified || false,
+          loginCount: user.loginCount || 0,
+          createdAt: new Date(user.createdAt),
+          updatedAt: new Date(user.updatedAt),
+          isDeleted: user.isDeleted || false,
+          // Core user fields (ensuring compatibility)
+          firstName: user.firstName || null,
+          lastName: user.lastName || null,
+          phone: user.phone || null,
+          lastLoginAt: user.lastLoginAt ? new Date(user.lastLoginAt) : null,
+          deletedAt: user.deletedAt ? new Date(user.deletedAt) : null,
+          metadata: user.metadata || null,
+          // Enterprise fields
+          roleId: user.roleId || null,
+          storeId: user.storeId || null,
+          organizationId: user.organizationId || null,
+          roleAssignedAt: user.roleAssignedAt
+            ? new Date(user.roleAssignedAt)
+            : null,
+          roleRevokedAt: user.roleRevokedAt
+            ? new Date(user.roleRevokedAt)
+            : null,
+          roleAssignedBy: user.roleAssignedBy || null,
+          roleRevokedBy: user.roleRevokedBy || null,
+          roleExpiresAt: user.roleExpiresAt
+            ? new Date(user.roleExpiresAt)
+            : null,
+          createdBy: user.createdBy || null,
+          updatedBy: user.updatedBy || null,
+          auditLog: user.auditLog || null,
+        },
+        session: null, // JWT doesn't have session context
+        permissions: permissions,
+        roles: [], // TODO: Get user roles from JWT payload or service
+        ipAddress: "0.0.0.0", // Not available from JWT
+        userAgent: "unknown", // Not available from JWT
+        timestamp: createTimestamp(),
+        metadata: {
+          jwtUsed: true,
+          tokenIssuer: validation.payload.iss,
+          tokenSubject: validation.payload.sub,
+          tokenExpires: validation.payload.exp,
+          // Add enhanced user security metadata
+          enhancedSecurity: {
+            failedLoginAttempts:
+              enhancedUser.securityMetadata.failedLoginAttempts,
+            mfaEnabled: enhancedUser.securityMetadata.mfaEnabled,
+            trustedDevicesCount:
+              enhancedUser.securityMetadata.trustedDevices.length,
+            suspiciousActivitiesCount:
+              enhancedUser.securityMetadata.suspiciousActivities.length,
+          },
+          userPreferences: {
+            theme: enhancedUser.preferences.theme,
+            language: enhancedUser.preferences.language,
+            timezone: enhancedUser.preferences.timezone,
+          },
+        },
+      };
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async getContextByJWT(
+    token: JWTToken
+  ): Promise<IAuthenticationContext | null> {
+    try {
+      const validation = await this.jwtService.verify(token);
+      if (!validation.isValid || !validation.payload) return null;
+
+      // Get user details from payload
+      const userId = validation.payload.sub || validation.payload.userId;
+      if (!userId) return null;
+
+      const user = await this.userService.findById(userId as EntityId);
+      if (!user) return null;
+
+      // Transform to enhanced user with enterprise features
+      const enhancedUser = ModelTransformers.toEnhancedUser(user);
+
+      // Validate enhanced user structure
+      if (!EnhancedTypeGuards.isEnhancedUser(enhancedUser)) {
+        console.warn("Failed to create valid enhanced user for JWT context");
+        return null;
+      }
+
+      // Get user permissions (either from token or service)
+      const permissions =
+        validation.payload.permissions ||
+        (await this.permissionService.getUserPermissions(user.id)).map(
+          (p) => p.name
+        );
+
+      return {
+        user: {
+          id: user.id,
+          email: user.email,
+          password: "", // Never expose password
+          username: user.username,
+          status: user.status,
+          emailVerified: user.emailVerified || false,
+          phoneVerified: user.phoneVerified || false,
+          loginCount: user.loginCount || 0,
+          createdAt: new Date(user.createdAt),
+          updatedAt: new Date(user.updatedAt),
+          isDeleted: user.isDeleted || false,
+          // Core user fields (ensuring compatibility)
+          firstName: user.firstName || null,
+          lastName: user.lastName || null,
+          phone: user.phone || null,
+          lastLoginAt: user.lastLoginAt ? new Date(user.lastLoginAt) : null,
+          deletedAt: user.deletedAt ? new Date(user.deletedAt) : null,
+          metadata: user.metadata || null,
+          // Enterprise fields
+          roleId: user.roleId || null,
+          storeId: user.storeId || null,
+          organizationId: user.organizationId || null,
+          roleAssignedAt: user.roleAssignedAt
+            ? new Date(user.roleAssignedAt)
+            : null,
+          roleRevokedAt: user.roleRevokedAt
+            ? new Date(user.roleRevokedAt)
+            : null,
+          roleAssignedBy: user.roleAssignedBy || null,
+          roleRevokedBy: user.roleRevokedBy || null,
+          roleExpiresAt: user.roleExpiresAt
+            ? new Date(user.roleExpiresAt)
+            : null,
+          createdBy: user.createdBy || null,
+          updatedBy: user.updatedBy || null,
+          auditLog: user.auditLog || null,
+        },
+        session: null, // JWT doesn't have session context
+        permissions: permissions,
+        roles: [], // TODO: Get user roles from JWT payload or service
+        ipAddress: "0.0.0.0", // Not available from JWT
+        userAgent: "unknown", // Not available from JWT
+        timestamp: createTimestamp(),
+        metadata: {
+          jwtUsed: true,
+          tokenIssuer: validation.payload.iss,
+          tokenSubject: validation.payload.sub,
+          tokenExpires: validation.payload.exp,
+          // Add enhanced user security metadata
+          enhancedSecurity: {
+            failedLoginAttempts:
+              enhancedUser.securityMetadata.failedLoginAttempts,
+            mfaEnabled: enhancedUser.securityMetadata.mfaEnabled,
+            trustedDevicesCount:
+              enhancedUser.securityMetadata.trustedDevices.length,
+            suspiciousActivitiesCount:
+              enhancedUser.securityMetadata.suspiciousActivities.length,
+          },
+          userPreferences: {
+            theme: enhancedUser.preferences.theme,
+            language: enhancedUser.preferences.language,
+            timezone: enhancedUser.preferences.timezone,
+          },
+        },
+      };
+    } catch (error) {
+      return null;
+    }
   }
 
   async getContextByAPIKey(
     apiKey: APIKey
   ): Promise<IAuthenticationContext | null> {
-    const validation = await this.apiKeyService.validate(apiKey);
-    if (!validation || !validation.isValid || !validation.keyInfo) return null;
+    try {
+      const validation = await this.apiKeyService.validate(apiKey);
+      if (!validation || !validation.isValid || !validation.keyInfo)
+        return null;
 
-    // Mock context for now
-    return {
-      user: {
-        id: validation.keyInfo.userId,
-        email: "",
-        password: "",
-        username: "",
-        status: "ACTIVE" as any,
-        emailVerified: false,
-        phoneVerified: false,
-        loginCount: 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        isDeleted: false,
-      },
-      session: null,
-      permissions: validation.keyInfo.scopes as string[],
-      roles: [],
-      ipAddress: "0.0.0.0",
-      userAgent: "unknown",
-      timestamp: createTimestamp(),
-      metadata: {},
-    };
+      // Get full user details from user service
+      const user = await this.userService.findById(validation.keyInfo.userId);
+      if (!user) return null;
+
+      // Get user permissions from the permission service
+      const userPermissions = await this.permissionService.getUserPermissions(
+        user.id
+      );
+      const permissions = userPermissions.map((p) => p.name);
+
+      // Merge API key scopes with user permissions
+      const combinedPermissions = Array.from(
+        new Set([...permissions, ...(validation.keyInfo.scopes as string[])])
+      );
+
+      return {
+        user: {
+          id: user.id,
+          email: user.email,
+          password: "", // Never expose password
+          username: user.username,
+          status: user.status,
+          emailVerified: user.emailVerified || false,
+          phoneVerified: user.phoneVerified || false,
+          loginCount: user.loginCount || 0,
+          createdAt: new Date(user.createdAt),
+          updatedAt: new Date(user.updatedAt),
+          isDeleted: user.isDeleted || false,
+        },
+        session: null, // API Key doesn't have session context
+        permissions: combinedPermissions,
+        roles: [], // API Key doesn't typically have role context
+        ipAddress: "0.0.0.0", // Not available from API Key
+        userAgent: "unknown", // Not available from API Key
+        timestamp: createTimestamp(),
+        metadata: {
+          apiKeyUsed: true,
+          apiKeyId: validation.keyInfo.id,
+          apiKeyScopes: validation.keyInfo.scopes,
+          keyName: validation.keyInfo.name,
+        },
+      };
+    } catch (error) {
+      return null;
+    }
   }
 
   async getHealth(): Promise<any> {
@@ -475,7 +767,9 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
       } else if ("apiKey" in credentials) {
         return await this.executeAPIKeyAuthentication(credentials);
       } else if ("token" in credentials) {
-        return await this.executeJWTAuthentication(credentials);
+        return await this.executeJWTAuthentication(
+          credentials as { token: JWTToken }
+        );
       }
 
       throw new AuthenticationError("Unsupported authentication method");
@@ -489,47 +783,127 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
   }
 
   private async executePasswordAuthentication(
-    credentials: any
+    credentials: IAuthenticationCredentials
   ): Promise<IAuthFlowResult> {
-    // Mock implementation for now
-    return {
-      success: true,
-      user: { id: "user-123", email: credentials.email },
-      userId: "user-123",
-      method: "password",
-      expiresAt: Date.now() + 3600000,
-      permissions: [],
-    };
+    try {
+      const flowResult = await this.flowManager.executePasswordFlow(
+        credentials
+      );
+
+      if (!flowResult.success) {
+        throw new AuthenticationError(
+          flowResult.error?.message || "Password authentication failed"
+        );
+      }
+
+      return {
+        success: true,
+        user: { id: flowResult.userId },
+        userId: flowResult.userId as string,
+        sessionId: flowResult.sessionId as string,
+        method: "password",
+        ...(flowResult.tokens && {
+          token: flowResult.tokens.accessToken,
+          expiresAt: flowResult.tokens.expiresAt,
+        }),
+        permissions: flowResult.permissions || [],
+        ...(flowResult.metadata && { metadata: flowResult.metadata }),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? error
+            : new AuthenticationError("Authentication failed"),
+      };
+    }
   }
 
   private async executeAPIKeyAuthentication(
-    credentials: any
+    credentials: IAuthenticationCredentials
   ): Promise<IAuthFlowResult> {
-    // Mock implementation for now
-    return {
-      success: true,
-      user: { id: "user-456" },
-      userId: "user-456",
-      method: "apikey",
-      expiresAt: Date.now() + 86400000,
-      permissions: [],
-      metadata: { apiKey: credentials.apiKey },
-    };
+    try {
+      const flowResult = await this.flowManager.executeAPIKeyFlow(credentials);
+
+      if (!flowResult.success) {
+        throw new AuthenticationError(
+          flowResult.error?.message || "API key authentication failed"
+        );
+      }
+
+      return {
+        success: true,
+        user: { id: flowResult.userId },
+        userId: flowResult.userId as string,
+        sessionId: flowResult.sessionId as string,
+        method: "apikey",
+        ...(flowResult.tokens && {
+          token: flowResult.tokens.accessToken,
+          expiresAt: flowResult.tokens.expiresAt,
+        }),
+        permissions: flowResult.permissions || [],
+        metadata: {
+          ...flowResult.metadata,
+          apiKey: credentials.apiKey,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? error
+            : new AuthenticationError("API key authentication failed"),
+      };
+    }
   }
 
-  private async executeJWTAuthentication(
-    credentials: any
-  ): Promise<IAuthFlowResult> {
-    // Mock implementation for now
-    return {
-      success: true,
-      user: { id: "user-789" },
-      userId: "user-789",
-      method: "jwt",
-      token: credentials.token,
-      expiresAt: Date.now() + 3600000,
-      permissions: [],
-    };
+  private async executeJWTAuthentication(credentials: {
+    token: JWTToken;
+  }): Promise<IAuthFlowResult> {
+    try {
+      const jwtResult = await this.jwtService.verify(credentials.token);
+
+      if (!jwtResult.isValid) {
+        throw new AuthenticationError(
+          jwtResult.failureReason || "Invalid JWT token"
+        );
+      }
+
+      // Build context from JWT payload
+      const authContext = {
+        userId: jwtResult.payload?.userId,
+        sessionId: jwtResult.payload?.sessionId,
+        permissions: jwtResult.payload?.permissions,
+      };
+
+      return {
+        success: true,
+        user: { id: authContext.userId },
+        userId: authContext.userId as string,
+        sessionId: authContext.sessionId as string,
+        method: "jwt",
+        token: credentials.token,
+        ...(jwtResult.expiresAt && {
+          expiresAt: jwtResult.expiresAt.getTime(),
+        }),
+        permissions: authContext.permissions || [],
+        metadata: {
+          tokenIssued: jwtResult.payload?.iat,
+          tokenExpires: jwtResult.payload?.exp,
+          isBlacklisted: jwtResult.isBlacklisted,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? error
+            : new AuthenticationError("JWT authentication failed"),
+      };
+    }
   }
 
   private determineAuthMethod(

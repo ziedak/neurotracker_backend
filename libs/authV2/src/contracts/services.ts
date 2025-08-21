@@ -157,6 +157,24 @@ export interface ISessionService {
   endAllForUser(userId: EntityId): Promise<number>;
 
   /**
+   * End all sessions for user except specific session
+   */
+  endAllForUserExcept(
+    userId: EntityId,
+    keepSessionId: SessionId
+  ): Promise<number>;
+
+  /**
+   * End multiple specific sessions
+   */
+  endSessions(sessionIds: ReadonlyArray<SessionId>): Promise<number>;
+
+  /**
+   * Get active session count for user
+   */
+  getActiveSessionCount(userId: EntityId): Promise<number>;
+
+  /**
    * Cleanup expired sessions
    */
   cleanupExpired(): Promise<number>;

@@ -9,10 +9,10 @@ import {
   RecoveryEvent,
   Report,
   SessionActivity,
-  Permission,
+  Role,
+  RolePermission,
   Webhook,
   User,
-  UserRole,
   UserSession,
   SessionLog,
   UserEvent,
@@ -79,10 +79,10 @@ export const MODELS_NAME = {
   RECOVERY_EVENT: "recoveryEvent",
   REPORT: "report",
   SESSION_ACTIVITY: "sessionActivity",
-  PERMISSION: "permission",
+  ROLE: "role",
+  ROLE_PERMISSION: "rolePermission",
   WEBHOOK: "webhook",
   USER: "user",
-  USER_ROLE: "userRole",
   USER_SESSION: "userSession",
   SESSION_LOG: "sessionLog",
   USER_EVENT: "userEvent",
@@ -104,10 +104,10 @@ export type ModelStructure = {
   recoveryEvent: RecoveryEvent;
   report: Report;
   sessionActivity: SessionActivity;
-  permission: Permission;
+  role: Role;
+  rolePermission: RolePermission;
   webhook: Webhook;
   user: User;
-  userRole: UserRole;
   userSession: UserSession;
   sessionLog: SessionLog;
   userEvent: UserEvent;
@@ -207,22 +207,35 @@ export type ModelTypes<T = unknown> = {
     // @ts-ignore
     Return: Prisma.SessionActivityGetPayload<T>;
   };
-  permission: {
-    Where: Prisma.PermissionWhereInput;
-    Select: Prisma.PermissionSelect;
-    Include: unknown;
-    Create:
-      | Prisma.PermissionCreateInput
-      | Prisma.PermissionUncheckedCreateInput;
-    Update:
-      | Prisma.PermissionUpdateInput
-      | Prisma.PermissionUncheckedUpdateInput;
-    Cursor: Prisma.PermissionWhereUniqueInput;
-    Order: Prisma.PermissionOrderByWithRelationInput;
-    Delegate: Prisma.PermissionDelegate;
-    GroupBy: Prisma.PermissionGroupByOutputType;
+  role: {
+    Where: Prisma.RoleWhereInput;
+    Select: Prisma.RoleSelect;
+    Include: Prisma.RoleInclude;
+    Create: Prisma.RoleCreateInput | Prisma.RoleUncheckedCreateInput;
+    Update: Prisma.RoleUpdateInput | Prisma.RoleUncheckedUpdateInput;
+    Cursor: Prisma.RoleWhereUniqueInput;
+    Order: Prisma.RoleOrderByWithRelationInput;
+    Delegate: Prisma.RoleDelegate;
+    GroupBy: Prisma.RoleGroupByOutputType;
     // @ts-ignore
-    Return: Prisma.PermissionGetPayload<T>;
+    Return: Prisma.RoleGetPayload<T>;
+  };
+  rolePermission: {
+    Where: Prisma.RolePermissionWhereInput;
+    Select: Prisma.RolePermissionSelect;
+    Include: Prisma.RolePermissionInclude;
+    Create:
+      | Prisma.RolePermissionCreateInput
+      | Prisma.RolePermissionUncheckedCreateInput;
+    Update:
+      | Prisma.RolePermissionUpdateInput
+      | Prisma.RolePermissionUncheckedUpdateInput;
+    Cursor: Prisma.RolePermissionWhereUniqueInput;
+    Order: Prisma.RolePermissionOrderByWithRelationInput;
+    Delegate: Prisma.RolePermissionDelegate;
+    GroupBy: Prisma.RolePermissionGroupByOutputType;
+    // @ts-ignore
+    Return: Prisma.RolePermissionGetPayload<T>;
   };
   webhook: {
     Where: Prisma.WebhookWhereInput;
@@ -249,19 +262,6 @@ export type ModelTypes<T = unknown> = {
     GroupBy: Prisma.UserGroupByOutputType;
     // @ts-ignore
     Return: Prisma.UserGetPayload<T>;
-  };
-  userRole: {
-    Where: Prisma.UserRoleWhereInput;
-    Select: Prisma.UserRoleSelect;
-    Include: Prisma.UserRoleInclude;
-    Create: Prisma.UserRoleCreateInput | Prisma.UserRoleUncheckedCreateInput;
-    Update: Prisma.UserRoleUpdateInput | Prisma.UserRoleUncheckedUpdateInput;
-    Cursor: unknown;
-    Order: Prisma.UserRoleOrderByWithRelationInput;
-    Delegate: Prisma.UserRoleDelegate;
-    GroupBy: Prisma.UserRoleGroupByOutputType;
-    // @ts-ignore
-    Return: Prisma.UserRoleGetPayload<T>;
   };
   userSession: {
     Where: Prisma.UserSessionWhereInput;

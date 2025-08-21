@@ -12,6 +12,7 @@ export { default as StoreSettings } from "./storeSettings";
 export { default as Cart } from "./cart";
 export { default as Product } from "./product";
 export { default as Config } from "./config";
-export { default as UserRole } from "./userRole";
+export { default as Role } from "./role";
+export { default as RolePermission } from "./rolePermission";
 export { default as User } from "./user";
 export { default as Store } from "./store";

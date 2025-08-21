@@ -223,6 +223,20 @@ export class SessionServiceV2 implements ISessionService {
         };
       }
 
+      // Enhanced security validation
+      const securityValidation = await this.validateSessionSecurity(session);
+      if (!securityValidation.isValid) {
+        this.metrics.validationFailures++;
+        await this.end(sessionId);
+        return {
+          isValid: false,
+          session: null,
+          failureReason:
+            securityValidation.reason || "Security validation failed",
+          remainingTtl: 0,
+        };
+      }
+
       // Update last access time
       const now = new Date();
       const updatedSession = await this.update(sessionId, {
@@ -360,6 +374,109 @@ export class SessionServiceV2 implements ISessionService {
       this.metrics.errorsTotal++;
       throw new ValidationError(
         `Failed to end user sessions: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    }
+  }
+
+  /**
+   * End all sessions for user except specific session
+   */
+  async endAllForUserExcept(
+    userId: EntityId,
+    keepSessionId: SessionId
+  ): Promise<number> {
+    try {
+      this.metrics.operationsTotal++;
+
+      const activeSessions = await this.findActiveByUserId(userId);
+      let endedCount = 0;
+
+      for (const session of activeSessions) {
+        // Skip the session we want to keep
+        if (session.sessionId === keepSessionId) {
+          continue;
+        }
+
+        const success = await this.end(session.sessionId);
+        if (success) {
+          endedCount++;
+        }
+      }
+
+      // Update user cache to only include the kept session
+      const keptSession = activeSessions.find(
+        (s) => s.sessionId === keepSessionId
+      );
+      if (keptSession) {
+        this.userSessionsCache.set(userId, new Set([keepSessionId]));
+      } else {
+        this.userSessionsCache.delete(userId);
+      }
+
+      return endedCount;
+    } catch (error) {
+      this.metrics.errorsTotal++;
+      throw new ValidationError(
+        `Failed to end user sessions except ${keepSessionId}: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    }
+  }
+
+  /**
+   * End multiple specific sessions
+   */
+  async endSessions(sessionIds: ReadonlyArray<SessionId>): Promise<number> {
+    try {
+      this.metrics.operationsTotal++;
+
+      let endedCount = 0;
+      const affectedUsers = new Set<EntityId>();
+
+      for (const sessionId of sessionIds) {
+        const session = await this.findById(sessionId);
+        if (session) {
+          affectedUsers.add(session.userId);
+        }
+
+        const success = await this.end(sessionId);
+        if (success) {
+          endedCount++;
+        }
+      }
+
+      // Clear caches for affected users
+      for (const userId of affectedUsers) {
+        this.userSessionsCache.delete(userId);
+      }
+
+      return endedCount;
+    } catch (error) {
+      this.metrics.errorsTotal++;
+      throw new ValidationError(
+        `Failed to end sessions: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    }
+  }
+
+  /**
+   * Get active session count for user
+   */
+  async getActiveSessionCount(userId: EntityId): Promise<number> {
+    try {
+      this.metrics.operationsTotal++;
+
+      const activeSessions = await this.findActiveByUserId(userId);
+      return activeSessions.length;
+    } catch (error) {
+      this.metrics.errorsTotal++;
+      throw new ValidationError(
+        `Failed to get active session count for user ${userId}: ${
           error instanceof Error ? error.message : "Unknown error"
         }`
       );
@@ -541,6 +658,8 @@ export class SessionServiceV2 implements ISessionService {
 
   private createSecurityContext(data: ISessionCreateData): any {
     const deviceFingerprint = this.generateDeviceFingerprint(data);
+    const riskScore = this.calculateRiskScore(data);
+
     return {
       deviceFingerprint,
       locationData: {
@@ -549,12 +668,16 @@ export class SessionServiceV2 implements ISessionService {
         city: "",
         coordinates: null,
         timezone: "UTC",
-        isVpn: false,
-        isTor: false,
+        isVpn: this.detectVPN(data.ipAddress),
+        isTor: this.detectTor(data.ipAddress),
       },
-      securityFlags: [],
-      riskScore: this.calculateRiskScore(data),
-      validationLevel: "BASIC",
+      securityFlags: this.generateSecurityFlags(data, riskScore),
+      riskScore,
+      validationLevel:
+        riskScore > 0.7 ? "HIGH" : riskScore > 0.4 ? "MEDIUM" : "BASIC",
+      bruteForceAttempts: 0,
+      suspiciousActivityFlags: [],
+      lastSecurityCheck: new Date().toISOString() as Timestamp,
     };
   }
 
@@ -586,24 +709,140 @@ export class SessionServiceV2 implements ISessionService {
   }
 
   private calculateRiskScore(data: ISessionCreateData): number {
-    let score = 0;
+    let riskScore = 0;
 
-    // Check for suspicious patterns
-    if (this.extractLocationFromIP(data.ipAddress) === "external") {
-      score += 20;
+    // Check for suspicious IP patterns
+    if (this.detectVPN(data.ipAddress)) riskScore += 0.3;
+    if (this.detectTor(data.ipAddress)) riskScore += 0.5;
+
+    // Check for unusual user agent patterns
+    if (this.isUnusualUserAgent(data.userAgent)) riskScore += 0.2;
+
+    // Check for geographic anomalies (simplified)
+    if (this.isGeographicAnomaly(data.ipAddress)) riskScore += 0.25;
+
+    return Math.min(riskScore, 1.0);
+  }
+
+  private detectVPN(ipAddress: string): boolean {
+    // Simplified VPN detection - in production use proper VPN detection service
+    const vpnPatterns = [
+      /^10\./, // Private IP ranges (often VPN)
+      /^192\.168\./, // Private IP ranges
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // Private IP ranges
+    ];
+
+    return vpnPatterns.some((pattern) => pattern.test(ipAddress));
+  }
+
+  private detectTor(ipAddress: string): boolean {
+    // Simplified Tor detection - in production use proper Tor exit node lists
+    const torExitNodes = [
+      "127.0.0.1", // Placeholder - would contain actual known Tor exit nodes
+    ];
+
+    return torExitNodes.includes(ipAddress);
+  }
+
+  private generateSecurityFlags(
+    data: ISessionCreateData,
+    riskScore: number
+  ): string[] {
+    const flags: string[] = [];
+
+    if (this.detectVPN(data.ipAddress)) flags.push("VPN_DETECTED");
+    if (this.detectTor(data.ipAddress)) flags.push("TOR_DETECTED");
+    if (this.isUnusualUserAgent(data.userAgent))
+      flags.push("UNUSUAL_USER_AGENT");
+    if (this.isGeographicAnomaly(data.ipAddress))
+      flags.push("GEOGRAPHIC_ANOMALY");
+    if (riskScore > 0.7) flags.push("HIGH_RISK");
+    if (this.isNewDevice(data.deviceId)) flags.push("NEW_DEVICE");
+
+    return flags;
+  }
+
+  private isUnusualUserAgent(userAgent: string): boolean {
+    // Check for unusual or suspicious user agent patterns
+    const suspiciousPatterns = [
+      /bot/i,
+      /crawler/i,
+      /spider/i,
+      /^$/, // Empty user agent
+      /python|curl|wget/i, // Automated tools
+    ];
+
+    return suspiciousPatterns.some((pattern) => pattern.test(userAgent));
+  }
+
+  private isGeographicAnomaly(ipAddress: string): boolean {
+    // Simplified geographic anomaly detection
+    // In production, compare with user's typical locations
+    const country = this.extractLocationFromIP(ipAddress);
+
+    // For now, flag if no country could be determined
+    return country === "UNKNOWN";
+  }
+
+  private isNewDevice(deviceId: string): boolean {
+    // Simplified new device detection
+    // In production, check against user's known devices
+    return deviceId.length === 0 || deviceId === "unknown";
+  }
+
+  /**
+   * Enhanced security validation for session hijacking detection
+   */
+  private async validateSessionSecurity(
+    session: IEnhancedSession
+  ): Promise<{ isValid: boolean; reason?: string }> {
+    // Check for excessive activity patterns
+    const activityCheck = this.detectSuspiciousActivity(session);
+    if (!activityCheck.isValid) {
+      return activityCheck;
     }
 
-    // Check user agent for known bot patterns
-    const botPatterns = ["bot", "crawler", "spider"];
-    if (
-      botPatterns.some((pattern) =>
-        data.userAgent.toLowerCase().includes(pattern)
-      )
-    ) {
-      score += 50;
+    // Check risk score
+    if (session.securityContext.riskScore > 0.8) {
+      return { isValid: false, reason: "High risk score detected" };
     }
 
-    return Math.min(score, 100);
+    // Check security flags for suspicious patterns
+    const suspiciousFlags = ["VPN_DETECTED", "TOR_DETECTED", "HIGH_RISK"];
+    const hasSuspiciousFlag = session.securityContext.securityFlags.some(
+      (flag) => suspiciousFlags.includes(flag as string)
+    );
+
+    if (hasSuspiciousFlag) {
+      return { isValid: false, reason: "Suspicious security flags detected" };
+    }
+
+    return { isValid: true };
+  }
+
+  private detectSuspiciousActivity(session: IEnhancedSession): {
+    isValid: boolean;
+    reason?: string;
+  } {
+    const metrics = session.metrics;
+
+    // Check for excessive request rate
+    if (metrics.requestCount > 1000) {
+      const sessionAge = Date.now() - new Date(session.createdAt).getTime();
+      const requestRate = metrics.requestCount / (sessionAge / 1000); // requests per second
+
+      if (requestRate > 10) {
+        // More than 10 requests per second
+        return { isValid: false, reason: "Excessive request rate detected" };
+      }
+    }
+
+    // Check for unusual error patterns
+    if (metrics.errorCount > 50) {
+      return { isValid: false, reason: "Excessive error rate detected" };
+    }
+
+    return { isValid: true };
   }
 
   private isSessionValid(session: IEnhancedSession): boolean {

@@ -11,6 +11,7 @@ export * from "./base/BaseRepository";
 // Repository Implementations
 export * from "./UserRepository";
 export * from "./RoleRepository";
+export * from "./APIKeyRepository";
 
 // Repository Factory
 export * from "./RepositoryFactory";
@@ -43,6 +44,7 @@ export const RepositoryInfo = {
   repositories: [
     "UserRepository - User management with enterprise features",
     "RoleRepository - Role hierarchy and permission management",
+    "APIKeyRepository - API key management with scoped access control",
   ],
   architecture: {
     pattern: "Repository Pattern",

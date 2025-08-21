@@ -14,6 +14,8 @@ import type {
   IAuthenticationContext,
 } from "../../types/core";
 
+import type { IEnhancedUser } from "../../types/enhanced";
+
 import { createTimestamp } from "../../types/core";
 
 import type {
@@ -22,6 +24,8 @@ import type {
   IPermissionService,
   IAPIKeyService,
   IAuditService,
+  IUserService,
+  IUserCreateData,
   IAuthenticationCredentials,
   IRegistrationData,
   IRegistrationResult,
@@ -80,19 +84,22 @@ export class AuthenticationFlowManager {
   private readonly permissionService: IPermissionService;
   private readonly apiKeyService: IAPIKeyService;
   private readonly auditService: IAuditService;
+  private readonly userService: IUserService;
 
   constructor(
     jwtService: IJWTService,
     sessionService: ISessionService,
     permissionService: IPermissionService,
     apiKeyService: IAPIKeyService,
-    auditService: IAuditService
+    auditService: IAuditService,
+    userService: IUserService
   ) {
     this.jwtService = jwtService;
     this.sessionService = sessionService;
     this.permissionService = permissionService;
     this.apiKeyService = apiKeyService;
     this.auditService = auditService;
+    this.userService = userService;
   }
 
   /**
@@ -373,6 +380,7 @@ export class AuthenticationFlowManager {
       // Update password
       await this.updateUserPassword(
         context.user.id as EntityId,
+        passwordData.currentPassword,
         passwordData.newPassword
       );
 
@@ -592,77 +600,146 @@ export class AuthenticationFlowManager {
 
   // User service integration methods (these would be implemented with actual user service)
   private async verifyPasswordCredentials(
-    _identifier: string,
-    _password: string
+    identifier: string,
+    password: string
   ): Promise<EntityId> {
-    // This would integrate with actual user service for password verification
-    throw new Error(
-      "User service integration required for password verification"
-    );
+    try {
+      const verificationResult = await this.userService.verifyCredentials(
+        identifier,
+        password
+      );
+
+      if (!verificationResult.isValid || !verificationResult.user) {
+        throw new Error("Invalid credentials");
+      }
+
+      return verificationResult.user.id;
+    } catch (error) {
+      throw new Error("Authentication verification failed");
+    }
   }
 
   private async checkExistingUser(
-    _email: string,
-    _username: string
+    email: string,
+    username: string
   ): Promise<{ field: string; value: string } | null> {
-    // This would integrate with actual user service to check for existing users
-    return null; // Placeholder - no existing users found
+    try {
+      // Check email
+      const userByEmail = await this.userService.findByEmail(email);
+      if (userByEmail) {
+        return { field: "email", value: email };
+      }
+
+      // Check username if provided
+      if (username) {
+        const userByUsername = await this.userService.findByUsername(username);
+        if (userByUsername) {
+          return { field: "username", value: username };
+        }
+      }
+
+      return null;
+    } catch (error) {
+      // On error, assume no conflict to allow creation attempt
+      return null;
+    }
   }
 
   private async createUserAccount(
-    _context: IUserCreationContext
+    context: IUserCreationContext
   ): Promise<EntityId> {
-    // This would integrate with actual user service to create user account
-    throw new Error("User service integration required for user creation");
+    try {
+      const createData: IUserCreateData = {
+        email: context.email,
+        username: context.username,
+        password: context.passwordHash, // This is already hashed
+        ...(context.firstName && { firstName: context.firstName }),
+        ...(context.lastName && { lastName: context.lastName }),
+        metadata: context.registrationMetadata,
+      };
+
+      const user = await this.userService.create(createData);
+      return user.id;
+    } catch (error) {
+      throw new Error("User account creation failed");
+    }
   }
 
-  private async hashPassword(_password: string): Promise<string> {
-    // This would use proper password hashing (bcrypt, argon2, etc.)
-    throw new Error("Password hashing service integration required");
+  private async hashPassword(password: string): Promise<string> {
+    // The user service handles password hashing internally during creation/updates
+    // For now, return the password as-is since UserService will hash it
+    return password;
   }
 
   private async verifyCurrentPassword(
-    _userId: EntityId,
-    _password: string
+    userId: EntityId,
+    password: string
   ): Promise<void> {
-    // This would verify the current password against stored hash
-    throw new Error(
-      "User service integration required for password verification"
-    );
+    try {
+      const user = await this.userService.findById(userId);
+      if (!user) {
+        throw new Error("User not found");
+      }
+
+      const verificationResult = await this.userService.verifyCredentials(
+        user.email,
+        password
+      );
+
+      if (!verificationResult.isValid) {
+        throw new Error("Invalid current password");
+      }
+    } catch (error) {
+      throw new Error("Current password verification failed");
+    }
   }
 
   private async updateUserPassword(
-    _userId: EntityId,
-    _newPassword: string
+    userId: EntityId,
+    currentPassword: string,
+    newPassword: string
   ): Promise<void> {
-    // This would update the user's password in the user service
-    throw new Error("User service integration required for password update");
+    try {
+      const success = await this.userService.updatePassword(
+        userId,
+        currentPassword,
+        newPassword
+      );
+
+      if (!success) {
+        throw new Error("Password update failed");
+      }
+    } catch (error) {
+      throw new Error("User password update failed");
+    }
   }
 
-  private async getUserById(_userId: EntityId): Promise<any> {
-    // This would fetch user details from user service
-    return null; // Placeholder
+  private async getUserById(userId: EntityId): Promise<IEnhancedUser | null> {
+    try {
+      const user = await this.userService.findById(userId);
+      return user;
+    } catch (error) {
+      return null;
+    }
   }
 
   private async invalidateOtherSessions(
     userId: EntityId,
     keepSessionId?: SessionId
   ): Promise<void> {
-    // Note: ISessionService doesn't have getUserSessions or deleteSession methods
-    // This would need to be implemented differently using available methods
-    // const userSessions = await this.sessionService.getUserSessions(userId);
-    // for (const session of userSessions) {
-    //   if (session.id !== keepSessionId) {
-    //     await this.sessionService.deleteSession(session.id);
-    //   }
-    // }
-
-    // Alternative: Use endAllForUser method which is available
-    if (keepSessionId) {
-      // Would need to implement logic to keep one session while ending others
-      console.warn("Session invalidation logic needs proper implementation");
-    } else {
-      await this.sessionService.endAllForUser(userId);
+    try {
+      if (keepSessionId) {
+        // Use the new selective session termination method
+        await this.sessionService.endAllForUserExcept(userId, keepSessionId);
+      } else {
+        await this.sessionService.endAllForUser(userId);
+      }
+    } catch (error) {
+      throw new Error(
+        `Failed to invalidate user sessions: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     }
   }
 }

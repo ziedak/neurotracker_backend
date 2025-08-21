@@ -8,6 +8,7 @@
 import { PostgreSQLClient } from "@libs/database";
 import { UserRepository } from "./UserRepository";
 import { RoleRepository } from "./RoleRepository";
+import { APIKeyRepository } from "./APIKeyRepository";
 
 /**
  * Repository Factory for managing all data access repositories
@@ -25,6 +26,7 @@ export class RepositoryFactory {
   // Repository instances
   private _userRepository?: UserRepository;
   private _roleRepository?: RoleRepository;
+  private _apiKeyRepository?: APIKeyRepository;
 
   private constructor() {
     this.prismaClient = PostgreSQLClient.getInstance();
@@ -51,6 +53,16 @@ export class RepositoryFactory {
   }
 
   /**
+   * Get API Key Repository instance
+   */
+  getAPIKeyRepository(): APIKeyRepository {
+    if (!this._apiKeyRepository) {
+      this._apiKeyRepository = new APIKeyRepository(this.prismaClient);
+    }
+    return this._apiKeyRepository;
+  }
+
+  /**
    * Get Role Repository instance
    */
   getRoleRepository(): RoleRepository {
@@ -67,16 +79,19 @@ export class RepositoryFactory {
     operation: (repositories: {
       userRepo: UserRepository;
       roleRepo: RoleRepository;
+      apiKeyRepo: APIKeyRepository;
     }) => Promise<T>
   ): Promise<T> {
     return await this.prismaClient.$transaction(async (prisma: any) => {
       // Create transactional repository instances
       const transactionalUserRepo = new UserRepository(prisma);
       const transactionalRoleRepo = new RoleRepository(prisma);
+      const transactionalAPIKeyRepo = new APIKeyRepository(prisma);
 
       return await operation({
         userRepo: transactionalUserRepo,
         roleRepo: transactionalRoleRepo,
+        apiKeyRepo: transactionalAPIKeyRepo,
       });
     });
   }
@@ -88,6 +103,7 @@ export class RepositoryFactory {
     return {
       userRepository: this.getUserRepository(),
       roleRepository: this.getRoleRepository(),
+      apiKeyRepository: this.getAPIKeyRepository(),
     };
   }
 
@@ -128,6 +144,17 @@ export class RepositoryFactory {
       } catch (error) {
         results.repositories["roleRepository"] = "unhealthy";
         results.details["roleRepository"] =
+          error instanceof Error ? error.message : "Unknown error";
+        results.status = "unhealthy";
+      }
+
+      // Test API key repository
+      try {
+        await this.getAPIKeyRepository().count();
+        results.repositories["apiKeyRepository"] = "healthy";
+      } catch (error) {
+        results.repositories["apiKeyRepository"] = "unhealthy";
+        results.details["apiKeyRepository"] =
           error instanceof Error ? error.message : "Unknown error";
         results.status = "unhealthy";
       }
@@ -178,6 +205,7 @@ export const withTransaction = <T>(
   operation: (repositories: {
     userRepo: UserRepository;
     roleRepo: RoleRepository;
+    apiKeyRepo: APIKeyRepository;
   }) => Promise<T>
 ): Promise<T> => {
   return RepositoryFactory.getInstance().executeInTransaction(operation);

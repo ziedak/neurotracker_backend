@@ -16,7 +16,7 @@
  * @author Enterprise Auth Foundation
  */
 
-import { Logger } from "../utils/logger";
+import { Logger } from "@libs/monitoring";
 import { DatabaseUtils } from "../utils/database-utils";
 import { PasswordService } from "./password-service";
 import { UnifiedSessionManager } from "./unified-session-manager";
