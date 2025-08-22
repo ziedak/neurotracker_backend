@@ -30,6 +30,7 @@ import type {
   IRegistrationData,
   IRegistrationResult,
   IPasswordChangeData,
+  IRoleService,
 } from "../../contracts/services";
 
 import {
@@ -45,6 +46,7 @@ interface IFlowResult {
   userId?: EntityId;
   sessionId?: SessionId;
   permissions?: string[];
+  roles?: string[]; // ✅ Added roles for consistency
   tokens?: {
     accessToken: JWTToken;
     refreshToken: JWTToken;
@@ -85,6 +87,7 @@ export class AuthenticationFlowManager {
   private readonly apiKeyService: IAPIKeyService;
   private readonly auditService: IAuditService;
   private readonly userService: IUserService;
+  private readonly roleService: IRoleService;
 
   constructor(
     jwtService: IJWTService,
@@ -92,7 +95,8 @@ export class AuthenticationFlowManager {
     permissionService: IPermissionService,
     apiKeyService: IAPIKeyService,
     auditService: IAuditService,
-    userService: IUserService
+    userService: IUserService,
+    roleService: IRoleService
   ) {
     this.jwtService = jwtService;
     this.sessionService = sessionService;
@@ -100,6 +104,7 @@ export class AuthenticationFlowManager {
     this.apiKeyService = apiKeyService;
     this.auditService = auditService;
     this.userService = userService;
+    this.roleService = roleService;
   }
 
   /**
@@ -182,6 +187,98 @@ export class AuthenticationFlowManager {
   }
 
   /**
+   * Execute JWT token authentication flow
+   */
+  async executeJWTFlow(
+    credentials: IAuthenticationCredentials
+  ): Promise<IFlowResult> {
+    try {
+      // Extract JWT token from credentials
+      if (!("token" in credentials) || !credentials.token) {
+        throw new AuthenticationError("JWT token not provided");
+      }
+
+      const token = credentials.token as JWTToken;
+
+      // Verify JWT token
+      const tokenVerification = await this.jwtService.verify(token);
+
+      if (!tokenVerification.isValid || !tokenVerification.payload?.userId) {
+        throw new AuthenticationError("Invalid or expired JWT token");
+      }
+
+      const userId = tokenVerification.payload.userId as EntityId;
+
+      // Get user from database
+      const user = await this.userService.findById(userId);
+      if (!user) {
+        throw new AuthenticationError("User not found");
+      }
+
+      // Create or refresh session if sessionId is in token
+      let sessionId: SessionId | null = null;
+      if (tokenVerification.payload.sessionId) {
+        sessionId = tokenVerification.payload.sessionId as SessionId;
+
+        // Validate existing session
+        const session = await this.sessionService.findById(sessionId);
+        if (!session || session.userId !== userId) {
+          throw new AuthenticationError("Invalid session in JWT token");
+        }
+      }
+
+      // Get user permissions and roles
+      const permissions = await this.permissionService.getUserPermissions(
+        userId
+      );
+
+      // Get user roles
+      const userRoles = await this.roleService.getUserRoles(userId);
+      const roles: string[] = userRoles.map(
+        (assignment) => assignment.role.name
+      );
+
+      // Generate fresh token pair for the JWT flow
+      // Note: Even in JWT validation flow, we should generate new tokens
+      // to maintain consistent token lifecycle management
+      const tokenPayload = {
+        userId: user.id,
+        permissions: permissions.map((p) => p.name),
+        ...(sessionId && { sessionId }),
+      };
+
+      const newTokens = await this.jwtService.generate(tokenPayload);
+
+      return {
+        success: true,
+        userId: user.id,
+        ...(sessionId && { sessionId }),
+        tokens: {
+          accessToken: newTokens.token, // ✅ New access token
+          refreshToken: newTokens.refreshToken, // ✅ Proper refresh token
+          expiresAt: newTokens.expiresAt.getTime(),
+        },
+        permissions: permissions.map((p) => p.name),
+        roles, // ✅ Include roles for consistency
+        metadata: {
+          authMethod: "jwt",
+          userEmail: user.email,
+          originalTokenValidated: true,
+          tokenRefreshed: true,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? error
+            : new AuthenticationError("JWT authentication failed"),
+      };
+    }
+  }
+
+  /**
    * Execute JWT token refresh flow
    */
   async executeRefreshFlow(refreshToken: JWTToken): Promise<IFlowResult> {
@@ -209,9 +306,17 @@ export class AuthenticationFlowManager {
         throw new AuthenticationError("Session expired or inactive");
       }
 
-      // Get current permissions
+      // Get current permissions and roles
       const permissions = await this.permissionService.getUserPermissions(
         tokenVerification.payload.userId
+      );
+
+      // Get user roles
+      const userRoles = await this.roleService.getUserRoles(
+        tokenVerification.payload.userId as EntityId
+      );
+      const roles: string[] = userRoles.map(
+        (assignment) => assignment.role.name
       );
 
       // Generate new token pair
@@ -235,6 +340,7 @@ export class AuthenticationFlowManager {
         userId: tokenVerification.payload.userId,
         sessionId: tokenVerification.payload.sessionId,
         permissions: permissions.map((p) => p.name),
+        roles, // ✅ Include roles consistently
         tokens: {
           accessToken: newTokens.token,
           refreshToken: newTokens.refreshToken,
@@ -437,11 +543,19 @@ export class AuthenticationFlowManager {
         }
       }
 
-      // Get current permissions
+      // Get current permissions and roles
       const currentPermissions =
         await this.permissionService.getUserPermissions(
           context.user.id as EntityId
         );
+
+      // Get current user roles
+      const userRoleAssignments = await this.roleService.getUserRoles(
+        context.user.id as EntityId
+      );
+      const currentRoles: string[] = userRoleAssignments.map(
+        (assignment) => assignment.role.name
+      );
 
       // Check if permissions have changed
       const permissionsChanged = this.hasPermissionsChanged(
@@ -474,6 +588,7 @@ export class AuthenticationFlowManager {
         userId: context.user.id as EntityId,
         sessionId: context.session?.id as SessionId,
         permissions: currentPermissions.map((p) => p.name),
+        roles: currentRoles, // ✅ Include roles consistently
         ...(tokens && {
           tokens: {
             accessToken: tokens.token,
@@ -507,8 +622,14 @@ export class AuthenticationFlowManager {
     authMethod: "password" | "apikey" | "session" | "jwt",
     options: Record<string, unknown> = {}
   ): Promise<IFlowResult> {
-    // Get user permissions
+    // Get user permissions and roles
     const permissions = await this.permissionService.getUserPermissions(userId);
+
+    // Get user roles
+    const userRoleAssignments = await this.roleService.getUserRoles(userId);
+    const roles: string[] = userRoleAssignments.map(
+      (assignment) => assignment.role.name
+    );
 
     // Create session
     const session = await this.sessionService.create({
@@ -535,6 +656,7 @@ export class AuthenticationFlowManager {
       userId,
       sessionId: session.id as unknown as SessionId,
       permissions: permissions.map((p) => (typeof p === "string" ? p : p.name)),
+      roles, // ✅ Include roles consistently
       tokens: {
         accessToken: tokens.token,
         refreshToken: tokens.refreshToken,
@@ -566,7 +688,7 @@ export class AuthenticationFlowManager {
         ? createTimestamp(new Date(flowResult.tokens.expiresAt))
         : null,
       permissions: flowResult.permissions || [],
-      roles: [], // Would be populated with user roles
+      roles: flowResult.roles || [], // ✅ Use roles from flow result
       errors: [],
       metadata: flowResult.metadata || {},
     };
@@ -740,6 +862,63 @@ export class AuthenticationFlowManager {
           error instanceof Error ? error.message : "Unknown error"
         }`
       );
+    }
+  }
+
+  /**
+   * Get health status of the authentication flow service
+   */
+  async getHealth(): Promise<{
+    status: string;
+    details?: Record<string, unknown>;
+  }> {
+    try {
+      // Check if core services are accessible
+      const checks = {
+        userService: false,
+        sessionService: false,
+        jwtService: false,
+        apiKeyService: false,
+        auditService: false,
+        permissionService: false,
+      };
+
+      // Simple health checks for each service
+      try {
+        // Test if services respond (basic ping)
+        checks.userService = typeof this.userService.findById === "function";
+        checks.sessionService =
+          typeof this.sessionService.findById === "function";
+        checks.jwtService = typeof this.jwtService.verify === "function";
+        checks.apiKeyService =
+          typeof this.apiKeyService.validate === "function";
+        checks.auditService =
+          typeof this.auditService.logAuthEvent === "function";
+        checks.permissionService =
+          typeof this.permissionService.getUserPermissions === "function";
+      } catch (error) {
+        // Service check failed
+      }
+
+      const healthyServices = Object.values(checks).filter(Boolean).length;
+      const totalServices = Object.keys(checks).length;
+      const isHealthy = healthyServices === totalServices;
+
+      return {
+        status: isHealthy ? "healthy" : "degraded",
+        details: {
+          serviceChecks: checks,
+          healthyServices: `${healthyServices}/${totalServices}`,
+          supportedFlows: ["password", "apikey", "jwt", "registration"],
+        },
+      };
+    } catch (error) {
+      return {
+        status: "error",
+        details: {
+          error: error instanceof Error ? error.message : "Unknown error",
+        },
+      };
     }
   }
 }

@@ -12,7 +12,13 @@ import { RateLimitError } from "../../errors/core";
 /**
  * Authentication method types for rate limiting
  */
-type AuthenticationMethod = "password" | "apikey" | "session" | "jwt";
+export type AuthenticationMethod =
+  | "password"
+  | "apikey"
+  | "session"
+  | "jwt"
+  | "registration"
+  | "cache";
 
 /**
  * Rate limiting configuration per method
@@ -82,6 +88,18 @@ const DEFAULT_RATE_LIMITS: Record<AuthenticationMethod, IRateLimitConfig> = {
     maxAttempts: 30,
     windowMinutes: 5,
     blockDurationMinutes: 5,
+    progressive: false,
+  },
+  registration: {
+    maxAttempts: 3,
+    windowMinutes: 60,
+    blockDurationMinutes: 120,
+    progressive: true,
+  },
+  cache: {
+    maxAttempts: 100,
+    windowMinutes: 1,
+    blockDurationMinutes: 1,
     progressive: false,
   },
 };
@@ -441,5 +459,44 @@ export class RateLimitManager {
       ...this.rateLimits[method],
       ...config,
     };
+  }
+
+  /**
+   * Get health status of the rate limit service
+   */
+  async getHealth(): Promise<{
+    status: string;
+    details?: Record<string, unknown>;
+  }> {
+    try {
+      // Check if cache service is accessible
+      const testKey = "health_check_test";
+      await this.cacheService.set(testKey, "test", 1000);
+      const testValue = await this.cacheService.get<string>(testKey);
+      await this.cacheService.delete(testKey);
+
+      const isHealthy = testValue === "test";
+
+      return {
+        status: isHealthy ? "healthy" : "degraded",
+        details: {
+          cacheServiceStatus: isHealthy ? "operational" : "error",
+          configuredMethods: Object.keys(this.rateLimits),
+          defaultLimits: {
+            password: this.rateLimits.password?.maxAttempts,
+            apikey: this.rateLimits.apikey?.maxAttempts,
+            jwt: this.rateLimits.jwt?.maxAttempts,
+          },
+        },
+      };
+    } catch (error) {
+      return {
+        status: "error",
+        details: {
+          error: error instanceof Error ? error.message : "Unknown error",
+          cacheServiceStatus: "error",
+        },
+      };
+    }
   }
 }

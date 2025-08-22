@@ -30,6 +30,7 @@ import {
   IRegistrationData,
   IRegistrationResult,
   IPasswordChangeData,
+  type IRoleService,
 } from "../contracts/services";
 
 import { AuthenticationError } from "../errors/core";
@@ -103,6 +104,7 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
   private readonly cacheService: ICacheService;
   private readonly auditService: IAuditService;
   private readonly userService: IUserService;
+  private readonly roleService: IRoleService;
 
   // Specialized authentication components
   private readonly credentialsValidator: CredentialsValidator;
@@ -153,6 +155,7 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
     cacheService: ICacheService,
     auditService: IAuditService,
     userService: IUserService,
+    roleService: IRoleService,
     config?: Partial<IAuthenticationServiceConfig>
   ) {
     this.jwtService = jwtService;
@@ -162,6 +165,7 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
     this.cacheService = cacheService;
     this.auditService = auditService;
     this.userService = userService;
+    this.roleService = roleService;
 
     // Merge configuration with enterprise defaults
     this.config = {
@@ -184,7 +188,8 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
       permissionService,
       apiKeyService,
       auditService,
-      userService
+      userService,
+      roleService
     );
 
     this.metrics = new AuthenticationMetrics(cacheService);

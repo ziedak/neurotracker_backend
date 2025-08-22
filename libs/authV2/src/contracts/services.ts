@@ -788,3 +788,4 @@ export * from "./services/ISecurityAuditor";
 export * from "./services/ISessionManager";
 export * from "./services/IContextResolver";
 export * from "./services/IRegistrationService";
+export * from "./services/IRoleService";

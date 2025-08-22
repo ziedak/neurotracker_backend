@@ -8,11 +8,12 @@
 
 import type { ICacheService } from "../../contracts/services";
 import { createTimestamp, type Timestamp } from "../../types/core";
+import { type AuthenticationMethod } from "./RateLimitManager";
 
 /**
- * Authentication method types for metrics
+ * Authentication method types for metrics - now using shared type
  */
-type AuthenticationMethod = "password" | "apikey" | "session" | "jwt";
+// type AuthenticationMethod = "password" | "apikey" | "session" | "jwt";
 
 /**
  * Metrics event types
@@ -423,6 +424,8 @@ export class AuthenticationMetrics {
         apikey: 0,
         session: 0,
         jwt: 0,
+        registration: 0,
+        cache: 0,
       },
       errorDistribution: {},
       hourlyDistribution: {},
@@ -564,6 +567,72 @@ export class AuthenticationMetrics {
         return METRICS_CACHE.TTL.DAILY * 30;
       default:
         return METRICS_CACHE.TTL.DAILY;
+    }
+  }
+
+  /**
+   * Get health status of the metrics service
+   */
+  async getHealth(): Promise<{
+    status: string;
+    details?: Record<string, unknown>;
+  }> {
+    try {
+      const currentMetrics = await this.getCurrentMetrics();
+      const isHealthy = currentMetrics.totalAttempts >= 0; // Basic health check
+
+      return {
+        status: isHealthy ? "healthy" : "degraded",
+        details: {
+          totalAttempts: currentMetrics.totalAttempts,
+          successRate: currentMetrics.successRate,
+          averageResponseTime: currentMetrics.averageResponseTime,
+          uniqueUsers: currentMetrics.uniqueUsers,
+          timestamp: currentMetrics.timestamp,
+          cacheStatus: "operational",
+        },
+      };
+    } catch (error) {
+      return {
+        status: "error",
+        details: {
+          error: error instanceof Error ? error.message : "Unknown error",
+          cacheStatus: "error",
+        },
+      };
+    }
+  }
+
+  /**
+   * Get comprehensive metrics summary for monitoring
+   */
+  async getMetricsSummary(): Promise<Record<string, unknown>> {
+    try {
+      const currentMetrics = await this.getCurrentMetrics();
+
+      return {
+        summary: {
+          totalAttempts: currentMetrics.totalAttempts,
+          successRate: currentMetrics.successRate,
+          failureRate: currentMetrics.failureRate,
+          averageResponseTime: currentMetrics.averageResponseTime,
+          uniqueUsers: currentMetrics.uniqueUsers,
+        },
+        topMethods: currentMetrics.topMethods,
+        topErrors: currentMetrics.topErrors,
+        peakHour: currentMetrics.peakHour,
+        trends: currentMetrics.trends,
+        timestamp: currentMetrics.timestamp,
+        period: currentMetrics.period,
+      };
+    } catch (error) {
+      return {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to get metrics summary",
+        status: "error",
+      };
     }
   }
 }

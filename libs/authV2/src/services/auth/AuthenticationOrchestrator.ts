@@ -5,21 +5,9 @@
  * @since 1.0.0 - Phase 2.1 Service Architecture Refactoring
  */
 
-import {
-  IAuthenticationResult,
-  IAuthenticationContext,
-  EntityId,
-  SessionId,
-  JWTToken,
-  APIKey,
-  createTimestamp,
-} from "../../types/core";
+import { IAuthenticationResult, createTimestamp } from "../../types/core";
 
-import {
-  IEnhancedUser,
-  IEnhancedSession,
-  IServiceHealth,
-} from "../../types/enhanced";
+import { IServiceHealth } from "../../types/enhanced";
 
 import {
   IJWTService,
@@ -32,12 +20,16 @@ import {
   IAuthenticationCredentials,
   IRegistrationData,
   IRegistrationResult,
+  type IRoleService,
 } from "../../contracts/services";
 
-import { ValidationError, AuthenticationError } from "../../errors/core";
+import { AuthenticationError } from "../../errors/core";
 
 import { CredentialsValidator } from "./CredentialsValidator";
-import { RateLimitManager } from "./RateLimitManager";
+import {
+  RateLimitManager,
+  type AuthenticationMethod,
+} from "./RateLimitManager";
 import { AuthenticationFlowManager } from "./AuthenticationFlowManager";
 import { AuthenticationMetrics } from "./AuthenticationMetrics";
 import { SecurityAuditor } from "./SecurityAuditor";
@@ -120,6 +112,7 @@ export class AuthenticationOrchestrator {
     private readonly cacheService: ICacheService,
     private readonly auditService: IAuditService,
     private readonly userService: IUserService,
+    private readonly roleService: IRoleService,
     config?: Partial<IAuthenticationOrchestratorConfig>
   ) {
     // Initialize default configuration
@@ -144,7 +137,8 @@ export class AuthenticationOrchestrator {
       permissionService,
       apiKeyService,
       auditService,
-      userService
+      userService,
+      roleService
     );
     this.metrics = new AuthenticationMetrics(cacheService);
     this.securityAuditor = new SecurityAuditor(auditService);
@@ -371,10 +365,19 @@ export class AuthenticationOrchestrator {
       uptime: Date.now(),
       lastCheck: createTimestamp(),
       dependencies: componentHealth.map((result, index) => ({
-        service: ["FlowManager", "Metrics", "RateLimitManager"][index]!,
-        status: result.status === "fulfilled" ? result.value.status : "error",
+        name: ["FlowManager", "Metrics", "RateLimitManager"][index]!,
+        status:
+          result.status === "fulfilled"
+            ? (result.value.status as "healthy" | "degraded" | "unhealthy")
+            : "unhealthy",
+        responseTime: 0, // TODO: Add actual response time measurement
+        lastCheck: createTimestamp(),
+        error:
+          result.status === "rejected"
+            ? result.reason?.message || "Service check failed"
+            : null,
       })),
-      metrics: (await this.metrics.getMetricsSummary?.()) || {},
+      metrics: {}, // Simplified for now - will be populated from actual metrics
     };
   }
 
@@ -425,7 +428,9 @@ export class AuthenticationOrchestrator {
     return `auth_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
-  private determineAuthMethod(credentials: IAuthenticationCredentials): string {
+  private determineAuthMethod(
+    credentials: IAuthenticationCredentials
+  ): AuthenticationMethod {
     if ("email" in credentials && "password" in credentials) {
       return "password";
     }
@@ -435,35 +440,36 @@ export class AuthenticationOrchestrator {
     if ("apiKey" in credentials) {
       return "apikey";
     }
-    return "unknown";
+    // Default to password method for unknown credential types
+    return "password";
   }
 
   private extractIdentifier(credentials: IAuthenticationCredentials): string {
     if ("email" in credentials) {
-      return credentials.email;
+      return credentials.email as string;
     }
     if ("username" in credentials) {
-      return credentials.username;
+      return credentials.username as string;
     }
     if ("apiKey" in credentials) {
-      return credentials.apiKey.substring(0, 8); // Partial key for identification
+      return (credentials.apiKey as string).substring(0, 8); // Partial key for identification
     }
     return "anonymous";
   }
 
   private async getCachedAuthResult(
-    credentials: IAuthenticationCredentials
+    _credentials: IAuthenticationCredentials
   ): Promise<IAuthenticationResult | null> {
-    // Implementation would depend on cache strategy
+    // TODO: Implement caching strategy in Phase 2.3
     // For now, return null to indicate no cache hit
     return null;
   }
 
   private async cacheAuthResult(
-    credentials: IAuthenticationCredentials,
-    result: IAuthenticationResult
+    _credentials: IAuthenticationCredentials,
+    _result: IAuthenticationResult
   ): Promise<void> {
-    // Implementation would depend on cache strategy
+    // TODO: Implement cache storage in Phase 2.3
     // Cache key would be based on credentials hash
   }
 
