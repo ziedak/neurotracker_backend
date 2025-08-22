@@ -1,9 +1,12 @@
 /**
  * @fileoverview API Key Repository Implementation
- * @module repositories/APIKeyRepository
- * @version 1.0.0
- * @author Enterprise Development Team
- */
+ * @module repositories/APIKexport class APIKeyRepository extends BaseRepository<
+  IAPIKeyInfo,
+  CreateAPIKeyInput,
+  UpdateAPIKeyInput
+> {
+  protected readonly entityName = "ApiKey";
+*/
 
 import type { EntityId, TenantContext } from "../types/core";
 import type { IAPIKeyInfo } from "../contracts/services";
@@ -88,12 +91,8 @@ export class APIKeyRepository extends BaseRepository<
 > {
   protected readonly entityName = "apikey";
 
-  constructor(prisma: any) {
-    super(prisma);
-  }
-
   /**
-   * Find API key by ID with tenant context validation
+   * Find API key by ID
    */
   async findById(
     id: EntityId,
@@ -120,6 +119,53 @@ export class APIKeyRepository extends BaseRepository<
 
       if (!result) {
         return null;
+      }
+
+      // Validate tenant access
+      if (!this.validateAccess(result, context, "read")) {
+        return null;
+      }
+
+      const apiKey = this.mapToAPIKeyInfo(result);
+
+      this.logMetrics("findById", startTime);
+      await this.createAuditEntry("READ", id, {}, context);
+
+      return apiKey;
+    } catch (error) {
+      this.logMetrics("findById:error", startTime);
+      this.handleError(error, "findById");
+    }
+  }
+
+  /**
+   * Find API key by ID with tenant context validation
+   */
+  async trackUsage(
+    id: EntityId,
+    context?: TenantContext
+  ): Promise<IAPIKeyInfo> {
+    const startTime = Date.now();
+
+    try {
+      const where = this.applyTenantFilter({ id }, context);
+
+      const result = await this.prisma.apiKey.findUnique({
+        where,
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              username: true,
+              status: true,
+            },
+          },
+        },
+      });
+
+      if (!result) {
+        throw new EntityNotFoundError(this.entityName, id);
       }
 
       // Validate tenant access
@@ -156,7 +202,7 @@ export class APIKeyRepository extends BaseRepository<
     const startTime = Date.now();
 
     try {
-      const baseWhere = { hashedKey, isActive: true };
+      const baseWhere = { keyHash: hashedKey, isActive: true };
       const where = this.applyTenantFilter(baseWhere, context);
 
       const result = await this.prisma.apiKey.findUnique({
@@ -220,8 +266,8 @@ export class APIKeyRepository extends BaseRepository<
       const result = await this.prisma.apiKey.findMany({
         where,
         orderBy: this.buildOrderBy(filter.orderBy),
-        skip: filter.skip,
-        take: filter.take,
+        ...(filter.skip !== undefined && { skip: filter.skip }),
+        ...(filter.take !== undefined && { take: filter.take }),
         include: {
           user: {
             select: {
@@ -289,13 +335,24 @@ export class APIKeyRepository extends BaseRepository<
 
     try {
       const createData = {
-        ...data,
-        storeId: context?.storeId || data.storeId,
-        organizationId: context?.organizationId || data.organizationId,
-        createdBy: context?.userId || data.createdBy,
+        id: data.id,
+        keyHash: data.hashedKey, // Map hashedKey to keyHash for Prisma schema
+        keyPreview: data.hashedKey.substring(0, 8), // Create preview from hashed key
+        name: data.name,
+        userId: data.userId,
+        scopes: data.scopes,
+        permissions: data.metadata?.["permissions"]
+          ? JSON.parse(JSON.stringify(data.metadata["permissions"]))
+          : null,
+        storeId: context?.storeId || data.storeId || null,
         createdAt: data.createdAt || new Date(),
+        lastUsedAt: data.lastUsedAt || null,
         usageCount: data.usageCount || 0,
         isActive: data.isActive !== undefined ? data.isActive : true,
+        expiresAt: data.expiresAt || null,
+        metadata: data.metadata
+          ? JSON.parse(JSON.stringify(data.metadata))
+          : null,
       };
 
       const result = await this.prisma.apiKey.create({
@@ -341,11 +398,25 @@ export class APIKeyRepository extends BaseRepository<
         throw new EntityNotFoundError(this.entityName, id);
       }
 
-      const updateData = {
-        ...data,
-        updatedBy: context?.userId || data.updatedBy,
+      const updateData: any = {
         updatedAt: new Date(),
       };
+
+      // Only update fields that exist in schema
+      if (data.hashedKey) updateData.keyHash = data.hashedKey;
+      if (data.name !== undefined) updateData.name = data.name;
+      if (data.scopes !== undefined) updateData.scopes = data.scopes;
+      if (data.isActive !== undefined) updateData.isActive = data.isActive;
+      if (data.expiresAt !== undefined) updateData.expiresAt = data.expiresAt;
+      if (data.lastUsedAt !== undefined)
+        updateData.lastUsedAt = data.lastUsedAt;
+      if (data.usageCount !== undefined)
+        updateData.usageCount = data.usageCount;
+      if (data.metadata !== undefined) {
+        updateData.metadata = data.metadata
+          ? JSON.parse(JSON.stringify(data.metadata))
+          : null;
+      }
 
       const result = await this.prisma.apiKey.update({
         where: { id },
@@ -380,10 +451,7 @@ export class APIKeyRepository extends BaseRepository<
   /**
    * Update API key usage (last used time and usage count)
    */
-  async updateUsage(
-    id: EntityId,
-    context?: TenantContext
-  ): Promise<IAPIKeyInfo> {
+  async updateUsage(id: EntityId): Promise<IAPIKeyInfo> {
     const startTime = Date.now();
 
     try {
@@ -394,7 +462,6 @@ export class APIKeyRepository extends BaseRepository<
           usageCount: {
             increment: 1,
           },
-          updatedBy: context?.userId,
           updatedAt: new Date(),
         },
         include: {
@@ -438,9 +505,9 @@ export class APIKeyRepository extends BaseRepository<
         where: { id },
         data: {
           isActive: false,
-          isDeleted: true,
-          deletedAt: new Date(),
-          deletedBy: context?.userId,
+          revokedAt: new Date(),
+          revokedBy: context?.userId || null,
+          updatedAt: new Date(),
         },
       });
 
@@ -504,7 +571,7 @@ export class APIKeyRepository extends BaseRepository<
         };
       }
       if (searchFilters.hashedKey) {
-        whereClause.hashedKey = searchFilters.hashedKey;
+        whereClause.keyHash = searchFilters.hashedKey;
       }
       if (searchFilters.isActive !== undefined) {
         whereClause.isActive = searchFilters.isActive;

@@ -61,9 +61,9 @@ const BaseRepository = <
       query: AnyRecord = {},
       option: Option = {} as Option
     ) {
-      const limit = +(query.limit === "all" ? 0 : _.get(query, "limit", 10));
+      const limit = +(query["limit"] === "all" ? 0 : _.get(query, "limit", 10));
       const offset =
-        query.page && query.page > 0 ? limit * (query.page - 1) : 0;
+        query["page"] && query["page"] > 0 ? limit * (query["page"] - 1) : 0;
       const otherOptions = _.omit(query, ["limit", "offset", "page"]);
 
       const where = {

@@ -9,9 +9,9 @@ import {
   RecoveryEvent,
   Report,
   SessionActivity,
+  Webhook,
   Role,
   RolePermission,
-  Webhook,
   User,
   UserSession,
   SessionLog,
@@ -25,6 +25,12 @@ import {
   Feature,
   Notification,
   Config,
+  QualityValidation,
+  QualityAnomaly,
+  ReconciliationRule,
+  ReconciliationExecution,
+  RepairOperation,
+  ApiKey,
 } from "@prisma/client";
 import _ from "lodash";
 
@@ -79,9 +85,9 @@ export const MODELS_NAME = {
   RECOVERY_EVENT: "recoveryEvent",
   REPORT: "report",
   SESSION_ACTIVITY: "sessionActivity",
+  WEBHOOK: "webhook",
   ROLE: "role",
   ROLE_PERMISSION: "rolePermission",
-  WEBHOOK: "webhook",
   USER: "user",
   USER_SESSION: "userSession",
   SESSION_LOG: "sessionLog",
@@ -95,6 +101,12 @@ export const MODELS_NAME = {
   FEATURE: "feature",
   NOTIFICATION: "notification",
   CONFIG: "config",
+  QUALITY_VALIDATION: "qualityValidation",
+  QUALITY_ANOMALY: "qualityAnomaly",
+  RECONCILIATION_RULE: "reconciliationRule",
+  RECONCILIATION_EXECUTION: "reconciliationExecution",
+  REPAIR_OPERATION: "repairOperation",
+  API_KEY: "apiKey",
 } as const;
 
 // eslint-disable-next-line @typescript-eslint/ban-types
@@ -104,9 +116,9 @@ export type ModelStructure = {
   recoveryEvent: RecoveryEvent;
   report: Report;
   sessionActivity: SessionActivity;
+  webhook: Webhook;
   role: Role;
   rolePermission: RolePermission;
-  webhook: Webhook;
   user: User;
   userSession: UserSession;
   sessionLog: SessionLog;
@@ -120,6 +132,12 @@ export type ModelStructure = {
   feature: Feature;
   notification: Notification;
   config: Config;
+  qualityValidation: QualityValidation;
+  qualityAnomaly: QualityAnomaly;
+  reconciliationRule: ReconciliationRule;
+  reconciliationExecution: ReconciliationExecution;
+  repairOperation: RepairOperation;
+  apiKey: ApiKey;
 };
 
 export type ModelName = keyof ModelStructure;
@@ -127,7 +145,7 @@ export type ModelName = keyof ModelStructure;
 export type ModelScalarFields<T extends keyof ModelStructure> =
   Prisma.Enumerable<keyof ModelStructure[T]>;
 
-export type ModelDelegate = undefined;
+export type ModelDelegate = any;
 
 export type ModelTypes<T = unknown> = {
   store: {
@@ -138,7 +156,7 @@ export type ModelTypes<T = unknown> = {
     Update: Prisma.StoreUpdateInput | Prisma.StoreUncheckedUpdateInput;
     Cursor: Prisma.StoreWhereUniqueInput;
     Order: Prisma.StoreOrderByWithRelationInput;
-    Delegate: Prisma.StoreDelegate;
+    Delegate: Prisma.StoreDelegate<ModelDelegate>;
     GroupBy: Prisma.StoreGroupByOutputType;
     // @ts-ignore
     Return: Prisma.StoreGetPayload<T>;
@@ -155,7 +173,7 @@ export type ModelTypes<T = unknown> = {
       | Prisma.StoreSettingsUncheckedUpdateInput;
     Cursor: Prisma.StoreSettingsWhereUniqueInput;
     Order: Prisma.StoreSettingsOrderByWithRelationInput;
-    Delegate: Prisma.StoreSettingsDelegate;
+    Delegate: Prisma.StoreSettingsDelegate<ModelDelegate>;
     GroupBy: Prisma.StoreSettingsGroupByOutputType;
     // @ts-ignore
     Return: Prisma.StoreSettingsGetPayload<T>;
@@ -172,7 +190,7 @@ export type ModelTypes<T = unknown> = {
       | Prisma.RecoveryEventUncheckedUpdateInput;
     Cursor: unknown;
     Order: Prisma.RecoveryEventOrderByWithRelationInput;
-    Delegate: Prisma.RecoveryEventDelegate;
+    Delegate: Prisma.RecoveryEventDelegate<ModelDelegate>;
     GroupBy: Prisma.RecoveryEventGroupByOutputType;
     // @ts-ignore
     Return: Prisma.RecoveryEventGetPayload<T>;
@@ -185,7 +203,7 @@ export type ModelTypes<T = unknown> = {
     Update: Prisma.ReportUpdateInput | Prisma.ReportUncheckedUpdateInput;
     Cursor: unknown;
     Order: Prisma.ReportOrderByWithRelationInput;
-    Delegate: Prisma.ReportDelegate;
+    Delegate: Prisma.ReportDelegate<ModelDelegate>;
     GroupBy: Prisma.ReportGroupByOutputType;
     // @ts-ignore
     Return: Prisma.ReportGetPayload<T>;
@@ -202,10 +220,23 @@ export type ModelTypes<T = unknown> = {
       | Prisma.SessionActivityUncheckedUpdateInput;
     Cursor: unknown;
     Order: Prisma.SessionActivityOrderByWithRelationInput;
-    Delegate: Prisma.SessionActivityDelegate;
+    Delegate: Prisma.SessionActivityDelegate<ModelDelegate>;
     GroupBy: Prisma.SessionActivityGroupByOutputType;
     // @ts-ignore
     Return: Prisma.SessionActivityGetPayload<T>;
+  };
+  webhook: {
+    Where: Prisma.WebhookWhereInput;
+    Select: Prisma.WebhookSelect;
+    Include: Prisma.WebhookInclude;
+    Create: Prisma.WebhookCreateInput | Prisma.WebhookUncheckedCreateInput;
+    Update: Prisma.WebhookUpdateInput | Prisma.WebhookUncheckedUpdateInput;
+    Cursor: unknown;
+    Order: Prisma.WebhookOrderByWithRelationInput;
+    Delegate: Prisma.WebhookDelegate<ModelDelegate>;
+    GroupBy: Prisma.WebhookGroupByOutputType;
+    // @ts-ignore
+    Return: Prisma.WebhookGetPayload<T>;
   };
   role: {
     Where: Prisma.RoleWhereInput;
@@ -215,7 +246,7 @@ export type ModelTypes<T = unknown> = {
     Update: Prisma.RoleUpdateInput | Prisma.RoleUncheckedUpdateInput;
     Cursor: Prisma.RoleWhereUniqueInput;
     Order: Prisma.RoleOrderByWithRelationInput;
-    Delegate: Prisma.RoleDelegate;
+    Delegate: Prisma.RoleDelegate<ModelDelegate>;
     GroupBy: Prisma.RoleGroupByOutputType;
     // @ts-ignore
     Return: Prisma.RoleGetPayload<T>;
@@ -230,25 +261,12 @@ export type ModelTypes<T = unknown> = {
     Update:
       | Prisma.RolePermissionUpdateInput
       | Prisma.RolePermissionUncheckedUpdateInput;
-    Cursor: Prisma.RolePermissionWhereUniqueInput;
+    Cursor: unknown;
     Order: Prisma.RolePermissionOrderByWithRelationInput;
-    Delegate: Prisma.RolePermissionDelegate;
+    Delegate: Prisma.RolePermissionDelegate<ModelDelegate>;
     GroupBy: Prisma.RolePermissionGroupByOutputType;
     // @ts-ignore
     Return: Prisma.RolePermissionGetPayload<T>;
-  };
-  webhook: {
-    Where: Prisma.WebhookWhereInput;
-    Select: Prisma.WebhookSelect;
-    Include: Prisma.WebhookInclude;
-    Create: Prisma.WebhookCreateInput | Prisma.WebhookUncheckedCreateInput;
-    Update: Prisma.WebhookUpdateInput | Prisma.WebhookUncheckedUpdateInput;
-    Cursor: unknown;
-    Order: Prisma.WebhookOrderByWithRelationInput;
-    Delegate: Prisma.WebhookDelegate;
-    GroupBy: Prisma.WebhookGroupByOutputType;
-    // @ts-ignore
-    Return: Prisma.WebhookGetPayload<T>;
   };
   user: {
     Where: Prisma.UserWhereInput;
@@ -258,7 +276,7 @@ export type ModelTypes<T = unknown> = {
     Update: Prisma.UserUpdateInput | Prisma.UserUncheckedUpdateInput;
     Cursor: Prisma.UserWhereUniqueInput;
     Order: Prisma.UserOrderByWithRelationInput;
-    Delegate: Prisma.UserDelegate;
+    Delegate: Prisma.UserDelegate<ModelDelegate>;
     GroupBy: Prisma.UserGroupByOutputType;
     // @ts-ignore
     Return: Prisma.UserGetPayload<T>;
@@ -275,7 +293,7 @@ export type ModelTypes<T = unknown> = {
       | Prisma.UserSessionUncheckedUpdateInput;
     Cursor: Prisma.UserSessionWhereUniqueInput;
     Order: Prisma.UserSessionOrderByWithRelationInput;
-    Delegate: Prisma.UserSessionDelegate;
+    Delegate: Prisma.UserSessionDelegate<ModelDelegate>;
     GroupBy: Prisma.UserSessionGroupByOutputType;
     // @ts-ignore
     Return: Prisma.UserSessionGetPayload<T>;
@@ -292,7 +310,7 @@ export type ModelTypes<T = unknown> = {
       | Prisma.SessionLogUncheckedUpdateInput;
     Cursor: unknown;
     Order: Prisma.SessionLogOrderByWithRelationInput;
-    Delegate: Prisma.SessionLogDelegate;
+    Delegate: Prisma.SessionLogDelegate<ModelDelegate>;
     GroupBy: Prisma.SessionLogGroupByOutputType;
     // @ts-ignore
     Return: Prisma.SessionLogGetPayload<T>;
@@ -305,7 +323,7 @@ export type ModelTypes<T = unknown> = {
     Update: Prisma.UserEventUpdateInput | Prisma.UserEventUncheckedUpdateInput;
     Cursor: unknown;
     Order: Prisma.UserEventOrderByWithRelationInput;
-    Delegate: Prisma.UserEventDelegate;
+    Delegate: Prisma.UserEventDelegate<ModelDelegate>;
     GroupBy: Prisma.UserEventGroupByOutputType;
     // @ts-ignore
     Return: Prisma.UserEventGetPayload<T>;
@@ -318,7 +336,7 @@ export type ModelTypes<T = unknown> = {
     Update: Prisma.ProductUpdateInput | Prisma.ProductUncheckedUpdateInput;
     Cursor: Prisma.ProductWhereUniqueInput;
     Order: Prisma.ProductOrderByWithRelationInput;
-    Delegate: Prisma.ProductDelegate;
+    Delegate: Prisma.ProductDelegate<ModelDelegate>;
     GroupBy: Prisma.ProductGroupByOutputType;
     // @ts-ignore
     Return: Prisma.ProductGetPayload<T>;
@@ -331,7 +349,7 @@ export type ModelTypes<T = unknown> = {
     Update: Prisma.CartUpdateInput | Prisma.CartUncheckedUpdateInput;
     Cursor: unknown;
     Order: Prisma.CartOrderByWithRelationInput;
-    Delegate: Prisma.CartDelegate;
+    Delegate: Prisma.CartDelegate<ModelDelegate>;
     GroupBy: Prisma.CartGroupByOutputType;
     // @ts-ignore
     Return: Prisma.CartGetPayload<T>;
@@ -344,7 +362,7 @@ export type ModelTypes<T = unknown> = {
     Update: Prisma.OrderUpdateInput | Prisma.OrderUncheckedUpdateInput;
     Cursor: unknown;
     Order: Prisma.OrderOrderByWithRelationInput;
-    Delegate: Prisma.OrderDelegate;
+    Delegate: Prisma.OrderDelegate<ModelDelegate>;
     GroupBy: Prisma.OrderGroupByOutputType;
     // @ts-ignore
     Return: Prisma.OrderGetPayload<T>;
@@ -357,7 +375,7 @@ export type ModelTypes<T = unknown> = {
     Update: Prisma.OrderItemUpdateInput | Prisma.OrderItemUncheckedUpdateInput;
     Cursor: unknown;
     Order: Prisma.OrderItemOrderByWithRelationInput;
-    Delegate: Prisma.OrderItemDelegate;
+    Delegate: Prisma.OrderItemDelegate<ModelDelegate>;
     GroupBy: Prisma.OrderItemGroupByOutputType;
     // @ts-ignore
     Return: Prisma.OrderItemGetPayload<T>;
@@ -370,7 +388,7 @@ export type ModelTypes<T = unknown> = {
     Update: Prisma.PaymentUpdateInput | Prisma.PaymentUncheckedUpdateInput;
     Cursor: unknown;
     Order: Prisma.PaymentOrderByWithRelationInput;
-    Delegate: Prisma.PaymentDelegate;
+    Delegate: Prisma.PaymentDelegate<ModelDelegate>;
     GroupBy: Prisma.PaymentGroupByOutputType;
     // @ts-ignore
     Return: Prisma.PaymentGetPayload<T>;
@@ -383,7 +401,7 @@ export type ModelTypes<T = unknown> = {
     Update: Prisma.CartItemUpdateInput | Prisma.CartItemUncheckedUpdateInput;
     Cursor: unknown;
     Order: Prisma.CartItemOrderByWithRelationInput;
-    Delegate: Prisma.CartItemDelegate;
+    Delegate: Prisma.CartItemDelegate<ModelDelegate>;
     GroupBy: Prisma.CartItemGroupByOutputType;
     // @ts-ignore
     Return: Prisma.CartItemGetPayload<T>;
@@ -396,7 +414,7 @@ export type ModelTypes<T = unknown> = {
     Update: Prisma.FeatureUpdateInput | Prisma.FeatureUncheckedUpdateInput;
     Cursor: unknown;
     Order: Prisma.FeatureOrderByWithRelationInput;
-    Delegate: Prisma.FeatureDelegate;
+    Delegate: Prisma.FeatureDelegate<ModelDelegate>;
     GroupBy: Prisma.FeatureGroupByOutputType;
     // @ts-ignore
     Return: Prisma.FeatureGetPayload<T>;
@@ -413,7 +431,7 @@ export type ModelTypes<T = unknown> = {
       | Prisma.NotificationUncheckedUpdateInput;
     Cursor: unknown;
     Order: Prisma.NotificationOrderByWithRelationInput;
-    Delegate: Prisma.NotificationDelegate;
+    Delegate: Prisma.NotificationDelegate<ModelDelegate>;
     GroupBy: Prisma.NotificationGroupByOutputType;
     // @ts-ignore
     Return: Prisma.NotificationGetPayload<T>;
@@ -426,9 +444,107 @@ export type ModelTypes<T = unknown> = {
     Update: Prisma.ConfigUpdateInput | Prisma.ConfigUncheckedUpdateInput;
     Cursor: Prisma.ConfigWhereUniqueInput;
     Order: Prisma.ConfigOrderByWithRelationInput;
-    Delegate: Prisma.ConfigDelegate;
+    Delegate: Prisma.ConfigDelegate<ModelDelegate>;
     GroupBy: Prisma.ConfigGroupByOutputType;
     // @ts-ignore
     Return: Prisma.ConfigGetPayload<T>;
+  };
+  qualityValidation: {
+    Where: Prisma.QualityValidationWhereInput;
+    Select: Prisma.QualityValidationSelect;
+    Include: unknown;
+    Create:
+      | Prisma.QualityValidationCreateInput
+      | Prisma.QualityValidationUncheckedCreateInput;
+    Update:
+      | Prisma.QualityValidationUpdateInput
+      | Prisma.QualityValidationUncheckedUpdateInput;
+    Cursor: unknown;
+    Order: Prisma.QualityValidationOrderByWithRelationInput;
+    Delegate: Prisma.QualityValidationDelegate<ModelDelegate>;
+    GroupBy: Prisma.QualityValidationGroupByOutputType;
+    // @ts-ignore
+    Return: Prisma.QualityValidationGetPayload<T>;
+  };
+  qualityAnomaly: {
+    Where: Prisma.QualityAnomalyWhereInput;
+    Select: Prisma.QualityAnomalySelect;
+    Include: unknown;
+    Create:
+      | Prisma.QualityAnomalyCreateInput
+      | Prisma.QualityAnomalyUncheckedCreateInput;
+    Update:
+      | Prisma.QualityAnomalyUpdateInput
+      | Prisma.QualityAnomalyUncheckedUpdateInput;
+    Cursor: unknown;
+    Order: Prisma.QualityAnomalyOrderByWithRelationInput;
+    Delegate: Prisma.QualityAnomalyDelegate<ModelDelegate>;
+    GroupBy: Prisma.QualityAnomalyGroupByOutputType;
+    // @ts-ignore
+    Return: Prisma.QualityAnomalyGetPayload<T>;
+  };
+  reconciliationRule: {
+    Where: Prisma.ReconciliationRuleWhereInput;
+    Select: Prisma.ReconciliationRuleSelect;
+    Include: unknown;
+    Create:
+      | Prisma.ReconciliationRuleCreateInput
+      | Prisma.ReconciliationRuleUncheckedCreateInput;
+    Update:
+      | Prisma.ReconciliationRuleUpdateInput
+      | Prisma.ReconciliationRuleUncheckedUpdateInput;
+    Cursor: unknown;
+    Order: Prisma.ReconciliationRuleOrderByWithRelationInput;
+    Delegate: Prisma.ReconciliationRuleDelegate<ModelDelegate>;
+    GroupBy: Prisma.ReconciliationRuleGroupByOutputType;
+    // @ts-ignore
+    Return: Prisma.ReconciliationRuleGetPayload<T>;
+  };
+  reconciliationExecution: {
+    Where: Prisma.ReconciliationExecutionWhereInput;
+    Select: Prisma.ReconciliationExecutionSelect;
+    Include: Prisma.ReconciliationExecutionInclude;
+    Create:
+      | Prisma.ReconciliationExecutionCreateInput
+      | Prisma.ReconciliationExecutionUncheckedCreateInput;
+    Update:
+      | Prisma.ReconciliationExecutionUpdateInput
+      | Prisma.ReconciliationExecutionUncheckedUpdateInput;
+    Cursor: unknown;
+    Order: Prisma.ReconciliationExecutionOrderByWithRelationInput;
+    Delegate: Prisma.ReconciliationExecutionDelegate<ModelDelegate>;
+    GroupBy: Prisma.ReconciliationExecutionGroupByOutputType;
+    // @ts-ignore
+    Return: Prisma.ReconciliationExecutionGetPayload<T>;
+  };
+  repairOperation: {
+    Where: Prisma.RepairOperationWhereInput;
+    Select: Prisma.RepairOperationSelect;
+    Include: unknown;
+    Create:
+      | Prisma.RepairOperationCreateInput
+      | Prisma.RepairOperationUncheckedCreateInput;
+    Update:
+      | Prisma.RepairOperationUpdateInput
+      | Prisma.RepairOperationUncheckedUpdateInput;
+    Cursor: unknown;
+    Order: Prisma.RepairOperationOrderByWithRelationInput;
+    Delegate: Prisma.RepairOperationDelegate<ModelDelegate>;
+    GroupBy: Prisma.RepairOperationGroupByOutputType;
+    // @ts-ignore
+    Return: Prisma.RepairOperationGetPayload<T>;
+  };
+  apiKey: {
+    Where: Prisma.ApiKeyWhereInput;
+    Select: Prisma.ApiKeySelect;
+    Include: Prisma.ApiKeyInclude;
+    Create: Prisma.ApiKeyCreateInput | Prisma.ApiKeyUncheckedCreateInput;
+    Update: Prisma.ApiKeyUpdateInput | Prisma.ApiKeyUncheckedUpdateInput;
+    Cursor: Prisma.ApiKeyWhereUniqueInput;
+    Order: Prisma.ApiKeyOrderByWithRelationInput;
+    Delegate: Prisma.ApiKeyDelegate<ModelDelegate>;
+    GroupBy: Prisma.ApiKeyGroupByOutputType;
+    // @ts-ignore
+    Return: Prisma.ApiKeyGetPayload<T>;
   };
 };

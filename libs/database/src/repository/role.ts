@@ -18,7 +18,8 @@ type Scalar = ModelScalarFields<typeof MODELS_NAME.ROLE>;
 type Model = ModelStructure[typeof MODELS_NAME.ROLE];
 /*  eslint-enable @typescript-eslint/no-unused-vars */
 
+
 class Role extends BaseRepository(MODELS_NAME.ROLE) {
 }
 
-export default Role;
+export default Role

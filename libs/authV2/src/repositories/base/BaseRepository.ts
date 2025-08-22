@@ -7,9 +7,15 @@
 
 import type { EntityId, TenantContext } from "../../types/core";
 
-// Note: Using any for PrismaClient type since @prisma/client may not be available
-// In production, this would be properly typed with the actual PrismaClient
-type PrismaClient = any;
+/**
+ * Import proper database client types to maintain clean architecture
+ * This maintains dependency inversion principle with proper typing
+ */
+import {
+  PostgreSQLClient,
+  type DatabaseClient,
+  type TransactionCallback,
+} from "@libs/database";
 
 /**
  * Base repository interface defining core CRUD operations
@@ -57,7 +63,7 @@ export interface CountOptions<TEntity> {
 /**
  * Transaction callback type
  */
-export type TransactionCallback<T> = (prisma: PrismaClient) => Promise<T>;
+export type { TransactionCallback };
 
 /**
  * Audit entry interface
@@ -86,11 +92,11 @@ export interface IAuditEntry {
 export abstract class BaseRepository<TEntity, TCreateInput, TUpdateInput>
   implements IBaseRepository<TEntity, TCreateInput, TUpdateInput>
 {
-  protected readonly prisma: PrismaClient;
+  protected readonly prisma: DatabaseClient;
   protected abstract readonly entityName: string;
 
-  constructor(prisma: PrismaClient) {
-    this.prisma = prisma;
+  constructor(prisma?: DatabaseClient) {
+    this.prisma = prisma || PostgreSQLClient.getInstance();
   }
 
   /**
@@ -145,18 +151,36 @@ export abstract class BaseRepository<TEntity, TCreateInput, TUpdateInput>
   async executeInTransaction<TResult>(
     callback: TransactionCallback<TResult>
   ): Promise<TResult> {
-    return await this.prisma.$transaction(callback);
+    // Type assertion: we know prisma has $transaction method
+    return await (
+      this.prisma as unknown as {
+        $transaction: (
+          callback: TransactionCallback<TResult>
+        ) => Promise<TResult>;
+      }
+    ).$transaction(callback);
   }
 
   /**
    * Execute multiple operations in a single transaction
    */
   async batchOperations<TResult>(
-    operations: Array<TransactionCallback<any>>
+    operations: Array<TransactionCallback<TResult>>
   ): Promise<TResult[]> {
-    return await this.prisma.$transaction(
-      operations.map((op) => op(this.prisma))
-    );
+    const results: TResult[] = [];
+    return await (
+      this.prisma as unknown as {
+        $transaction: (
+          callback: TransactionCallback<TResult[]>
+        ) => Promise<TResult[]>;
+      }
+    ).$transaction(async (prisma) => {
+      for (const operation of operations) {
+        const result = await operation(prisma);
+        results.push(result);
+      }
+      return results;
+    });
   }
 
   /**

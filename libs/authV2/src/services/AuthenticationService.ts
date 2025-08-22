@@ -9,9 +9,10 @@ import {
 } from "../types/core";
 
 import {
+  EnhancedTypeGuards,
   IEnhancedUser,
   IEnhancedSession,
-  EnhancedTypeGuards,
+  IServiceHealth,
 } from "../types/enhanced";
 
 import {
@@ -42,15 +43,15 @@ import { AuthenticationMetrics } from "./auth/AuthenticationMetrics";
  */
 interface IAuthFlowResult {
   success: boolean;
-  user?: any;
-  session?: any;
+  user?: IEnhancedUser;
+  session?: IEnhancedSession;
   token?: JWTToken;
   permissions?: string[];
   method?: string;
   userId?: string;
   sessionId?: string;
   expiresAt?: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   error?: Error;
 }
 
@@ -627,17 +628,67 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
     }
   }
 
-  async getHealth(): Promise<any> {
+  async getHealth(): Promise<IServiceHealth> {
     return {
+      service: "authentication",
       status: "healthy",
-      lastChecked: createTimestamp(),
-      services: {
-        jwt: "healthy",
-        session: "healthy",
-        permission: "healthy",
-        apiKey: "healthy",
-        cache: "healthy",
-        audit: "healthy",
+      uptime: 0,
+      lastCheck: createTimestamp(),
+      dependencies: [
+        {
+          name: "jwt",
+          status: "healthy",
+          responseTime: 0,
+          lastCheck: createTimestamp(),
+          error: null,
+        },
+        {
+          name: "session",
+          status: "healthy",
+          responseTime: 0,
+          lastCheck: createTimestamp(),
+          error: null,
+        },
+        {
+          name: "permission",
+          status: "healthy",
+          responseTime: 0,
+          lastCheck: createTimestamp(),
+          error: null,
+        },
+        {
+          name: "apiKey",
+          status: "healthy",
+          responseTime: 0,
+          lastCheck: createTimestamp(),
+          error: null,
+        },
+        {
+          name: "cache",
+          status: "healthy",
+          responseTime: 0,
+          lastCheck: createTimestamp(),
+          error: null,
+        },
+        {
+          name: "audit",
+          status: "healthy",
+          responseTime: 0,
+          lastCheck: createTimestamp(),
+          error: null,
+        },
+        {
+          name: "user",
+          status: "healthy",
+          responseTime: 0,
+          lastCheck: createTimestamp(),
+          error: null,
+        },
+      ],
+      metrics: {
+        totalOperations: 0,
+        successCount: 0,
+        errorCount: 0,
       },
     };
   }

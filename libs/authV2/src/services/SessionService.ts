@@ -6,8 +6,13 @@
  */
 
 import type { EntityId, SessionId, Timestamp } from "../types/core";
-import { createSessionId } from "../types/core";
-import type { IEnhancedSession, IServiceHealth } from "../types/enhanced";
+import { SecurityFlag, SecurityValidationLevel } from "../types/enhanced";
+import type {
+  IEnhancedSession,
+  IServiceHealth,
+  ISessionSecurityContext,
+  ISessionMetrics as IEnhancedSessionMetrics,
+} from "../types/enhanced";
 import type {
   ISessionService,
   ISessionCreateData,
@@ -17,6 +22,7 @@ import type {
 } from "../contracts/services";
 import { ValidationError } from "../errors/core";
 import * as crypto from "crypto";
+import { SessionEncryptionService } from "./SessionEncryptionService";
 
 /**
  * Session metrics for performance tracking
@@ -61,8 +67,9 @@ export class SessionServiceV2 implements ISessionService {
   private readonly maxSessionsPerUser = 5;
   private readonly cacheMaxSize = 10000;
   private readonly cacheCleanupThreshold = 0.8;
+  private readonly encryptionService: SessionEncryptionService;
 
-  constructor() {
+  constructor(sessionSecret?: string) {
     this.startTime = Date.now();
     this.metrics = {
       sessionsCreated: 0,
@@ -73,6 +80,13 @@ export class SessionServiceV2 implements ISessionService {
       operationsTotal: 0,
       errorsTotal: 0,
     };
+
+    // Initialize session encryption service
+    const secret =
+      sessionSecret ||
+      process.env["SESSION_SECRET_KEY"] ||
+      this.generateDefaultSecret();
+    this.encryptionService = new SessionEncryptionService(secret);
 
     // Start background maintenance tasks
     this.startCleanupJob();
@@ -223,11 +237,19 @@ export class SessionServiceV2 implements ISessionService {
         };
       }
 
+      // Check if session requires regeneration for security
+      let validatedSession = session;
+      if (this.requiresSessionRegeneration(session)) {
+        validatedSession = await this.regenerateSessionId(session);
+      }
+
       // Enhanced security validation
-      const securityValidation = await this.validateSessionSecurity(session);
+      const securityValidation = await this.validateSessionSecurity(
+        validatedSession
+      );
       if (!securityValidation.isValid) {
         this.metrics.validationFailures++;
-        await this.end(sessionId);
+        await this.end(validatedSession.sessionId);
         return {
           isValid: false,
           session: null,
@@ -239,7 +261,7 @@ export class SessionServiceV2 implements ISessionService {
 
       // Update last access time
       const now = new Date();
-      const updatedSession = await this.update(sessionId, {
+      const updatedSession = await this.update(validatedSession.sessionId, {
         lastAccessedAt: now,
       });
 
@@ -645,18 +667,15 @@ export class SessionServiceV2 implements ISessionService {
     }
   }
 
-  private generateSecureSessionId(): SessionId {
-    const randomBytes = crypto.randomBytes(32);
-    const timestamp = Date.now().toString(36);
-    const hash = crypto
-      .createHash("sha256")
-      .update(randomBytes)
-      .update(timestamp)
-      .digest("hex");
-    return createSessionId(`ses_${hash.substring(0, 32)}`);
+  private generateSecureSessionId(existingSessionId?: SessionId): SessionId {
+    return this.encryptionService.generateSecureSessionId(
+      existingSessionId
+    ) as SessionId;
   }
 
-  private createSecurityContext(data: ISessionCreateData): any {
+  private createSecurityContext(
+    data: ISessionCreateData
+  ): ISessionSecurityContext {
     const deviceFingerprint = this.generateDeviceFingerprint(data);
     const riskScore = this.calculateRiskScore(data);
 
@@ -674,14 +693,15 @@ export class SessionServiceV2 implements ISessionService {
       securityFlags: this.generateSecurityFlags(data, riskScore),
       riskScore,
       validationLevel:
-        riskScore > 0.7 ? "HIGH" : riskScore > 0.4 ? "MEDIUM" : "BASIC",
-      bruteForceAttempts: 0,
-      suspiciousActivityFlags: [],
-      lastSecurityCheck: new Date().toISOString() as Timestamp,
+        riskScore > 0.7
+          ? SecurityValidationLevel.MAXIMUM
+          : riskScore > 0.4
+          ? SecurityValidationLevel.ENHANCED
+          : SecurityValidationLevel.BASIC,
     };
   }
 
-  private initializeSessionMetrics(): any {
+  private initializeSessionMetrics(): IEnhancedSessionMetrics {
     return {
       requestCount: 0,
       dataTransferred: 0,
@@ -747,17 +767,17 @@ export class SessionServiceV2 implements ISessionService {
   private generateSecurityFlags(
     data: ISessionCreateData,
     riskScore: number
-  ): string[] {
-    const flags: string[] = [];
+  ): SecurityFlag[] {
+    const flags: SecurityFlag[] = [];
 
-    if (this.detectVPN(data.ipAddress)) flags.push("VPN_DETECTED");
-    if (this.detectTor(data.ipAddress)) flags.push("TOR_DETECTED");
+    if (this.detectVPN(data.ipAddress)) flags.push(SecurityFlag.VPN_CONNECTION);
+    if (this.detectTor(data.ipAddress)) flags.push(SecurityFlag.TOR_CONNECTION);
     if (this.isUnusualUserAgent(data.userAgent))
-      flags.push("UNUSUAL_USER_AGENT");
+      flags.push(SecurityFlag.UNUSUAL_ACTIVITY);
     if (this.isGeographicAnomaly(data.ipAddress))
-      flags.push("GEOGRAPHIC_ANOMALY");
-    if (riskScore > 0.7) flags.push("HIGH_RISK");
-    if (this.isNewDevice(data.deviceId)) flags.push("NEW_DEVICE");
+      flags.push(SecurityFlag.SUSPICIOUS_LOCATION);
+    if (riskScore > 0.7) flags.push(SecurityFlag.HIGH_RISK_IP);
+    if (this.isNewDevice(data.deviceId)) flags.push(SecurityFlag.NEW_DEVICE);
 
     return flags;
   }
@@ -944,11 +964,106 @@ export class SessionServiceV2 implements ISessionService {
   private startCacheMaintenanceJob(): void {
     // Run cache maintenance every 30 minutes
     setInterval(() => {
-      try {
+      if (
+        this.sessionCache.size >
+        this.cacheMaxSize * this.cacheCleanupThreshold
+      ) {
         this.cleanupCache();
-      } catch (error) {
-        console.error("Cache maintenance failed:", error);
       }
     }, 30 * 60 * 1000);
+  }
+
+  /**
+   * Generate a default secret for session encryption
+   * In production, this should be replaced with a proper secret management system
+   */
+  private generateDefaultSecret(): string {
+    return crypto.randomBytes(32).toString("hex");
+  }
+
+  /**
+   * Encrypt session data for secure storage
+   */
+  private encryptSessionData(session: IEnhancedSession): {
+    success: boolean;
+    encryptedData?: string;
+    error?: string;
+  } {
+    try {
+      const result = this.encryptionService.encryptSessionData({
+        userId: session.userId,
+        sessionId: session.sessionId,
+        securityContext: session.securityContext,
+        metrics: session.metrics,
+      });
+
+      if (!result.success) {
+        return {
+          success: false,
+          error: result.errors?.[0] || "Encryption failed",
+        };
+      }
+
+      return {
+        success: true,
+        encryptedData: JSON.stringify(result.encryptedData),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error:
+          error instanceof Error ? error.message : "Unknown encryption error",
+      };
+    }
+  }
+
+  /**
+   * Generate secure session ID with encryption service
+   */
+
+  /**
+   * Check if session requires regeneration for security
+   */
+  private requiresSessionRegeneration(session: IEnhancedSession): boolean {
+    const createdAt = new Date(session.createdAt);
+    const updatedAt = session.updatedAt
+      ? new Date(session.updatedAt)
+      : undefined;
+
+    return this.encryptionService.requiresRegeneration(
+      createdAt,
+      updatedAt,
+      false // privilege escalation flag - could be determined from session context
+    );
+  }
+
+  /**
+   * Regenerate session ID for security
+   */
+  private async regenerateSessionId(
+    session: IEnhancedSession
+  ): Promise<IEnhancedSession> {
+    const oldSessionId = session.sessionId;
+    const newSessionId = this.generateSecureSessionId(oldSessionId);
+
+    const updatedSession: IEnhancedSession = {
+      ...session,
+      sessionId: newSessionId,
+      updatedAt: new Date().toISOString() as Timestamp,
+    };
+
+    // Update storage
+    this.sessionStore.delete(oldSessionId);
+    this.sessionStore.set(newSessionId, updatedSession);
+
+    // Update caches
+    this.removeSessionFromCache(oldSessionId);
+    this.addSessionToCache(updatedSession);
+
+    // Update user session cache
+    this.removeUserSessionFromCache(session.userId, oldSessionId);
+    this.addUserSessionToCache(session.userId, newSessionId);
+
+    return updatedSession;
   }
 }

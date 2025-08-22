@@ -20,14 +20,14 @@ datasource db {
 //   provider = "prisma-zod-generator"
 // }
 
-// generator repo {
-//   provider = "prisma-repo"
-//   output   = "../src/repository"
-//   query    = true
-//   warn     = true
-//   info     = true
-//   error    = true
-// }
+generator repo {
+  provider = "prisma-repo"
+  output   = "../src/repository"
+  query    = true
+  warn     = true
+  info     = true
+  error    = true
+}
 
 enum StoreStatus {
   ACTIVE
@@ -54,6 +54,7 @@ model Store {
   webhooks       Webhook[]
   reports        Report[]
   activities     SessionActivity[]
+  apiKeys        ApiKey[] // API keys associated with this store
 
   @@index([ownerId])
   @@map("stores")
@@ -196,9 +197,14 @@ model Role {
   version     String   @default("1.0.0") @db.VarChar(32)
   metadata    Json?
 
-  // Role hierarchy relations
-  parentRoleIds String[] // Array of parent role IDs for inheritance
-  childRoleIds  String[] // Array of child role IDs for delegation
+  // Proper self-referential role hierarchy
+  parentRoleId String?
+  parentRole   Role?   @relation("RoleHierarchy", fields: [parentRoleId], references: [id], onDelete: SetNull)
+  childRoles   Role[]  @relation("RoleHierarchy")
+
+  // Legacy fields for backward compatibility (will be removed after migration)
+  parentRoleIds String[] @default([])
+  childRoleIds  String[] @default([])
 
   // Relations
   users       User[]
@@ -207,6 +213,7 @@ model Role {
   @@index([name])
   @@index([category])
   @@index([isActive])
+  @@index([parentRoleId])
   @@map("roles")
 }
 
@@ -281,6 +288,7 @@ model User {
   store          Store?            @relation(fields: [storeId], references: [id])
   recoveryEvents RecoveryEvent[]
   activities     SessionActivity[]
+  apiKeys        ApiKey[] // API keys owned by this user
 
   @@index([email])
   @@index([username])
@@ -612,4 +620,41 @@ model RepairOperation {
   status      String
   error       String?
   executedAt  DateTime @default(now())
+}
+
+// API Key model for authentication
+model ApiKey {
+  id         String  @id @default(cuid())
+  name       String  @db.VarChar(255)
+  keyHash    String  @unique @db.VarChar(255) // Hashed API key
+  keyPreview String  @db.VarChar(16) // First few chars for display
+  userId     String
+  user       User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeId    String?
+  store      Store?  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  // Permissions and scope
+  permissions Json? // Array of permissions
+  scopes      String[] // API scopes/endpoints allowed
+
+  // Usage tracking
+  lastUsedAt DateTime?
+  usageCount Int       @default(0)
+
+  // Status and lifecycle
+  isActive  Boolean   @default(true)
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  revokedAt DateTime?
+  revokedBy String? // User ID who revoked the key
+
+  // Metadata for additional context
+  metadata Json?
+
+  @@index([keyHash])
+  @@index([userId])
+  @@index([storeId])
+  @@index([isActive])
+  @@map("api_keys")
 }

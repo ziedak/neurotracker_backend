@@ -17,8 +17,10 @@ import type {
   ICacheStatistics,
   IServiceHealth,
 } from "../contracts/services";
-import type { IEnhancedUser } from "../types/enhanced";
+import type { IEnhancedUser, IBatchError } from "../types/enhanced";
 import { ValidationError } from "../errors/core";
+import { PasswordSecurity } from "../utils/PasswordSecurity";
+import { InputValidator } from "../utils/InputValidator";
 import {
   UserRepository,
   CreateUserInput,
@@ -81,7 +83,13 @@ export class UserServiceV2 implements IUserService {
     this.metrics.lastOperation = new Date();
 
     try {
-      const user = await this.userRepository.findByEmail(email);
+      // SECURITY: Validate email format before querying database
+      const emailValidation = InputValidator.validateEmail(email);
+      if (!emailValidation.success) {
+        return null; // Invalid email format, no need to query database
+      }
+
+      const user = await this.userRepository.findByEmail(emailValidation.data!);
 
       if (user) {
         this.setCacheEntry(user.id as EntityId, user);
@@ -100,7 +108,15 @@ export class UserServiceV2 implements IUserService {
     this.metrics.lastOperation = new Date();
 
     try {
-      const user = await this.userRepository.findByUsername(username);
+      // SECURITY: Validate username format before querying database
+      const usernameValidation = InputValidator.validateUsername(username);
+      if (!usernameValidation.success) {
+        return null; // Invalid username format, no need to query database
+      }
+
+      const user = await this.userRepository.findByUsername(
+        usernameValidation.data!
+      );
 
       if (user) {
         this.setCacheEntry(user.id as EntityId, user);
@@ -121,7 +137,7 @@ export class UserServiceV2 implements IUserService {
     this.metrics.lastOperation = new Date();
 
     const successful: IEnhancedUser[] = [];
-    const failed: Array<{ id: string; error: any; input: any }> = [];
+    const failed: IBatchError[] = [];
 
     for (const userId of userIds) {
       try {
@@ -156,20 +172,85 @@ export class UserServiceV2 implements IUserService {
     this.metrics.lastOperation = new Date();
 
     try {
-      if (!userData.email || !userData.username) {
-        throw new ValidationError("Email and username are required");
+      // SECURITY: Comprehensive input validation
+      const emailValidation = InputValidator.validateEmail(userData.email);
+      if (!emailValidation.success) {
+        throw new ValidationError(
+          `Email validation failed: ${emailValidation.errors?.join(", ")}`
+        );
       }
 
+      const usernameValidation = InputValidator.validateUsername(
+        userData.username
+      );
+      if (!usernameValidation.success) {
+        throw new ValidationError(
+          `Username validation failed: ${usernameValidation.errors?.join(", ")}`
+        );
+      }
+
+      // Validate optional name fields
+      let validatedFirstName: string | null = null;
+      if (userData.firstName) {
+        const firstNameValidation = InputValidator.validateName(
+          userData.firstName
+        );
+        if (!firstNameValidation.success) {
+          throw new ValidationError(
+            `First name validation failed: ${firstNameValidation.errors?.join(
+              ", "
+            )}`
+          );
+        }
+        validatedFirstName = firstNameValidation.data || null;
+      }
+
+      let validatedLastName: string | null = null;
+      if (userData.lastName) {
+        const lastNameValidation = InputValidator.validateName(
+          userData.lastName
+        );
+        if (!lastNameValidation.success) {
+          throw new ValidationError(
+            `Last name validation failed: ${lastNameValidation.errors?.join(
+              ", "
+            )}`
+          );
+        }
+        validatedLastName = lastNameValidation.data || null;
+      }
+
+      // Validate metadata if provided
+      let validatedMetadata: Record<string, unknown> | null = null;
+      if (userData.metadata) {
+        const metadataValidation = InputValidator.validateMetadata(
+          userData.metadata
+        );
+        if (!metadataValidation.success) {
+          throw new ValidationError(
+            `Metadata validation failed: ${metadataValidation.errors?.join(
+              ", "
+            )}`
+          );
+        }
+        validatedMetadata = metadataValidation.data || null;
+      }
+
+      // SECURITY FIX: Hash password before storing
+      const passwordHashResult = await PasswordSecurity.hashPassword(
+        userData.password
+      );
+
       const createInput: CreateUserInput = {
-        email: userData.email,
-        username: userData.username,
-        password: userData.password,
-        firstName: userData.firstName || null,
-        lastName: userData.lastName || null,
+        email: emailValidation.data!,
+        username: usernameValidation.data!,
+        password: passwordHashResult.hash, // Store hashed password
+        firstName: validatedFirstName,
+        lastName: validatedLastName,
         status: UserStatus.ACTIVE,
         emailVerified: false,
         phoneVerified: false,
-        metadata: userData.metadata || null,
+        metadata: validatedMetadata,
       };
 
       const user = await this.userRepository.create(createInput);
@@ -191,19 +272,95 @@ export class UserServiceV2 implements IUserService {
 
     try {
       const updateInput: Partial<UpdateUserInput> = {};
-      if (updateData.email !== undefined) updateInput.email = updateData.email;
-      if (updateData.username !== undefined)
-        updateInput.username = updateData.username;
-      if (updateData.firstName !== undefined)
-        updateInput.firstName = updateData.firstName || null;
-      if (updateData.lastName !== undefined)
-        updateInput.lastName = updateData.lastName || null;
-      if (updateData.isActive !== undefined)
+
+      // SECURITY: Validate email if provided
+      if (updateData.email !== undefined) {
+        const emailValidation = InputValidator.validateEmail(updateData.email);
+        if (!emailValidation.success) {
+          throw new ValidationError(
+            `Email validation failed: ${emailValidation.errors?.join(", ")}`
+          );
+        }
+        updateInput.email = emailValidation.data!;
+      }
+
+      // SECURITY: Validate username if provided
+      if (updateData.username !== undefined) {
+        const usernameValidation = InputValidator.validateUsername(
+          updateData.username
+        );
+        if (!usernameValidation.success) {
+          throw new ValidationError(
+            `Username validation failed: ${usernameValidation.errors?.join(
+              ", "
+            )}`
+          );
+        }
+        updateInput.username = usernameValidation.data!;
+      }
+
+      // SECURITY: Validate first name if provided
+      if (updateData.firstName !== undefined) {
+        if (updateData.firstName) {
+          const firstNameValidation = InputValidator.validateName(
+            updateData.firstName
+          );
+          if (!firstNameValidation.success) {
+            throw new ValidationError(
+              `First name validation failed: ${firstNameValidation.errors?.join(
+                ", "
+              )}`
+            );
+          }
+          updateInput.firstName = firstNameValidation.data!;
+        } else {
+          updateInput.firstName = null;
+        }
+      }
+
+      // SECURITY: Validate last name if provided
+      if (updateData.lastName !== undefined) {
+        if (updateData.lastName) {
+          const lastNameValidation = InputValidator.validateName(
+            updateData.lastName
+          );
+          if (!lastNameValidation.success) {
+            throw new ValidationError(
+              `Last name validation failed: ${lastNameValidation.errors?.join(
+                ", "
+              )}`
+            );
+          }
+          updateInput.lastName = lastNameValidation.data!;
+        } else {
+          updateInput.lastName = null;
+        }
+      }
+
+      if (updateData.isActive !== undefined) {
         updateInput.status = updateData.isActive
           ? UserStatus.ACTIVE
           : UserStatus.INACTIVE;
-      if (updateData.metadata !== undefined)
-        updateInput.metadata = updateData.metadata || null;
+      }
+
+      // SECURITY: Validate metadata if provided
+      if (updateData.metadata !== undefined) {
+        if (updateData.metadata) {
+          const metadataValidation = InputValidator.validateMetadata(
+            updateData.metadata
+          );
+          if (!metadataValidation.success) {
+            throw new ValidationError(
+              `Metadata validation failed: ${metadataValidation.errors?.join(
+                ", "
+              )}`
+            );
+          }
+          updateInput.metadata = metadataValidation.data!;
+        } else {
+          updateInput.metadata = null;
+        }
+      }
 
       const user = await this.userRepository.update(userId, updateInput);
       this.setCacheEntry(userId, user);
@@ -249,7 +406,12 @@ export class UserServiceV2 implements IUserService {
         };
       }
 
-      const isPasswordValid = user.password === password;
+      // SECURITY FIX: Replace plaintext comparison with secure Argon2 verification
+      const passwordVerification = await PasswordSecurity.verifyPassword(
+        password,
+        user.password
+      );
+      const isPasswordValid = passwordVerification.isValid;
 
       if (!isPasswordValid) {
         return {
@@ -287,23 +449,41 @@ export class UserServiceV2 implements IUserService {
   async updatePassword(
     userId: EntityId,
     currentPassword: string,
-    _newPassword: string
+    newPassword: string
   ): Promise<boolean> {
     this.metrics.operationsTotal++;
     this.metrics.lastOperation = new Date();
 
     try {
+      // SECURITY: Validate password strength before proceeding
+      // Note: This will throw an error if validation fails
+      PasswordSecurity.validatePasswordStrength(newPassword);
+
       const user = await this.userRepository.findById(userId);
       if (!user) {
         return false;
       }
 
-      if (user.password !== currentPassword) {
+      // SECURITY FIX: Verify current password using secure comparison
+      const currentPasswordVerification = await PasswordSecurity.verifyPassword(
+        currentPassword,
+        user.password
+      );
+      if (!currentPasswordVerification.isValid) {
         return false;
       }
 
-      // TODO: In a real implementation, you'd hash the password and update it
-      // For now, we just invalidate the cache as password update would be handled elsewhere
+      // Hash new password before storing
+      const newPasswordHashResult = await PasswordSecurity.hashPassword(
+        newPassword
+      );
+
+      // Update password in database
+      await this.userRepository.update(userId, {
+        password: newPasswordHashResult.hash,
+      });
+
+      // Invalidate cache
       this.cache.delete(userId);
 
       return true;

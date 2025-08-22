@@ -76,16 +76,49 @@ export class RoleRepository extends BaseRepository<
     try {
       const where = this.applyTenantFilter({ id }, context);
 
-      const role = await this.prisma.role.findFirst({
+      const role = await this.prisma.role.findUnique({
         where,
         include: {
-          permissions: context?.permissions.includes("role.read.extended"),
-          parentRoles: context?.permissions.includes("role.read.hierarchy"),
-          childRoles: context?.permissions.includes("role.read.hierarchy"),
+          users: {
+            select: {
+              id: true,
+              email: true,
+              username: true,
+              status: true,
+            },
+          },
+          permissions: {
+            select: {
+              id: true,
+              resource: true,
+              action: true,
+              conditions: true,
+            },
+          },
+          parentRole: {
+            select: {
+              id: true,
+              name: true,
+              displayName: true,
+              level: true,
+            },
+          },
+          childRoles: {
+            select: {
+              id: true,
+              name: true,
+              displayName: true,
+              level: true,
+            },
+          },
         },
       });
 
-      if (role && !this.validateAccess(role, context, "read")) {
+      if (!role) {
+        return null;
+      }
+
+      if (!this.validateAccess(role, context, "read")) {
         throw new TenantAccessError("role", id, context?.storeId || undefined);
       }
 
@@ -106,17 +139,29 @@ export class RoleRepository extends BaseRepository<
     const startTime = Date.now();
 
     try {
-      const where = this.applyTenantFilter(filter.where || {}, context);
+      const where = this.buildRoleWhereClause(filter.where || {}, context);
 
-      const roles = await this.prisma.role.findMany({
-        where,
-        orderBy: filter.orderBy?.map((order) => ({
+      const queryOptions: any = { where };
+
+      if (filter.orderBy && filter.orderBy.length > 0) {
+        queryOptions.orderBy = filter.orderBy.map((order) => ({
           [order.field as string]: order.direction,
-        })),
-        skip: filter.skip,
-        take: filter.take,
-        include: filter.include || {},
-      });
+        }));
+      }
+
+      if (filter.skip !== undefined) {
+        queryOptions.skip = filter.skip;
+      }
+
+      if (filter.take !== undefined) {
+        queryOptions.take = filter.take;
+      }
+
+      if (filter.include) {
+        queryOptions.include = filter.include;
+      }
+
+      const roles = await this.prisma.role.findMany(queryOptions);
 
       // Filter results based on access permissions
       const accessibleRoles = roles.filter((role: any) =>
@@ -140,20 +185,54 @@ export class RoleRepository extends BaseRepository<
       // Validate role name uniqueness within tenant
       await this.validateRoleNameUniqueness(data.name, context);
 
-      const roleData = {
-        ...data,
-        isActive: data.isActive ?? true,
+      const roleData: any = {
+        name: data.name,
+        displayName: data.displayName,
+        category: data.category,
+        level: data.level,
+        isActive: data.isActive !== undefined ? data.isActive : true,
         version: data.version || "1.0.0",
-        parentRoleIds: data.parentRoleIds || [],
-        childRoleIds: data.childRoleIds || [],
         createdAt: new Date(),
         updatedAt: new Date(),
       };
+
+      // Handle optional fields properly for exactOptionalPropertyTypes
+      if (data.description !== undefined) {
+        roleData.description = data.description;
+      }
+
+      if (data.parentRoleIds && data.parentRoleIds.length > 0) {
+        roleData.parentRoleId = data.parentRoleIds[0];
+      }
+
+      // Legacy fields for backward compatibility
+      roleData.parentRoleIds = data.parentRoleIds || [];
+      roleData.childRoleIds = data.childRoleIds || [];
+
+      if (data.metadata !== undefined) {
+        roleData.metadata = data.metadata
+          ? JSON.parse(JSON.stringify(data.metadata))
+          : null;
+      }
 
       const role = await this.prisma.role.create({
         data: roleData,
         include: {
           permissions: true,
+          parentRole: {
+            select: {
+              id: true,
+              name: true,
+              displayName: true,
+            },
+          },
+          childRoles: {
+            select: {
+              id: true,
+              name: true,
+              displayName: true,
+            },
+          },
         },
       });
 
@@ -189,10 +268,30 @@ export class RoleRepository extends BaseRepository<
         await this.validateRoleNameUniqueness(data.name, context);
       }
 
-      const updateData = {
-        ...data,
+      const updateData: any = {
         updatedAt: new Date(),
       };
+
+      // Only update fields that are provided and exist in schema
+      if (data.name !== undefined) updateData.name = data.name;
+      if (data.displayName !== undefined)
+        updateData.displayName = data.displayName;
+      if (data.description !== undefined)
+        updateData.description = data.description;
+      if (data.category !== undefined) updateData.category = data.category;
+      if (data.level !== undefined) updateData.level = data.level;
+      if (data.isActive !== undefined) updateData.isActive = data.isActive;
+      if (data.version !== undefined) updateData.version = data.version;
+      if (data.parentRoleIds !== undefined)
+        updateData.parentRoleIds = data.parentRoleIds;
+      if (data.childRoleIds !== undefined)
+        updateData.childRoleIds = data.childRoleIds;
+
+      if (data.metadata !== undefined) {
+        updateData.metadata = data.metadata
+          ? JSON.parse(JSON.stringify(data.metadata))
+          : null;
+      }
 
       const updatedRole = await this.prisma.role.update({
         where: { id },
@@ -258,7 +357,7 @@ export class RoleRepository extends BaseRepository<
     const startTime = Date.now();
 
     try {
-      const where = this.applyTenantFilter(filter?.where || {}, context);
+      const where = this.buildRoleWhereClause(filter?.where || {}, context);
 
       const count = await this.prisma.role.count({ where });
 
@@ -548,5 +647,43 @@ export class RoleRepository extends BaseRepository<
     }
 
     return changes;
+  }
+
+  /**
+   * Build safe where clause for role queries, handling JSON fields properly
+   */
+  private buildRoleWhereClause(
+    where?: Partial<Role>,
+    context?: TenantContext
+  ): any {
+    const whereClause: any = {};
+
+    // Copy safe primitive fields
+    if (where) {
+      const safeFields = [
+        "id",
+        "name",
+        "displayName",
+        "description",
+        "category",
+        "level",
+        "isActive",
+        "version",
+        "parentRoleId",
+        "parentRoleIds",
+        "childRoleIds",
+        "createdAt",
+        "updatedAt",
+      ];
+
+      for (const field of safeFields) {
+        if (where[field as keyof Role] !== undefined) {
+          whereClause[field] = where[field as keyof Role];
+        }
+      }
+    }
+
+    // Apply tenant filtering
+    return this.applyTenantFilter(whereClause, context);
   }
 }

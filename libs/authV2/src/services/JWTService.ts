@@ -10,8 +10,11 @@ import type {
   JWTToken,
   Timestamp,
   ITokenPayload,
+  IAuthenticationError,
+  AuthErrorCode,
 } from "../types/core";
-import { createJWTToken } from "../types/core";
+import { createJWTToken, createTimestamp } from "../types/core";
+import type { IBatchError } from "../types/enhanced";
 import type {
   IJWTService,
   IJWTGeneratePayload,
@@ -318,7 +321,7 @@ export class JWTServiceV2 implements IJWTService {
     this.metrics.lastOperation = new Date();
 
     const successful: IJWTVerifyResult[] = [];
-    const failed: Array<{ id: string; error: any; input: any }> = [];
+    const failed: IBatchError[] = [];
     const startTime = Date.now();
 
     for (let i = 0; i < tokens.length; i++) {

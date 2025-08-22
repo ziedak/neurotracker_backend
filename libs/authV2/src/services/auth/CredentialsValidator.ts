@@ -503,7 +503,12 @@ export class CredentialsValidator {
   /**
    * Validate device information
    */
-  private validateDeviceInfo(deviceInfo: any): void {
+  private validateDeviceInfo(deviceInfo: {
+    deviceId: string;
+    platform: string;
+    browser: string;
+    [key: string]: unknown;
+  }): void {
     if (!deviceInfo || typeof deviceInfo !== "object") {
       throw new ValidationError("Invalid device information");
     }

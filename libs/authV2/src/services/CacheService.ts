@@ -247,7 +247,7 @@ class CacheTier<T = any> {
       .map(([key]) => key);
   }
 
-  private calculateSize(value: any): number {
+  private calculateSize(value: unknown): number {
     try {
       return JSON.stringify(value).length;
     } catch {

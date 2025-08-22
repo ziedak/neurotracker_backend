@@ -40,6 +40,7 @@ export interface CreateUserInput {
 export interface UpdateUserInput {
   email?: string;
   username?: string;
+  password?: string;
   firstName?: string | null;
   lastName?: string | null;
   phone?: string | null;
@@ -91,10 +92,6 @@ export class UserRepository extends BaseRepository<
 > {
   protected readonly entityName = "user";
 
-  constructor(prisma: any) {
-    super(prisma);
-  }
-
   /**
    * Find user by ID with tenant context validation
    */
@@ -104,12 +101,15 @@ export class UserRepository extends BaseRepository<
     try {
       const where = this.applyTenantFilter({ id }, context);
 
+      const includeExtended =
+        context?.permissions?.includes("user.read.extended") || false;
+
       const user = await this.prisma.user.findFirst({
         where,
         include: {
           // Include related data for enterprise features
-          role: context?.permissions.includes("user.read.extended"),
-          store: context?.permissions.includes("user.read.extended"),
+          role: includeExtended,
+          store: includeExtended,
         },
       });
 
@@ -134,17 +134,29 @@ export class UserRepository extends BaseRepository<
     const startTime = Date.now();
 
     try {
-      const where = this.applyTenantFilter(filter.where || {}, context);
+      const where = this.buildUserWhereClause(filter.where || {}, context);
 
-      const users = await this.prisma.user.findMany({
-        where,
-        orderBy: filter.orderBy?.map((order) => ({
+      const queryOptions: any = { where };
+
+      if (filter.orderBy && filter.orderBy.length > 0) {
+        queryOptions.orderBy = filter.orderBy.map((order) => ({
           [order.field as string]: order.direction,
-        })),
-        skip: filter.skip,
-        take: filter.take,
-        include: filter.include || {},
-      });
+        }));
+      }
+
+      if (filter.skip !== undefined) {
+        queryOptions.skip = filter.skip;
+      }
+
+      if (filter.take !== undefined) {
+        queryOptions.take = filter.take;
+      }
+
+      if (filter.include) {
+        queryOptions.include = filter.include;
+      }
+
+      const users = await this.prisma.user.findMany(queryOptions);
 
       // Filter results based on access permissions
       const accessibleUsers = users.filter((user: any) =>
@@ -168,16 +180,47 @@ export class UserRepository extends BaseRepository<
       // Validate email uniqueness within tenant context
       await this.validateEmailUniqueness(data.email, context);
 
-      // Apply tenant context to user data
-      const userData = {
-        ...data,
-        storeId: data.storeId || context?.storeId,
-        organizationId: data.organizationId || context?.organizationId,
-        createdBy: data.createdBy || context?.userId,
+      // Build user data properly for exactOptionalPropertyTypes
+      const userData: any = {
+        email: data.email,
+        username: data.username,
+        firstName: data.firstName,
+        lastName: data.lastName,
         loginCount: 0,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
+
+      // Handle optional fields properly
+      if (data.phone !== undefined) userData.phone = data.phone;
+      if (data.password !== undefined) userData.passwordHash = data.password; // Map password to passwordHash
+      if (data.status !== undefined) userData.status = data.status;
+      if (data.emailVerified !== undefined)
+        userData.emailVerified = data.emailVerified;
+      if (data.phoneVerified !== undefined)
+        userData.phoneVerified = data.phoneVerified;
+      if (data.roleId !== undefined) userData.roleId = data.roleId;
+
+      // Apply tenant context
+      if (data.storeId !== undefined || context?.storeId !== undefined) {
+        userData.storeId = data.storeId || context?.storeId || null;
+      }
+      if (
+        data.organizationId !== undefined ||
+        context?.organizationId !== undefined
+      ) {
+        userData.organizationId =
+          data.organizationId || context?.organizationId || null;
+      }
+      if (data.createdBy !== undefined || context?.userId !== undefined) {
+        userData.createdBy = data.createdBy || context?.userId || null;
+      }
+
+      if (data.metadata !== undefined) {
+        userData.metadata = data.metadata
+          ? JSON.parse(JSON.stringify(data.metadata))
+          : null;
+      }
 
       const user = await this.prisma.user.create({
         data: userData,
@@ -219,11 +262,43 @@ export class UserRepository extends BaseRepository<
         await this.validateEmailUniqueness(data.email, context);
       }
 
-      const updateData: UpdateUserInput = {
-        ...data,
-        updatedBy: (data.updatedBy || context?.userId) ?? null,
+      const updateData: any = {
         updatedAt: new Date(),
-      } as any;
+      };
+
+      // Only update fields that are provided and exist in schema
+      if (data.email !== undefined) updateData.email = data.email;
+      if (data.username !== undefined) updateData.username = data.username;
+      if (data.password !== undefined) updateData.passwordHash = data.password; // Map password to passwordHash
+      if (data.firstName !== undefined) updateData.firstName = data.firstName;
+      if (data.lastName !== undefined) updateData.lastName = data.lastName;
+      if (data.phone !== undefined) updateData.phone = data.phone;
+      if (data.status !== undefined) updateData.status = data.status;
+      if (data.emailVerified !== undefined)
+        updateData.emailVerified = data.emailVerified;
+      if (data.phoneVerified !== undefined)
+        updateData.phoneVerified = data.phoneVerified;
+      if (data.roleId !== undefined) updateData.roleId = data.roleId;
+      if (data.roleAssignedAt !== undefined)
+        updateData.roleAssignedAt = data.roleAssignedAt;
+      if (data.roleAssignedBy !== undefined)
+        updateData.roleAssignedBy = data.roleAssignedBy;
+      if (data.roleRevokedAt !== undefined)
+        updateData.roleRevokedAt = data.roleRevokedAt;
+      if (data.roleRevokedBy !== undefined)
+        updateData.roleRevokedBy = data.roleRevokedBy;
+      if (data.roleExpiresAt !== undefined)
+        updateData.roleExpiresAt = data.roleExpiresAt;
+
+      if (data.updatedBy !== undefined || context?.userId !== undefined) {
+        updateData.updatedBy = data.updatedBy || context?.userId || null;
+      }
+
+      if (data.metadata !== undefined) {
+        updateData.metadata = data.metadata
+          ? JSON.parse(JSON.stringify(data.metadata))
+          : null;
+      }
 
       const updatedUser = await this.prisma.user.update({
         where: { id },
@@ -262,14 +337,19 @@ export class UserRepository extends BaseRepository<
         throw new TenantAccessError("user", id, context?.storeId || undefined);
       }
 
+      const deleteData: any = {
+        isDeleted: true,
+        deletedAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      if (context?.userId !== undefined) {
+        deleteData.updatedBy = context.userId;
+      }
+
       await this.prisma.user.update({
         where: { id },
-        data: {
-          isDeleted: true,
-          deletedAt: new Date(),
-          updatedBy: context?.userId,
-          updatedAt: new Date(),
-        },
+        data: deleteData,
       });
 
       // Create audit entry
@@ -292,7 +372,7 @@ export class UserRepository extends BaseRepository<
     const startTime = Date.now();
 
     try {
-      const where = this.applyTenantFilter(filter?.where || {}, context);
+      const where = this.buildUserWhereClause(filter?.where || {}, context);
 
       const count = await this.prisma.user.count({ where });
 
@@ -485,5 +565,57 @@ export class UserRepository extends BaseRepository<
     }
 
     return changes;
+  }
+
+  /**
+   * Build safe where clause for user queries, handling JSON fields properly
+   */
+  private buildUserWhereClause(
+    where?: Partial<User>,
+    context?: TenantContext
+  ): any {
+    const whereClause: any = {};
+
+    // Copy safe primitive fields
+    if (where) {
+      const safeFields = [
+        "id",
+        "email",
+        "username",
+        "firstName",
+        "lastName",
+        "phone",
+        "status",
+        "isActive",
+        "isDeleted",
+        "emailVerified",
+        "phoneVerified",
+        "roleId",
+        "storeId",
+        "organizationId",
+        "loginCount",
+        "lastLoginAt",
+        "roleAssignedAt",
+        "roleAssignedBy",
+        "roleExpiresAt",
+        "roleRevokedAt",
+        "roleRevokedBy",
+        "createdAt",
+        "updatedAt",
+        "deletedAt",
+        "createdBy",
+        "updatedBy",
+        "deletedBy",
+      ];
+
+      for (const field of safeFields) {
+        if (where[field as keyof User] !== undefined) {
+          whereClause[field] = where[field as keyof User];
+        }
+      }
+    }
+
+    // Apply tenant filtering
+    return this.applyTenantFilter(whereClause, context);
   }
 }
