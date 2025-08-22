@@ -11,21 +11,41 @@ import { UserRepository } from "../../repositories/UserRepository";
 import type { IUserCreateData } from "../../contracts/services";
 import { UserStatus } from "../../types/core";
 
-// Mock the repository
-const mockUserRepository: Partial<UserRepository> = {
-  findById: jest.fn(),
-  findByEmail: jest.fn(),
-  findByUsername: jest.fn(),
-  create: jest.fn(),
-  update: jest.fn(),
-  delete: jest.fn(),
-  findMany: jest.fn(),
-  count: jest.fn(),
-  search: jest.fn(),
-  updateLastLogin: jest.fn(),
-  assignRole: jest.fn(),
-  revokeRole: jest.fn(),
-};
+// Mock the repository with proper typing
+jest.mock("../../repositories/UserRepository");
+const MockedUserRepository = UserRepository as jest.MockedClass<
+  typeof UserRepository
+>;
+const mockUserRepository = new MockedUserRepository(
+  {} as any
+) as jest.Mocked<UserRepository>;
+
+// Helper to create complete User objects for testing
+const createMockUser = (
+  overrides: Partial<import("../../types/core").User> = {}
+): import("../../types/core").User => ({
+  id: "test-user-id",
+  email: "test@example.com",
+  password: "$argon2id$v=19$m=65536,t=3,p=4$test",
+  username: "testuser",
+  firstName: "John",
+  lastName: "Doe",
+  phone: null,
+  status: UserStatus.ACTIVE,
+  emailVerified: true,
+  phoneVerified: false,
+  lastLoginAt: null,
+  loginCount: 0,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  deletedAt: null,
+  isDeleted: false,
+  metadata: null,
+  roleId: null,
+  storeId: null,
+  organizationId: null,
+  ...overrides,
+});
 
 describe("UserServiceV2 - Password Security Integration", () => {
   let userService: UserServiceV2;

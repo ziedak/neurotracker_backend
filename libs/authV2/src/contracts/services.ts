@@ -781,3 +781,10 @@ export type {
   ICacheStatistics,
   IServiceHealth,
 } from "../types/enhanced";
+
+// Export new service interfaces for Phase 2.1 refactoring
+export * from "./services/ICredentialValidator";
+export * from "./services/ISecurityAuditor";
+export * from "./services/ISessionManager";
+export * from "./services/IContextResolver";
+export * from "./services/IRegistrationService";
