@@ -10,7 +10,6 @@ import type {
   JWTToken,
   Timestamp,
   ITokenPayload,
-  IAuthenticationError,
   AuthErrorCode,
 } from "../types/core";
 import { createJWTToken, createTimestamp } from "../types/core";
@@ -332,8 +331,11 @@ export class JWTServiceV2 implements IJWTService {
           failed.push({
             id: `token_${i}`,
             error: {
+              code: "VALIDATION_ERROR" as AuthErrorCode,
               message: "Token is required",
-              type: "ValidationError",
+              details: {},
+              timestamp: createTimestamp(),
+              traceId: crypto.randomUUID(),
             },
             input: token,
           });
@@ -346,9 +348,12 @@ export class JWTServiceV2 implements IJWTService {
           failed.push({
             id: `token_${i}`,
             error: {
+              code: "INVALID_TOKEN" as AuthErrorCode,
               message:
                 verifyResult.failureReason || "Token verification failed",
-              type: "VerificationError",
+              details: {},
+              timestamp: createTimestamp(),
+              traceId: crypto.randomUUID(),
             },
             input: token,
           });
@@ -372,8 +377,11 @@ export class JWTServiceV2 implements IJWTService {
         failed.push({
           id: `token_${i}`,
           error: {
+            code: "SERVICE_ERROR" as AuthErrorCode,
             message: error instanceof Error ? error.message : "Unknown error",
-            type: error?.constructor.name || "Error",
+            details: { errorType: error?.constructor.name || "Error" },
+            timestamp: createTimestamp(),
+            traceId: crypto.randomUUID(),
           },
           input: token,
         });

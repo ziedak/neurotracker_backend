@@ -5,6 +5,8 @@ import {
   SessionId,
   JWTToken,
   APIKey,
+  User,
+  UserSession,
   createTimestamp,
 } from "../types/core";
 
@@ -1027,11 +1029,21 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
         );
       }
 
+      if (!flowResult.userId) {
+        throw new AuthenticationError("Authentication failed: missing user ID");
+      }
+
+      // Fetch complete user data
+      const user = await this.userService.findById(flowResult.userId);
+      if (!user) {
+        throw new AuthenticationError("User not found after authentication");
+      }
+
       return {
         success: true,
-        user: { id: flowResult.userId },
-        userId: flowResult.userId as string,
-        sessionId: flowResult.sessionId as string,
+        user,
+        userId: flowResult.userId,
+        sessionId: flowResult.sessionId || "",
         method: "password",
         ...(flowResult.tokens && {
           token: flowResult.tokens.accessToken,
@@ -1063,11 +1075,21 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
         );
       }
 
+      if (!flowResult.userId) {
+        throw new AuthenticationError("Authentication failed: missing user ID");
+      }
+
+      // Fetch complete user data
+      const user = await this.userService.findById(flowResult.userId);
+      if (!user) {
+        throw new AuthenticationError("User not found after authentication");
+      }
+
       return {
         success: true,
-        user: { id: flowResult.userId },
-        userId: flowResult.userId as string,
-        sessionId: flowResult.sessionId as string,
+        user,
+        userId: flowResult.userId,
+        sessionId: flowResult.sessionId || "",
         method: "apikey",
         ...(flowResult.tokens && {
           token: flowResult.tokens.accessToken,
@@ -1109,11 +1131,25 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
         permissions: jwtResult.payload?.permissions,
       };
 
+      if (!authContext.userId) {
+        throw new AuthenticationError(
+          "Authentication failed: missing user ID in JWT"
+        );
+      }
+
+      // Fetch complete user data
+      const user = await this.userService.findById(authContext.userId);
+      if (!user) {
+        throw new AuthenticationError(
+          "User not found after JWT authentication"
+        );
+      }
+
       return {
         success: true,
-        user: { id: authContext.userId },
-        userId: authContext.userId as string,
-        sessionId: authContext.sessionId as string,
+        user,
+        userId: authContext.userId,
+        sessionId: authContext.sessionId || "",
         method: "jwt",
         token: credentials.token,
         ...(jwtResult.expiresAt && {
@@ -1174,10 +1210,57 @@ export class AuthenticationServiceV2 implements IAuthenticationService {
       );
     }
 
+    // Convert IEnhancedUser to User
+    const user: User | null = flowResult.user
+      ? {
+          id: flowResult.user.id as string,
+          email: flowResult.user.email,
+          password: flowResult.user.passwordHash, // Map passwordHash to password
+          username: flowResult.user.username,
+          firstName: flowResult.user.firstName ?? null,
+          lastName: flowResult.user.lastName ?? null,
+          phone: flowResult.user.phone ?? null,
+          status: flowResult.user.status,
+          emailVerified: flowResult.user.emailVerified,
+          phoneVerified: flowResult.user.phoneVerified,
+          lastLoginAt: flowResult.user.lastLoginAt
+            ? new Date(flowResult.user.lastLoginAt)
+            : null,
+          loginCount: flowResult.user.loginCount,
+          createdAt: new Date(flowResult.user.createdAt),
+          updatedAt: new Date(flowResult.user.updatedAt),
+          deletedAt: flowResult.user.deletedAt
+            ? new Date(flowResult.user.deletedAt)
+            : null,
+          isDeleted: flowResult.user.isDeleted,
+          metadata: flowResult.user.metadata ?? null,
+        }
+      : null;
+
+    // Convert IEnhancedSession to UserSession
+    const session: UserSession | null = flowResult.session
+      ? {
+          id: flowResult.session.id as string,
+          userId: flowResult.session.userId as string,
+          sessionId: flowResult.session.sessionId as string,
+          createdAt: new Date(flowResult.session.createdAt),
+          updatedAt: new Date(flowResult.session.updatedAt),
+          expiresAt: flowResult.session.expiresAt
+            ? new Date(flowResult.session.expiresAt)
+            : null,
+          ipAddress:
+            flowResult.session.securityContext?.locationData?.country || null,
+          userAgent: null, // Enhanced session doesn't store userAgent directly
+          metadata: flowResult.session.metadata || null,
+          isActive: flowResult.session.isActive,
+          endedAt: null, // Enhanced session doesn't track endedAt
+        }
+      : null;
+
     return {
       success: true,
-      user: flowResult.user!,
-      session: flowResult.session || null,
+      user,
+      session,
       accessToken: flowResult.token || null,
       refreshToken: null,
       permissions: flowResult.permissions || [],

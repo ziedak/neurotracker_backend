@@ -6,7 +6,7 @@
  */
 
 import type { EntityId, IUser, Timestamp } from "../types/core";
-import { UserStatus } from "../types/core";
+import { UserStatus, createTimestamp } from "../types/core";
 import type {
   IUserService,
   IUserCreateData,
@@ -149,8 +149,11 @@ export class UserServiceV2 implements IUserService {
         failed.push({
           id: userId,
           error: {
+            code: "SERVICE_ERROR" as import("../types/core").AuthErrorCode,
             message: error instanceof Error ? error.message : "Unknown error",
-            type: error?.constructor.name || "Error",
+            details: { errorType: error?.constructor.name || "Error" },
+            timestamp: createTimestamp(),
+            traceId: crypto.randomUUID(),
           },
           input: userId,
         });

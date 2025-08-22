@@ -982,42 +982,6 @@ export class SessionServiceV2 implements ISessionService {
   }
 
   /**
-   * Encrypt session data for secure storage
-   */
-  private encryptSessionData(session: IEnhancedSession): {
-    success: boolean;
-    encryptedData?: string;
-    error?: string;
-  } {
-    try {
-      const result = this.encryptionService.encryptSessionData({
-        userId: session.userId,
-        sessionId: session.sessionId,
-        securityContext: session.securityContext,
-        metrics: session.metrics,
-      });
-
-      if (!result.success) {
-        return {
-          success: false,
-          error: result.errors?.[0] || "Encryption failed",
-        };
-      }
-
-      return {
-        success: true,
-        encryptedData: JSON.stringify(result.encryptedData),
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error:
-          error instanceof Error ? error.message : "Unknown encryption error",
-      };
-    }
-  }
-
-  /**
    * Generate secure session ID with encryption service
    */
 

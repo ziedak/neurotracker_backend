@@ -10,6 +10,7 @@ import {
   IAuthenticationCredentials,
   IRegistrationData,
   IPasswordChangeData,
+  IDeviceInfo,
 } from "../../contracts/services";
 import { ValidationError, IValidationFieldError } from "../../errors/core";
 
@@ -503,22 +504,20 @@ export class CredentialsValidator {
   /**
    * Validate device information
    */
-  private validateDeviceInfo(deviceInfo: {
-    deviceId: string;
-    platform: string;
-    browser: string;
-    [key: string]: unknown;
-  }): void {
+  private validateDeviceInfo(deviceInfo: IDeviceInfo): void {
     if (!deviceInfo || typeof deviceInfo !== "object") {
       throw new ValidationError("Invalid device information");
     }
 
     // Validate required device info fields
-    const requiredFields = ["deviceId", "platform", "browser"];
-    for (const field of requiredFields) {
-      if (!deviceInfo[field] || typeof deviceInfo[field] !== "string") {
-        throw new ValidationError(`Device ${field} is required`);
-      }
+    if (!deviceInfo.deviceId || typeof deviceInfo.deviceId !== "string") {
+      throw new ValidationError("Device deviceId is required");
+    }
+    if (!deviceInfo.platform || typeof deviceInfo.platform !== "string") {
+      throw new ValidationError("Device platform is required");
+    }
+    if (!deviceInfo.browser || typeof deviceInfo.browser !== "string") {
+      throw new ValidationError("Device browser is required");
     }
 
     // Validate device ID format
