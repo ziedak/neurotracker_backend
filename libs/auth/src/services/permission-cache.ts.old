@@ -163,10 +163,10 @@ export class PermissionCache {
     });
 
     // Initialize local cache if enabled
-    this.localCache = new LRUCache<string, CachedPermissionEntry>({
-      max: this.config.localCacheMaxSize,
-      ttl: this.config.localCacheTTL * 1000, // Convert to milliseconds
-    });
+    this.localCache = new LRUCache<string, CachedPermissionEntry>(
+      this.config.localCacheMaxSize,
+      this.config.localCacheTTL * 1000 // Convert to milliseconds
+    );
 
     // Start background tasks
     this.startBackgroundTasks();
@@ -852,9 +852,9 @@ export class PermissionCache {
       totalMisses: this.stats.totalMisses,
       averageResponseTime: Math.round(averageResponseTime * 100) / 100,
       redisConnected,
-      localCacheSize: this.localCache.size,
+      localCacheSize: this.localCache.getSize(),
       errorRate: Math.round(errorRate * 100) / 100,
-      lastError: this.stats.lastError || undefined,
+      lastError: this.stats.lastError || "",
       uptime: uptime,
     };
   }
@@ -870,7 +870,7 @@ export class PermissionCache {
 
       // Clear local cache entries that are expired
       if (this.config.enableLocalCache) {
-        this.localCache.purgeStale();
+        this.localCache.cleanupExpired();
       }
 
       // Update performance metrics
@@ -885,7 +885,7 @@ export class PermissionCache {
 
       this.logger.info("Permission cache maintenance completed", {
         duration: Date.now() - startTime,
-        localCacheSize: this.localCache.size,
+        localCacheSize: this.localCache.getSize(),
         responseTimeSamples: this.stats.responseTimes.length,
       });
     } catch (error) {

@@ -6,7 +6,7 @@ export interface Metric {
   name: string;
   value: number;
   timestamp: number;
-  tags?: Record<string, string>;
+  tags?: Record<string, string> | undefined;
 }
 
 export interface TimingMetric extends Metric {
@@ -129,8 +129,10 @@ export class MetricsCollector {
       const metrics: Metric[] = [];
       for (let i = 0; i < results.length; i += 2) {
         const data = results[i];
-        const timestamp = parseInt(results[i + 1]);
-        metrics.push({ ...JSON.parse(data), timestamp });
+        const timestamp = parseInt(results[i + 1] ?? "0", 10);
+        if (typeof data === "string") {
+          metrics.push({ ...JSON.parse(data), timestamp });
+        }
       }
 
       return metrics;

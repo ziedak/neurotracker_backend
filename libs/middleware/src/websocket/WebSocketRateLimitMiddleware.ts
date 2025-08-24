@@ -206,12 +206,14 @@ export class WebSocketRateLimitMiddleware extends BaseWebSocketMiddleware<WebSoc
       }
 
       const [currentWindowResult, previousWindowResult] = results;
-      const currentCount = currentWindowResult[1]
-        ? parseInt(currentWindowResult[1] as string, 10)
-        : 0;
-      const previousCount = previousWindowResult[1]
-        ? parseInt(previousWindowResult[1] as string, 10)
-        : 0;
+      const currentCount =
+        currentWindowResult && currentWindowResult[1]
+          ? parseInt(currentWindowResult[1] as string, 10)
+          : 0;
+      const previousCount =
+        previousWindowResult && previousWindowResult[1]
+          ? parseInt(previousWindowResult[1] as string, 10)
+          : 0;
 
       // Calculate sliding window count
       const timeIntoCurrentWindow = now % windowMs;

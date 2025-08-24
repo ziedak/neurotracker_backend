@@ -26,7 +26,7 @@ export class Logger {
   private level: LogLevel;
   private transports: LogTransport[];
   private formatter: (entry: LogEntry) => string;
-  private customTransport?: (entry: LogEntry) => Promise<void>;
+  private customTransport: (entry: LogEntry) => Promise<void>;
   private static instances: Map<string, Logger> = new Map();
   private logQueue: LogEntry[] = [];
   private isProcessing: boolean = false;
@@ -36,7 +36,7 @@ export class Logger {
     this.level = options.level || "info";
     this.transports = options.transports || ["console", "redis"];
     this.formatter = options.formatter || ((entry) => JSON.stringify(entry));
-    this.customTransport = options.customTransport;
+    this.customTransport = options.customTransport || (async () => {});
   }
 
   static getInstance(

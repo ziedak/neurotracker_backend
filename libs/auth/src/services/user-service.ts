@@ -20,7 +20,7 @@ import { Logger } from "@libs/monitoring";
 import { DatabaseUtils } from "../utils/database-utils";
 import { PasswordService } from "./password-service";
 import { UnifiedSessionManager } from "./unified-session-manager";
-import { PermissionService } from "./permission-service";
+// import { PermissionService } from "./permission-service.ts.old";
 import {
   User,
   CreateUserData,
@@ -29,6 +29,7 @@ import {
   UserSecurityProfile,
 } from "../models/user-models";
 import { Role } from "../models/permission-models";
+import { error } from "console";
 
 // Re-export UserSecurityProfile for external use
 export type { UserSecurityProfile } from "../models/user-models";
@@ -225,7 +226,7 @@ export class UserService implements IUserService {
   private readonly db: DatabaseUtils;
   private readonly passwordService: PasswordService;
   private readonly sessionManager: UnifiedSessionManager;
-  private readonly permissionService: PermissionService;
+  // private readonly permissionService: PermissionService;
   private readonly cache: UserCacheManager;
   private readonly metrics: Map<string, number> = new Map();
 
@@ -233,13 +234,13 @@ export class UserService implements IUserService {
     db: DatabaseUtils,
     passwordService: PasswordService,
     sessionManager: UnifiedSessionManager,
-    permissionService: PermissionService,
+    // permissionService: PermissionService,
     logger: Logger
   ) {
     this.db = db;
     this.passwordService = passwordService;
     this.sessionManager = sessionManager;
-    this.permissionService = permissionService;
+    // this.permissionService = permissionService;
     this.logger = logger;
     this.cache = new UserCacheManager();
 
@@ -354,11 +355,17 @@ export class UserService implements IUserService {
 
       return user;
     } catch (error) {
-      this.logger.error("Failed to create user", {
-        email: userData.email,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to create user",
+        error instanceof Error ? error : undefined,
+        {
+          message: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+          metadata: { email: userData.email }
+        }
+      );
+
+
       throw error;
     }
   }
@@ -401,11 +408,15 @@ export class UserService implements IUserService {
 
       return user;
     } catch (error) {
-      this.logger.error("Failed to get user by ID", {
-        userId,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to get user by ID",
+        error instanceof Error ? error : undefined,
+        {
+          userId,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -452,7 +463,7 @@ export class UserService implements IUserService {
 
       return user;
     } catch (error) {
-      this.logger.error("Failed to get user by email", {
+      this.logger.error("Failed to get user by email", error instanceof Error ? error : undefined, {
         email,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -534,7 +545,7 @@ export class UserService implements IUserService {
 
       return updatedUser;
     } catch (error) {
-      this.logger.error("Failed to update user", {
+      this.logger.error("Failed to update user", error instanceof Error ? error : undefined, {
         userId,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -596,7 +607,7 @@ export class UserService implements IUserService {
         duration: Date.now() - startTime,
       });
     } catch (error) {
-      this.logger.error("Failed to delete user", {
+      this.logger.error("Failed to delete user", error instanceof Error ? error : undefined, {
         userId,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -696,7 +707,7 @@ export class UserService implements IUserService {
 
       return updatedUser;
     } catch (error) {
-      this.logger.error("Authentication failed", {
+      this.logger.error("Authentication failed", error instanceof Error ? error : undefined, {
         email,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -741,7 +752,7 @@ export class UserService implements IUserService {
         duration: Date.now() - startTime,
       });
     } catch (error) {
-      this.logger.error("Failed to update user password", {
+      this.logger.error("Failed to update user password", error instanceof Error ? error : undefined, {
         userId,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -788,7 +799,7 @@ export class UserService implements IUserService {
         duration: Date.now() - startTime,
       });
     } catch (error) {
-      this.logger.error("Failed to lock user account", {
+      this.logger.error("Failed to lock user account", error instanceof Error ? error : undefined, {
         userId,
         reason,
         error: this.getErrorMessage(error),
@@ -868,7 +879,7 @@ export class UserService implements IUserService {
 
       return updatedUser;
     } catch (error) {
-      this.logger.error("Failed to revoke user role", {
+      this.logger.error("Failed to revoke user role", error instanceof Error ? error : undefined, {
         userId,
         revokedBy,
         error: this.getErrorMessage(error),
@@ -912,8 +923,8 @@ export class UserService implements IUserService {
 
       // Remove lock-related metadata
       const cleanedMetadata = { ...user.metadata };
-      delete cleanedMetadata.lockReason;
-      delete cleanedMetadata.lockedAt;
+      delete cleanedMetadata["lockReason"];
+      delete cleanedMetadata["lockedAt"];
 
       await this.updateUser(userId, {
         status: UserStatus.ACTIVE,
@@ -929,7 +940,7 @@ export class UserService implements IUserService {
         duration: Date.now() - startTime,
       });
     } catch (error) {
-      this.logger.error("Failed to unlock user account", {
+      this.logger.error("Failed to unlock user account", error instanceof Error ? error : undefined, {
         userId,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -989,7 +1000,7 @@ export class UserService implements IUserService {
 
       return result;
     } catch (error) {
-      this.logger.error("Failed to batch get users", {
+      this.logger.error("Failed to batch get users", error instanceof Error ? error : undefined, {
         userIds: userIds.length,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1021,9 +1032,7 @@ export class UserService implements IUserService {
           if (result.status === "fulfilled") {
             createdUsers.push(result.value);
           } else {
-            this.logger.error("Failed to create user in batch", {
-              error: result.reason.message,
-            });
+            this.logger.error("Failed to create user in batch",  new Error(result.reason.message));
           }
         }
       }
@@ -1037,7 +1046,7 @@ export class UserService implements IUserService {
 
       return createdUsers;
     } catch (error) {
-      this.logger.error("Failed to batch create users", {
+      this.logger.error("Failed to batch create users", error instanceof Error ? error : undefined, {
         count: usersData.length,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1071,9 +1080,7 @@ export class UserService implements IUserService {
           if (result.status === "fulfilled") {
             updatedUsers.push(result.value);
           } else {
-            this.logger.error("Failed to update user in batch", {
-              error: result.reason.message,
-            });
+            this.logger.error("Failed to update user in batch", new Error(result.reason.message));
           }
         }
       }
@@ -1087,7 +1094,7 @@ export class UserService implements IUserService {
 
       return updatedUsers;
     } catch (error) {
-      this.logger.error("Failed to batch update users", {
+      this.logger.error("Failed to batch update users", error instanceof Error ? error : undefined, {
         count: updates.length,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1113,23 +1120,23 @@ export class UserService implements IUserService {
       // Build security profile from user data and additional security information
       const securityProfile: UserSecurityProfile = {
         userId: user.id,
-        twoFactorEnabled: user.metadata?.twoFactorEnabled === true,
-        lastPasswordChange: user.metadata?.lastPasswordChange
-          ? new Date(user.metadata.lastPasswordChange)
+        twoFactorEnabled: user.metadata?.["twoFactorEnabled"] === true,
+        lastPasswordChange: user.metadata?.["lastPasswordChange"]
+          ? new Date(user.metadata["lastPasswordChange"])
           : user.updatedAt,
-        failedLoginAttempts: user.metadata?.failedLoginAttempts || 0,
+        failedLoginAttempts: user.metadata?.["failedLoginAttempts"] || 0,
         accountLocked: user.status === UserStatus.LOCKED,
-        lockReason: user.metadata?.lockReason,
-        passwordExpiryDate: user.metadata?.passwordExpiryDate
-          ? new Date(user.metadata.passwordExpiryDate)
+        lockReason: user.metadata?.["lockReason"],
+        passwordExpiryDate: user.metadata?.["passwordExpiryDate"]
+          ? new Date(user.metadata["passwordExpiryDate"])
           : null,
-        securityQuestions: user.metadata?.securityQuestions || [],
-        trustedDevices: user.metadata?.trustedDevices || [],
-        loginNotifications: user.metadata?.loginNotifications !== false,
+        securityQuestions: user.metadata?.["securityQuestions"] || [],
+        trustedDevices: user.metadata?.["trustedDevices"] || [],
+        loginNotifications: user.metadata?.["loginNotifications"] !== false,
         apiKeysCount: 0, // Would be fetched from API key service
         activeSessions: 0, // Would be fetched from session manager
-        lastSecurityAudit: user.metadata?.lastSecurityAudit
-          ? new Date(user.metadata.lastSecurityAudit)
+        lastSecurityAudit: user.metadata?.["lastSecurityAudit"]
+          ? new Date(user.metadata["lastSecurityAudit"])
           : null,
       };
 
@@ -1140,7 +1147,7 @@ export class UserService implements IUserService {
 
       return securityProfile;
     } catch (error) {
-      this.logger.error("Failed to get user security profile", {
+      this.logger.error("Failed to get user security profile", error instanceof Error ? error : undefined, {
         userId,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1170,19 +1177,19 @@ export class UserService implements IUserService {
       const updatedMetadata = { ...user.metadata };
 
       if (settings.twoFactorEnabled !== undefined) {
-        updatedMetadata.twoFactorEnabled = settings.twoFactorEnabled;
+        updatedMetadata["twoFactorEnabled"] = settings.twoFactorEnabled;
       }
 
       if (settings.loginNotifications !== undefined) {
-        updatedMetadata.loginNotifications = settings.loginNotifications;
+        updatedMetadata["loginNotifications"] = settings.loginNotifications;
       }
 
       if (settings.securityQuestions !== undefined) {
-        updatedMetadata.securityQuestions = settings.securityQuestions;
+        updatedMetadata["securityQuestions"] = settings.securityQuestions;
       }
 
       if (settings.trustedDevices !== undefined) {
-        updatedMetadata.trustedDevices = settings.trustedDevices;
+        updatedMetadata["trustedDevices"] = settings.trustedDevices;
       }
 
       await this.updateUser(userId, { metadata: updatedMetadata });
@@ -1198,7 +1205,7 @@ export class UserService implements IUserService {
         duration: Date.now() - startTime,
       });
     } catch (error) {
-      this.logger.error("Failed to update user security settings", {
+      this.logger.error("Failed to update user security settings", error instanceof Error ? error : undefined, {
         userId,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1222,15 +1229,15 @@ export class UserService implements IUserService {
         timestamp: new Date().toISOString(),
         metadata: {
           ...metadata,
-          userAgent: metadata.userAgent || "system",
-          ipAddress: metadata.ipAddress || "127.0.0.1",
+          userAgent: metadata["userAgent"] || "system",
+          ipAddress: metadata["ipAddress"] || "127.0.0.1",
         },
       };
 
       // In a real implementation, this would go to a security audit log
       this.logger.info("Security event logged", securityEvent);
     } catch (error) {
-      this.logger.error("Failed to log security event", {
+      this.logger.error("Failed to log security event", error instanceof Error ? error : undefined, {
         userId,
         event,
         error: this.getErrorMessage(error),
@@ -1261,7 +1268,7 @@ export class UserService implements IUserService {
         duration: Date.now() - startTime,
       });
     } catch (error) {
-      this.logger.error("Failed to preload user data", {
+      this.logger.error("Failed to preload user data",error instanceof Error ? error : undefined, {
         count: userIds.length,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1281,7 +1288,7 @@ export class UserService implements IUserService {
         this.logger.debug("User cache warmed", { userId });
       }
     } catch (error) {
-      this.logger.error("Failed to warm user cache", {
+      this.logger.error("Failed to warm user cache", error instanceof Error ? error : undefined, {
         userId,
         error: this.getErrorMessage(error),
       });
@@ -1312,7 +1319,7 @@ export class UserService implements IUserService {
 
       return history;
     } catch (error) {
-      this.logger.error("Failed to get user login history", {
+      this.logger.error("Failed to get user login history", error instanceof Error ? error : undefined, {
         userId,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1358,7 +1365,7 @@ export class UserService implements IUserService {
 
       return summary;
     } catch (error) {
-      this.logger.error("Failed to get user activity summary", {
+      this.logger.error("Failed to get user activity summary", error instanceof Error ? error : undefined, {
         userId,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1460,7 +1467,7 @@ export class UserService implements IUserService {
 
       this.logger.debug("Storing user in database", { userId: user.id });
     } catch (error) {
-      this.logger.error("Failed to store user in database", {
+      this.logger.error("Failed to store user in database", error instanceof Error ? error : undefined, {
         userId: user.id,
         error: this.getErrorMessage(error),
       });
@@ -1507,7 +1514,7 @@ export class UserService implements IUserService {
       this.logger.debug("Fetching user from database", { userId });
       return null; // Mock: user not found
     } catch (error) {
-      this.logger.error("Failed to fetch user from database", {
+      this.logger.error("Failed to fetch user from database", error instanceof Error ? error : undefined, {
         userId,
         error: this.getErrorMessage(error),
       });
@@ -1599,7 +1606,7 @@ export class UserService implements IUserService {
       this.logger.debug("Role resolved", { roleId, role: mockRole.name });
       return mockRole;
     } catch (error) {
-      this.logger.error("Failed to resolve role", { roleId, error });
+      this.logger.error("Failed to resolve role", error instanceof Error ? error : undefined, { roleId, error });
 
       // Return default customer role on failure
       return {
@@ -1630,14 +1637,14 @@ export const createUserService = (
   db: DatabaseUtils,
   passwordService: PasswordService,
   sessionManager: UnifiedSessionManager,
-  permissionService: PermissionService,
+  // permissionService: PermissionService,
   logger: Logger
 ): UserService => {
   return new UserService(
     db,
     passwordService,
     sessionManager,
-    permissionService,
+    // permissionService,
     logger
   );
 };

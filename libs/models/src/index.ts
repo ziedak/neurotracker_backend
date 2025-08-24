@@ -1,22 +1,36 @@
-type StoreStatus = "ACTIVE" | "SUSPENDED" | "DELETED";
+/**
+ * @fileoverview Enterprise Database Models - Type-Safe Foundation
+ * @module models
+ * @version 2.0.0
+ * @description FIXED: Corrected Decimal types for financial precision
+ */
 
-type EventType = "LOGIN" | "LOGOUT" | "CART_CREATED" | "CART_UPDATED" | "CART_ABANDONED" | "ORDER_PLACED" | "ORDER_COMPLETED" | "FEATURE_COMPUTED" | "EXPORT_REQUESTED" | "QUALITY_ALERT" | "RECONCILIATION_RUN" | "OTHER";
+// Prisma enums - validated against schema
+export type StoreStatus = "ACTIVE" | "SUSPENDED" | "DELETED";
+export type EventType =
+  | "LOGIN"
+  | "LOGOUT"
+  | "CART_CREATED"
+  | "CART_UPDATED"
+  | "CART_ABANDONED"
+  | "ORDER_PLACED"
+  | "ORDER_COMPLETED"
+  | "FEATURE_COMPUTED"
+  | "EXPORT_REQUESTED"
+  | "QUALITY_ALERT"
+  | "RECONCILIATION_RUN"
+  | "OTHER";
+export type UserRoleType = "ADMIN" | "ANALYST" | "VIEWER" | "USER";
+export type RecoveryStatus = "PENDING" | "SUCCESS" | "FAILED" | "IGNORED";
+export type ReportStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED";
+export type UserStatus = "ACTIVE" | "BANNED" | "INACTIVE" | "DELETED";
+export type ProductStatus = "ACTIVE" | "INACTIVE" | "ARCHIVED" | "DELETED";
+export type OrderStatus = "PENDING" | "COMPLETED" | "CANCELLED" | "FAILED";
+export type PaymentStatus = "PENDING" | "COMPLETED" | "FAILED" | "REFUNDED";
+export type CartStatus = "ACTIVE" | "ABANDONED" | "CONVERTED" | "EXPIRED";
 
-type UserRoleType = "ADMIN" | "ANALYST" | "VIEWER" | "USER";
-
-type RecoveryStatus = "PENDING" | "SUCCESS" | "FAILED" | "IGNORED";
-
-type ReportStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED";
-
-type UserStatus = "ACTIVE" | "BANNED" | "INACTIVE" | "DELETED";
-
-type ProductStatus = "ACTIVE" | "INACTIVE" | "ARCHIVED" | "DELETED";
-
-type OrderStatus = "PENDING" | "COMPLETED" | "CANCELLED" | "FAILED";
-
-type PaymentStatus = "PENDING" | "COMPLETED" | "FAILED" | "REFUNDED";
-
-type CartStatus = "ACTIVE" | "ABANDONED" | "CONVERTED" | "EXPIRED";
+// CRITICAL FIX: Use string for Decimal fields to preserve precision
+export type PrismaDecimal = string;
 
 export interface Store {
   id: string;
@@ -37,6 +51,7 @@ export interface Store {
   webhooks: Webhook[];
   reports: Report[];
   activities: SessionActivity[];
+  apiKeys: ApiKey[];
 }
 
 export interface StoreSettings {
@@ -117,6 +132,9 @@ export interface Role {
   updatedAt: Date;
   version: string;
   metadata?: any | null;
+  parentRoleId?: string | null;
+  parentRole?: Role | null;
+  childRoles: Role[];
   parentRoleIds: string[];
   childRoleIds: string[];
   users: User[];
@@ -177,6 +195,7 @@ export interface User {
   store?: Store | null;
   recoveryEvents: RecoveryEvent[];
   activities: SessionActivity[];
+  apiKeys: ApiKey[];
 }
 
 export interface UserSession {
@@ -228,7 +247,7 @@ export interface Product {
   id: string;
   name: string;
   description?: string | null;
-  price: number;
+  price: PrismaDecimal; // FIXED: Was number, now Decimal for precision
   currency: string;
   sku?: string | null;
   imageUrl?: string | null;
@@ -250,7 +269,7 @@ export interface Cart {
   id: string;
   userId: string;
   status: CartStatus;
-  total: number;
+  total: PrismaDecimal; // FIXED: Was number, now Decimal for precision
   currency: string;
   createdAt: Date;
   updatedAt: Date;
@@ -272,7 +291,7 @@ export interface Order {
   cartId: string;
   userId: string;
   status: OrderStatus;
-  total: number;
+  total: PrismaDecimal; // FIXED: Was number, now Decimal for precision
   currency: string;
   paymentId?: string | null;
   createdAt: Date;
@@ -291,7 +310,7 @@ export interface OrderItem {
   orderId: string;
   productId: string;
   quantity: number;
-  price: number;
+  price: PrismaDecimal; // FIXED: Was number, now Decimal for precision
   createdAt: Date;
   updatedAt: Date;
   order: Order;
@@ -301,7 +320,7 @@ export interface OrderItem {
 export interface Payment {
   id: string;
   orderId: string;
-  amount: number;
+  amount: PrismaDecimal; // FIXED: Was number, now Decimal for precision
   currency: string;
   status: PaymentStatus;
   provider?: string | null;
@@ -319,7 +338,7 @@ export interface CartItem {
   cartId: string;
   productId: string;
   quantity: number;
-  price: number;
+  price: PrismaDecimal; // FIXED: Was number, now Decimal for precision
   createdAt: Date;
   updatedAt: Date;
   metadata?: any | null;
@@ -412,3 +431,24 @@ export interface RepairOperation {
   executedAt: Date;
 }
 
+export interface ApiKey {
+  id: string;
+  name: string;
+  keyHash: string;
+  keyPreview: string;
+  userId: string;
+  user: User;
+  storeId?: string | null;
+  store?: Store | null;
+  permissions?: any | null;
+  scopes: string[];
+  lastUsedAt?: Date | null;
+  usageCount: number;
+  isActive: boolean;
+  expiresAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  revokedAt?: Date | null;
+  revokedBy?: string | null;
+  metadata?: any | null;
+}

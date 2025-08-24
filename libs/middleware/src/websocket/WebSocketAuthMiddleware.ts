@@ -229,9 +229,10 @@ export class WebSocketAuthMiddleware extends BaseWebSocketMiddleware<WebSocketAu
     const cookieHeader = headers["cookie"];
     if (cookieHeader) {
       const sessionMatch = cookieHeader.match(/sessionId=([^;]+)/);
-      if (sessionMatch) {
+      if (sessionMatch && sessionMatch[1] !== undefined) {
         return sessionMatch[1];
       }
+      return null;
     }
 
     // Try authorization header with session: prefix
@@ -302,8 +303,8 @@ export class WebSocketAuthMiddleware extends BaseWebSocketMiddleware<WebSocketAu
       expirationHours: 24, // Default 24 hours
       deviceInfo: {
         deviceType: this.detectDeviceType(context.metadata.userAgent),
-        os: this.extractOS(context.metadata.userAgent),
-        browser: this.extractBrowser(context.metadata.userAgent),
+        os: this.extractOS(context.metadata.userAgent) ?? "unknown",
+        browser: this.extractBrowser(context.metadata.userAgent) ?? "unknown",
       },
     };
 

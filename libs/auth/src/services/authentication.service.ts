@@ -7,7 +7,7 @@ import { PostgreSQLClient } from "@libs/database";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { UserService } from "./user-service";
 import { SessionManager } from "./session.service";
-import { PermissionService } from "./permission-service";
+// import { PermissionService } from "./permission-service.ts.old";
 import { PasswordService } from "../password";
 import {
   EnhancedJWTService,
@@ -65,7 +65,7 @@ export interface RefreshTokenResult {
 export class AuthenticationService {
   private readonly userService: UserService;
   private readonly sessionManager: SessionManager;
-  private readonly permissionService: PermissionService;
+  // private readonly permissionService: PermissionService;
   private readonly jwtService: EnhancedJWTService;
   private readonly logger: Logger;
   private readonly metrics: MetricsCollector;
@@ -73,13 +73,13 @@ export class AuthenticationService {
   constructor(
     userService: UserService,
     sessionManager: SessionManager,
-    permissionService: PermissionService,
+    // permissionService: PermissionService,
     logger: Logger,
     metrics: MetricsCollector
   ) {
     this.userService = userService;
     this.sessionManager = sessionManager;
-    this.permissionService = permissionService;
+    // this.permissionService = permissionService;
     this.jwtService = EnhancedJWTService.getInstance();
     this.logger = logger;
     this.metrics = metrics;
@@ -162,20 +162,20 @@ export class AuthenticationService {
       }
 
       // Get user permissions
-      const permissions = await this.permissionService.getUserPermissions(
-        user.id
-      );
-      const permissionStrings = permissions.map(
-        (p) => `${p.resource}:${p.action}`
-      );
+      // const permissions = await this.permissionService.getUserPermissions(
+      //   user.id
+      // );
+      // const permissionStrings = permissions.map(
+      //   (p) => `${p.resource}:${p.action}`
+      // );
 
       // Generate JWT tokens
       const tokens = await this.jwtService.generateTokens({
         sub: user.id,
         email: user.email,
-        storeId: user.metadata?.storeId as string, // Extract from metadata
+        storeId: user.metadata?.["storeId"] as string, // Extract from metadata
         role: this.getPrimaryRoleId(user.role), // Use role ID from single Role object
-        permissions: permissionStrings,
+        // permissions: permissionStrings,
       });
 
       // Create session
@@ -209,7 +209,7 @@ export class AuthenticationService {
           id: user.id,
           email: user.email,
           name: `${user.firstName} ${user.lastName}`,
-          storeId: user.metadata?.storeId as string, // Extract from metadata
+          storeId: user.metadata?.["storeId"] as string, // Extract from metadata
           role: this.getPrimaryRoleId(user.role), // Use role ID from single Role object
           status: user.status as any, // Map status
           metadata: user.metadata,
@@ -295,7 +295,7 @@ export class AuthenticationService {
           id: user.id,
           email: user.email,
           name: `${user.firstName} ${user.lastName}`,
-          storeId: user.metadata?.storeId as string, // Extract from metadata
+          storeId: user.metadata?.["storeId"] as string, // Extract from metadata
           role: this.getPrimaryRoleId(user.role), // Use role ID from single Role object
           status: user.status as any, // Map status
           metadata: user.metadata,
@@ -482,7 +482,7 @@ export class AuthenticationService {
           id: user.id,
           email: user.email,
           name: `${user.firstName} ${user.lastName}`,
-          storeId: user.metadata?.storeId as string, // Extract from metadata
+          storeId: user.metadata?.["storeId"] as string, // Extract from metadata
           role: this.getPrimaryRoleId(user.role), // Use role ID from single Role object
           status: user.status as any, // Map status
           metadata: user.metadata,
@@ -601,23 +601,23 @@ export class AuthenticationService {
    * Legacy support for role extraction from role arrays (for transition period)
    * TODO: Remove this method once database migration to single role is complete
    */
-  private getPrimaryRole(roles: string[]): string {
-    if (!roles || roles.length === 0) {
-      return "customer"; // Default role
-    }
+  // private getPrimaryRole(roles: string[]): string {
+  //   if (!roles || roles.length === 0) {
+  //     return "customer"; // Default role
+  //   }
 
-    // Phase 3A business logic: Priority order for role selection
-    const rolePriority = ["admin", "store_owner", "api_user", "customer"];
+  //   // Phase 3A business logic: Priority order for role selection
+  //   const rolePriority = ["admin", "store_owner", "api_user", "customer"];
 
-    for (const priority of rolePriority) {
-      if (roles.includes(priority)) {
-        return priority;
-      }
-    }
+  //   for (const priority of rolePriority) {
+  //     if (roles.includes(priority)) {
+  //       return priority;
+  //     }
+  //   }
 
-    // Fallback: return first role if none match priority
-    return roles[0];
-  }
+  //   // Fallback: return first role if none match priority
+  //   return roles[0];
+  // }
   private validateLoginCredentials(credentials: LoginCredentials): boolean {
     if (!credentials || typeof credentials !== "object") {
       return false;

@@ -13,7 +13,7 @@ export abstract class BaseWebSocketMiddleware<
   TConfig extends WebSocketMiddlewareOptions = WebSocketMiddlewareOptions
 > {
   protected readonly logger: Logger;
-  protected readonly metrics?: MetricsCollector;
+  protected readonly metrics: MetricsCollector | undefined;
   protected readonly config: TConfig;
   protected readonly name: string;
 

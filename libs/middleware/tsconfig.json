@@ -10,6 +10,8 @@
     { "path": "../../libs/config" },
     { "path": "../../libs/database" },
     { "path": "../../libs/monitoring" },
+    { "path": "../../libs/elysia-server" },
+    { "path": "../../libs/models" },
     { "path": "../../libs/auth" }
   ],
   "include": ["src"],

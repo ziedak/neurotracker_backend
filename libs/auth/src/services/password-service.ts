@@ -65,6 +65,9 @@ export class PasswordService implements IPasswordService {
   ): Promise<boolean> {
     // Mock implementation - would use bcrypt.compare in production
     const [salt, hash] = hashedPassword.split("$");
+    if (!salt || !hash) {
+      return false;
+    }
     const computedHash = this.mockHash(password, salt);
     return hash === computedHash;
   }

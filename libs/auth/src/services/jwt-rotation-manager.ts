@@ -73,13 +73,13 @@ export interface TokenOperation {
   readonly tokenId: string;
   readonly familyId: string;
   readonly userId: string;
-  readonly sessionId?: string;
+  readonly sessionId?: string | undefined;
   readonly timestamp: Date;
-  readonly ipAddress?: string;
-  readonly userAgent?: string;
+  readonly ipAddress?: string | undefined;
+  readonly userAgent?: string | undefined;
   readonly success: boolean;
-  readonly errorCode?: string;
-  readonly metadata?: Record<string, unknown>;
+  readonly errorCode?: string | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
 }
 
 /**
@@ -197,13 +197,15 @@ export class JWTRotationManager {
       resetTimeout: 60000,
     });
 
-    this.tokenFamilyCache = new LRUCache<string, TokenFamily>({
-      max: this.config.cacheMaxSize,
-    });
+    this.tokenFamilyCache = new LRUCache<string, TokenFamily>(
+     this.config.cacheMaxSize,
+     6000
+    );
 
-    this.rotationRateCache = new LRUCache<string, number>({
-      max: 1000, // Track rotation rates for 1000 users
-    });
+    this.rotationRateCache = new LRUCache<string, number>(
+      1000, // Track rotation rates for 1000 users
+      60000
+    );
 
     this.serviceStartTime = Date.now();
 
@@ -703,13 +705,13 @@ export class JWTRotationManager {
           redis: redisHealthy ? "connected" : "error",
           circuitBreaker: circuitBreakerState,
           cache:
-            this.tokenFamilyCache.size < this.config.cacheMaxSize * 0.9
+            this.tokenFamilyCache.getSize() < this.config.cacheMaxSize * 0.9
               ? "healthy"
               : "degraded",
         },
         metrics: {
-          tokenFamiliesInCache: this.tokenFamilyCache.size,
-          rotationRatesTracked: this.rotationRateCache.size,
+          tokenFamiliesInCache: this.tokenFamilyCache.getSize(),
+          rotationRatesTracked: this.rotationRateCache.getSize(),
           uptime: Date.now() - this.serviceStartTime,
         },
       };

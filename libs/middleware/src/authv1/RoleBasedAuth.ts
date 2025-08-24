@@ -225,10 +225,10 @@ export class RoleBasedAuth {
   /**
    * Normalize path for route matching
    */
-  private normalizePath(url: string): string {
+  private normalizePath(url: string | undefined): string {
     // Remove query parameters
-    const path = url.split('?')[0];
-    
+    const path = ((url ?? '') as string).split('?')[0] || '';
+
     // Remove trailing slash
     return path.endsWith('/') && path.length > 1 ? path.slice(0, -1) : path;
   }

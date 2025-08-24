@@ -91,8 +91,8 @@ export interface UserRevocationRecord {
   readonly reason: TokenRevocationReason;
   readonly revokedAt: string;
   readonly revokedAtTimestamp: number;
-  readonly revokedBy?: string;
-  readonly metadata?: Record<string, unknown>;
+  readonly revokedBy?: string | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
 }
 
 /**
@@ -132,7 +132,7 @@ export interface BlacklistManagerConfig {
  * Default production configuration
  */
 export const DEFAULT_BLACKLIST_CONFIG: BlacklistManagerConfig = {
-  keyPrefix: process.env.JWT_BLACKLIST_PREFIX || "jwt:blacklist:",
+  keyPrefix: process.env["JWT_BLACKLIST_PREFIX"] || "jwt:blacklist:",
   cache: {
     enabled: true,
     maxSize: 10000,
@@ -626,15 +626,15 @@ class BlacklistBusinessLogic {
       reason,
       revokedAt: now.toISOString(),
       revokedAtTimestamp: now.getTime(),
-      revokedBy: context?.revokedBy as string,
-      sessionId: context?.sessionId as string,
-      deviceId: context?.deviceId as string,
-      ipAddress: context?.ipAddress as string,
-      userAgent: context?.userAgent as string,
+      revokedBy: context?.["revokedBy"] as string,
+      sessionId: context?.["sessionId"] as string,
+      deviceId: context?.["deviceId"] as string,
+      ipAddress: context?.["ipAddress"] as string,
+      userAgent: context?.["userAgent"] as string,
       metadata: {
         tokenIssuedAt: new Date(issuedAt * 1000).toISOString(),
         tokenExpiresAt: new Date(expiresAt * 1000).toISOString(),
-        ...(context?.metadata as Record<string, unknown>),
+        ...(context?.["metadata"] as Record<string, unknown>),
       },
     };
 
@@ -721,20 +721,13 @@ class BlacklistCacheManager {
     this.metrics = metrics;
 
     // Initialize token revocation cache
-    this.cache = new LRUCache({
-      max: config.cache.maxSize,
-      ttl: config.cache.ttlMs,
-      updateAgeOnGet: true,
-      allowStale: false,
-    });
+    this.cache = new LRUCache(config.cache.maxSize, config.cache.ttlMs);
 
     // Initialize user revocation cache
-    this.userCache = new LRUCache({
-      max: Math.floor(config.cache.maxSize / 10), // Smaller cache for user revocations
-      ttl: config.cache.ttlMs,
-      updateAgeOnGet: true,
-      allowStale: false,
-    });
+    this.userCache = new LRUCache(
+      Math.floor(config.cache.maxSize / 10), // Smaller cache for user revocations
+      config.cache.ttlMs
+    );
   }
 
   /**
@@ -804,14 +797,14 @@ class BlacklistCacheManager {
   getCacheStats() {
     return {
       tokenCache: {
-        size: this.cache.size,
-        maxSize: this.cache.max,
-        calculatedSize: this.cache.calculatedSize,
+        size: this.cache.getSize(),
+        maxSize: this.cache.getStats().maxSize,
+        calculatedSize: this.cache.getSize(),
       },
       userCache: {
-        size: this.userCache.size,
-        maxSize: this.userCache.max,
-        calculatedSize: this.userCache.calculatedSize,
+        size: this.userCache.getSize(),
+        maxSize: this.userCache.getStats().maxSize,
+        calculatedSize: this.userCache.getSize(),
       },
     };
   }
@@ -943,8 +936,8 @@ export class JWTBlacklistManager {
         await this.recordMetrics("revoke_token_validation_failed", startTime);
         return {
           success: false,
-          error: validation.error,
-          errorCode: validation.errorCode,
+          error: validation.error ?? "Unknown error",
+          errorCode: validation.errorCode ?? "UNKNOWN_ERROR",
         };
       }
 

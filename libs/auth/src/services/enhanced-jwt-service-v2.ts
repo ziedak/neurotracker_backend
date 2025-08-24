@@ -58,7 +58,7 @@ export interface TokenVerificationResult {
 
 export interface TokenRotationResult {
   newAccessToken: string;
-  newRefreshToken?: string;
+  newRefreshToken?: string | undefined;
   expiresIn: number;
   rotatedAt: number;
   previousTokenRevoked: boolean;
@@ -113,9 +113,9 @@ export class EnhancedJWTService {
     this.config = this.loadConfiguration();
 
     // Initialize secrets
-    const jwtSecretKey = process.env.JWT_SECRET || "default_jwt_secret";
+    const jwtSecretKey = process.env["JWT_SECRET"] || "default_jwt_secret";
     const refreshSecretKey =
-      process.env.JWT_REFRESH_SECRET || "default_refresh_secret";
+      process.env["JWT_REFRESH_SECRET"] || "default_refresh_secret";
 
     this.jwtSecret = new TextEncoder().encode(jwtSecretKey);
     this.refreshSecret = new TextEncoder().encode(refreshSecretKey);
@@ -139,13 +139,12 @@ export class EnhancedJWTService {
       resetTimeout: 60000,
     });
 
-    this.tokenCache = new LRUCache<string, TokenVerificationResult>({
-      max: this.config.cacheMaxSize,
-    });
+    this.tokenCache = new LRUCache<string, TokenVerificationResult>(
+      this.config.cacheMaxSize,
+      60000
+    );
 
-    this.userTokenCount = new LRUCache<string, number>({
-      max: 1000,
-    });
+    this.userTokenCount = new LRUCache<string, number>(1000, 60000);
 
     this.serviceStartTime = Date.now();
 
@@ -200,15 +199,15 @@ export class EnhancedJWTService {
    */
   private loadConfiguration(): EnhancedJWTConfig {
     return {
-      accessTokenExpiry: Number(process.env.JWT_ACCESS_EXPIRY) || 15 * 60, // 15 minutes
+      accessTokenExpiry: Number(process.env["JWT_ACCESS_EXPIRY"]) || 15 * 60, // 15 minutes
       refreshTokenExpiry:
-        Number(process.env.JWT_REFRESH_EXPIRY) || 7 * 24 * 60 * 60, // 7 days
-      maxTokensPerUser: Number(process.env.JWT_MAX_TOKENS_PER_USER) || 10,
-      enableCaching: process.env.JWT_ENABLE_CACHE !== "false",
-      cacheMaxSize: Number(process.env.JWT_CACHE_MAX_SIZE) || 10000,
-      enableAuditLogging: process.env.JWT_ENABLE_AUDIT !== "false",
-      enableTokenRotation: process.env.JWT_ENFORCE_ROTATION === "true",
-      rotationThreshold: Number(process.env.JWT_ROTATION_THRESHOLD) || 0.8,
+        Number(process.env["JWT_REFRESH_EXPIRY"]) || 7 * 24 * 60 * 60, // 7 days
+      maxTokensPerUser: Number(process.env["JWT_MAX_TOKENS_PER_USER"]) || 10,
+      enableCaching: process.env["JWT_ENABLE_CACHE"] !== "false",
+      cacheMaxSize: Number(process.env["JWT_CACHE_MAX_SIZE"]) || 10000,
+      enableAuditLogging: process.env["JWT_ENABLE_AUDIT"] !== "false",
+      enableTokenRotation: process.env["JWT_ENFORCE_ROTATION"] === "true",
+      rotationThreshold: Number(process.env["JWT_ROTATION_THRESHOLD"]) || 0.8,
     };
   }
 
@@ -231,7 +230,7 @@ export class EnhancedJWTService {
       }
 
       // Check user token limit
-      await this.enforceTokenLimit(payload.sub);
+      await this.enforceTokenLimit(payload["sub"]);
 
       // Generate unique token ID
       const tokenId = this.generateTokenId();
@@ -239,17 +238,17 @@ export class EnhancedJWTService {
 
       // Prepare payloads
       const accessTokenPayload: JWTPayload = {
-        sub: payload.sub,
-        email: payload.email,
-        storeId: payload.storeId,
-        role: payload.role,
-        permissions: payload.permissions,
+        sub: payload["sub"],
+        email: payload["email"],
+        storeId: payload["storeId"],
+        role: payload["role"],
+        permissions: payload["permissions"],
         iat: currentTime,
         exp: currentTime + this.config.accessTokenExpiry,
       };
 
       const refreshTokenPayload: RefreshTokenPayload = {
-        sub: payload.sub,
+        sub: payload["sub"],
         type: "refresh",
         iat: currentTime,
         exp: currentTime + this.config.refreshTokenExpiry,
@@ -279,12 +278,16 @@ export class EnhancedJWTService {
       });
 
       // Update user token count
-      const currentCount = this.userTokenCount.get(payload.sub) || 0;
-      this.userTokenCount.set(payload.sub, currentCount + 1);
+      const currentCount = this.userTokenCount.get(payload["sub"]) || 0;
+      this.userTokenCount.set(payload["sub"], currentCount + 1);
 
       // Audit logging
       if (this.config.enableAuditLogging) {
-        await this.logTokenGeneration(payload.sub, tokenId, payload.email);
+        await this.logTokenGeneration(
+          payload["sub"],
+          tokenId,
+          payload["email"]
+        );
       }
 
       // Record metrics
@@ -296,7 +299,7 @@ export class EnhancedJWTService {
       await this.metrics.recordCounter("enhanced_jwt_tokens_generated");
 
       this.logger.info("Enhanced JWT tokens generated successfully", {
-        userId: payload.sub,
+        userId: payload["sub"],
         tokenId,
         duration,
       });
@@ -321,7 +324,7 @@ export class EnhancedJWTService {
         "Enhanced JWT token generation failed",
         error as Error,
         {
-          userId: payload.sub,
+          userId: payload["sub"],
         }
       );
 
@@ -698,7 +701,7 @@ export class EnhancedJWTService {
 
       // Calculate cache health
       const cacheHealth =
-        this.tokenCache.size < this.config.cacheMaxSize * 0.9
+        this.tokenCache.getSize() < this.config.cacheMaxSize * 0.9
           ? "healthy"
           : "degraded";
 
@@ -770,10 +773,10 @@ export class EnhancedJWTService {
   ): boolean {
     return !!(
       payload &&
-      typeof payload.sub === "string" &&
-      typeof payload.email === "string" &&
-      typeof payload.role === "string" &&
-      Array.isArray(payload.permissions)
+      typeof payload["sub"] === "string" &&
+      typeof payload["email"] === "string" &&
+      typeof payload["role"] === "string" &&
+      Array.isArray(payload["permissions"])
     );
   }
 
@@ -784,9 +787,9 @@ export class EnhancedJWTService {
     return !!(
       payload &&
       typeof payload.sub === "string" &&
-      typeof payload.email === "string" &&
-      typeof payload.role === "string" &&
-      Array.isArray(payload.permissions) &&
+      typeof payload["email"] === "string" &&
+      typeof payload["role"] === "string" &&
+      Array.isArray(payload["permissions"]) &&
       typeof payload.iat === "number" &&
       typeof payload.exp === "number"
     );
@@ -799,7 +802,7 @@ export class EnhancedJWTService {
     return !!(
       payload &&
       typeof payload.sub === "string" &&
-      payload.type === "refresh" &&
+      payload["type"] === "refresh" &&
       typeof payload.iat === "number" &&
       typeof payload.exp === "number"
     );
@@ -1027,10 +1030,14 @@ export class EnhancedJWTService {
       }
 
       // Revoke through blacklist manager
-      await this.blacklistManager.revokeToken(tokenId, reason, {
-        revokedBy,
-        userAgent: "EnhancedJWTService",
-      });
+      await this.blacklistManager.revokeToken(
+        tokenId,
+        reason,
+        {
+          ...(revokedBy !== undefined ? { revokedBy } : {}),
+          userAgent: "EnhancedJWTService",
+        }
+      );
 
       // Clear from cache
       if (this.config.enableCaching) {
@@ -1084,10 +1091,14 @@ export class EnhancedJWTService {
       }
 
       // Revoke through blacklist manager
-      await this.blacklistManager.revokeUserTokens(userId, reason, {
-        revokedBy,
-        metadata: { userAgent: "EnhancedJWTService" },
-      });
+      await this.blacklistManager.revokeUserTokens(
+        userId,
+        reason,
+        {
+          ...(revokedBy !== undefined ? { revokedBy } : {}),
+          metadata: { userAgent: "EnhancedJWTService" },
+        }
+      );
 
       // Clear user token count
       this.userTokenCount.delete(userId);

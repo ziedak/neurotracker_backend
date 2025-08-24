@@ -90,9 +90,14 @@ export class PostgreSQLClient {
       const versionResult = await PostgreSQLClient.getInstance().$queryRaw<
         { version: string }[]
       >`SELECT version() as version`;
-      const version = versionResult[0]?.version;
+      const version =
+        typeof versionResult[0]?.version === "string"
+          ? versionResult[0].version
+          : undefined;
       const latency = Date.now() - start;
-      return { status: "healthy", latency, version };
+      return version !== undefined
+        ? { status: "healthy", latency, version }
+        : { status: "healthy", latency };
     } catch (error) {
       console.error("PostgreSQL health check failed:", error);
       return { status: "unhealthy" };

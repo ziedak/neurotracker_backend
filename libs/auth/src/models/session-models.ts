@@ -45,10 +45,10 @@ export interface SessionData {
   readonly status: SessionStatus;
   readonly protocol: SessionProtocol;
   readonly authMethod: SessionAuthMethod;
-  readonly ipAddress?: string;
-  readonly userAgent?: string;
-  readonly origin?: string;
-  readonly connectionId?: string;
+  readonly ipAddress?: string | undefined;
+  readonly userAgent?: string | undefined;
+  readonly origin?: string | undefined;
+  readonly connectionId?: string | undefined;
   readonly refreshCount: number;
   readonly metadata: SessionMetadata;
 }
@@ -57,10 +57,10 @@ export interface SessionData {
  * Session metadata for additional context
  */
 export interface SessionMetadata {
-  readonly deviceInfo?: DeviceInfo;
-  readonly locationInfo?: LocationInfo;
-  readonly securityInfo?: SecurityInfo;
-  readonly customData?: Record<string, unknown>;
+  readonly deviceInfo?: DeviceInfo | undefined;
+  readonly locationInfo?: LocationInfo | undefined;
+  readonly securityInfo?: SecurityInfo | undefined;
+  readonly customData?: Record<string, unknown> | undefined;
 }
 
 /**
@@ -103,14 +103,14 @@ export interface SecurityInfo {
 export interface SessionCreateOptions {
   readonly protocol: SessionProtocol;
   readonly authMethod: SessionAuthMethod;
-  readonly ipAddress?: string;
-  readonly userAgent?: string;
-  readonly origin?: string;
-  readonly connectionId?: string;
-  readonly expirationHours?: number;
-  readonly metadata?: Partial<SessionMetadata>;
-  readonly persistent?: boolean;
-  readonly deviceInfo?: DeviceInfo;
+  readonly ipAddress?: string | undefined;
+  readonly userAgent?: string | undefined;
+  readonly origin?: string | undefined;
+  readonly connectionId?: string | undefined;
+  readonly expirationHours?: number | undefined;
+  readonly metadata?: Partial<SessionMetadata> | undefined;
+  readonly persistent?: boolean | undefined;
+  readonly deviceInfo?: DeviceInfo | undefined;
 }
 
 /**

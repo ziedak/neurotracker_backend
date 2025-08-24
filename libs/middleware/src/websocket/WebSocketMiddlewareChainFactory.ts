@@ -252,14 +252,14 @@ class WebSocketOriginValidationMiddleware extends BaseWebSocketMiddleware<Origin
  */
 export class WebSocketMiddlewareChainFactory {
   private readonly logger: Logger;
-  private readonly metrics?: MetricsCollector;
+  private readonly metrics: MetricsCollector;
 
   constructor(
     logger: Logger = Logger.getInstance("WebSocketMiddlewareChainFactory"),
     metrics?: MetricsCollector
   ) {
     this.logger = logger;
-    this.metrics = metrics;
+    this.metrics = metrics ?? MetricsCollector.getInstance();
   }
 
   /**

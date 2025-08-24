@@ -4,6 +4,9 @@ export * from "./types";
 // Export base classes
 export * from "./base";
 
+// Export Casbin authorization middleware
+export * from "./casbin";
+
 // Export WebSocket middleware
 export { BaseWebSocketMiddleware } from "./websocket/BaseWebSocketMiddleware";
 export {
@@ -30,8 +33,39 @@ export {
   WEBSOCKET_CHAIN_PRESETS,
 } from "./websocket/WebSocketMiddlewareChainFactory";
 
-// Export auth middleware
-export * from "./auth";
+// Export auth middleware (legacy)
+export * from "./authv1";
+
+// Export modern auth middleware (Oslo-based)
+export {
+  AuthService,
+  UserAuthService,
+  ElysiaAuthMiddleware,
+  createAuthPlugin,
+  authGuards,
+  PasswordUtils,
+  DEFAULT_PASSWORD_REQUIREMENTS,
+  SessionInvalidReason,
+  AuthEvent,
+} from "./auth";
+
+export type {
+  AuthConfig as ModernAuthConfig,
+  AuthUser as ModernAuthUser,
+  AuthContext as ModernAuthContext,
+  LoginCredentials,
+  SessionCreateOptions,
+  SessionValidationResult,
+  SessionTokenPayload,
+  AuthAuditEntry,
+  PasswordRequirements,
+  CookieOptions as ModernCookieOptions,
+  RateLimitConfig as ModernRateLimitConfig,
+  SecurityHeaders,
+  MFAConfig,
+  PermissionCheckResult,
+  AuthMiddlewareConfig,
+} from "./auth";
 
 // Export rate limiting middleware
 export * from "./rateLimit";
@@ -54,7 +88,7 @@ import {
   WebSocketAuthConfig,
   WebSocketRateLimitConfig,
 } from "./types";
-import { AuthMiddleware } from "./auth";
+import { AuthMiddleware } from "./authv1";
 import { RateLimitMiddleware } from "./rateLimit";
 import { ValidationMiddleware } from "./validation";
 import { LoggingMiddleware, LoggingConfig } from "./logging/logging.middleware";
@@ -150,6 +184,23 @@ export const createWebSocketRateLimitMiddleware = (
   const logger = Logger.getInstance("WSRateLimitMiddleware");
   const metrics = MetricsCollector.getInstance();
   return WebSocketRateLimitMiddleware.create(config, logger, metrics);
+};
+
+/**
+ * Casbin middleware factory function
+ */
+export const createCasbinMiddleware = (
+  config: Partial<import("./casbin/types").CasbinConfig>,
+  prisma: any,
+  redis?: any
+) => {
+  const logger = Logger.getInstance("CasbinMiddleware");
+  const metrics = MetricsCollector.getInstance();
+
+  return import("./casbin/factory").then(
+    ({ createCasbinMiddleware: factory }) =>
+      factory(config, prisma, logger, metrics, redis)
+  );
 };
 
 /**

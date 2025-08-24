@@ -33,9 +33,9 @@ type UserWithMetadata = {
 export interface SessionInfo {
   sessionId: string;
   userId: string;
-  deviceInfo?: string;
-  ipAddress?: string;
-  userAgent?: string;
+  deviceInfo: string | undefined;
+  ipAddress: string | undefined;
+  userAgent: string | undefined;
   createdAt: Date;
   lastActivity: Date;
   expiresAt: Date;
@@ -511,12 +511,12 @@ export class SessionManager {
     return {
       sessionId: session.sessionId,
       userId: session.userId,
-      deviceInfo: metadata.deviceName as string | undefined,
-      ipAddress: metadata.ipAddress as string | undefined,
-      userAgent: metadata.userAgent as string | undefined,
+      deviceInfo: metadata["deviceName"] as string | undefined,
+      ipAddress: metadata["ipAddress"] as string | undefined,
+      userAgent: metadata["userAgent"] as string | undefined,
       createdAt: session.createdAt,
-      lastActivity: metadata.lastActivity
-        ? new Date(metadata.lastActivity as string)
+      lastActivity: metadata["lastActivity"]
+        ? new Date(metadata["lastActivity"] as string)
         : session.createdAt,
       expiresAt: session.expiresAt || new Date(), // Provide fallback for null
       metadata: metadata,

@@ -155,7 +155,7 @@ export const ServiceRegistry: IServiceRegistry = {
       return promise as Promise<T>;
     }
     // 3. Fallback to sync resolve (for compatibility)
-    return Promise.resolve(this.resolve<T>(key));
+    // return Promise.resolve(this.resolve<T>(key));
     // 4. Check async transient
     if (asyncTransientRegistry.has(key)) {
       return asyncTransientRegistry.get(key)!() as Promise<T>;

@@ -9,4 +9,13 @@ export { Redis } from "ioredis";
 export { RedisClient } from "./redisClient";
 
 // Re-export key types for convenience
-export type { PrismaClient } from "@prisma/client";
+export type {
+  PrismaClient,
+  User,
+  UserSession,
+  Role,
+  Store,
+  Cart,
+  Product,
+  ApiKey,
+} from "@prisma/client";

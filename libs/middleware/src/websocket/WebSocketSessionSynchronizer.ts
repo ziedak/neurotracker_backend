@@ -19,7 +19,7 @@ export interface SessionUpdateEvent {
   updates: SessionUpdateData;
   source: "http" | "websocket";
   timestamp: Date;
-  connectionId?: string;
+  connectionId?: string | undefined;
 }
 
 /**

@@ -21,7 +21,7 @@ import { CircuitBreaker, LRUCache } from "@libs/utils";
 import {
   PermissionCache,
   type PermissionCacheConfig,
-} from "./permission-cache";
+} from "./permission-cache.ts.old";
 
 // Import canonical types from unified models
 import type {
@@ -417,20 +417,20 @@ export class PermissionService {
     });
 
     // Initialize local caches
-    this.resolvedPermissionsCache = new LRUCache({
-      max: 1000,
-      ttl: 300000, // 5 minutes
-    });
+    this.resolvedPermissionsCache = new LRUCache(
+      1000,
+      300000 // 5 minutes
+    );
 
-    this.hierarchyCache = new LRUCache({
-      max: 500,
-      ttl: 600000, // 10 minutes
-    });
+    this.hierarchyCache = new LRUCache(
+      500,
+      600000 // 10 minutes
+    );
 
-    this.conditionEvaluatorCache = new LRUCache({
-      max: 2000,
-      ttl: 60000, // 1 minute
-    });
+    this.conditionEvaluatorCache = new LRUCache(
+      2000,
+      60000 // 1 minute
+    );
 
     // Start background tasks
     this.startBackgroundTasks();

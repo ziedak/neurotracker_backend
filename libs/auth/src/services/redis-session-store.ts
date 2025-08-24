@@ -487,23 +487,26 @@ export class RedisSessionStore {
 
         if (batchResults) {
           for (let j = 0; j < batch.length; j++) {
-            const [error, data] = batchResults[j];
-            if (!error && data) {
-              try {
-                const decompressedData = this.config.enableCompression
-                  ? SessionSerializer.decompress(data as string)
-                  : (data as string);
+            const result = batchResults[j];
+            if (result !== undefined) {
+              const [error, data] = result;
+              if (!error && data) {
+                try {
+                  const decompressedData = this.config.enableCompression
+                    ? SessionSerializer.decompress(data as string)
+                    : (data as string);
 
-                const session = SessionSerializer.deserialize(decompressedData);
+                  const session = SessionSerializer.deserialize(decompressedData);
 
-                if (!SessionValidator.isSessionExpired(session)) {
-                  results.set(batch[j], session);
+                  if (!SessionValidator.isSessionExpired(session) && batch[j] !== undefined) {
+                    results.set(batch[j] as string, session);
+                  }
+                } catch (parseError) {
+                  this.logger.warn("Failed to deserialize session in batch", {
+                    sessionId: batch[j],
+                    error: parseError,
+                  });
                 }
-              } catch (parseError) {
-                this.logger.warn("Failed to deserialize session in batch", {
-                  sessionId: batch[j],
-                  error: parseError,
-                });
               }
             }
           }
@@ -694,6 +697,6 @@ export class RedisSessionStore {
 
   private parseMemoryUsage(info: string): number {
     const match = info.match(/used_memory:(\d+)/);
-    return match ? parseInt(match[1], 10) : 0;
+    return match ? parseInt(match[1] ?? "0", 10) : 0;
   }
 }

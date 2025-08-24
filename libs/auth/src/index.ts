@@ -79,7 +79,7 @@ export {
   type PermissionCacheConfig,
   type CacheStats,
   DEFAULT_PERMISSION_CACHE_CONFIG,
-} from "./services/permission-cache";
+} from "./services/permission-cache.ts.old";
 
 // ===================================================================
 // AUTHENTICATION GUARDS AND MIDDLEWARE
@@ -203,7 +203,7 @@ export {
   type RoleAssignmentResult,
   type PermissionAnalytics,
   DEFAULT_PERMISSION_SERVICE_CONFIG,
-} from "./services/permission-service";
+} from "./services/permission-service.ts.old";
 // export type {
 //   Permission,
 //   RolePermissions,
@@ -259,3 +259,30 @@ export {
   type UnifiedSessionManagerConfig,
   DEFAULT_UNIFIED_SESSION_MANAGER_CONFIG,
 } from "./services/unified-session-manager";
+
+// ===================================================================
+// PERFORMANCE OPTIMIZATION SERVICES (Phase 1)
+// ===================================================================
+
+// Performance Benchmarking
+export {
+  PerformanceBenchmark,
+  type PerformanceMetrics as AuthPerformanceMetrics,
+  type BenchmarkResult,
+  type SystemBaseline,
+} from "./services/performance-benchmark";
+
+// Authentication Cache Service
+export {
+  AuthCacheService,
+  type CacheConfig as AuthCacheConfig,
+  type CacheStats as AuthCacheStats,
+  type CacheOperationResult,
+  DEFAULT_CACHE_CONFIG,
+} from "./services/auth-cache.service";
+
+// Phase 1 Optimization Service
+export {
+  Phase1OptimizationService,
+  type Phase1Results,
+} from "./services/phase1-optimization.service";

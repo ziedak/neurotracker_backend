@@ -5,14 +5,14 @@
 
 export interface JWTPayload {
   sub: string;
-  email?: string;
-  role?: string;
-  permissions?: string[];
-  iat?: number;
-  exp?: number;
-  jti?: string;
-  iss?: string;
-  aud?: string | string[];
+  email?: string | undefined;
+  role?: string | undefined;
+  permissions?: string[] | undefined;
+  iat?: number | undefined;
+  exp?: number | undefined;
+  jti?: string | undefined;
+  iss?: string | undefined;
+  aud?: string | string[] | undefined;
   [key: string]: any;
 }
 

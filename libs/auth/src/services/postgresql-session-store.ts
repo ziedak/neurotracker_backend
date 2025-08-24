@@ -63,12 +63,12 @@ interface SessionRow {
   readonly status: SessionStatus;
   readonly protocol: SessionProtocol;
   readonly auth_method: SessionAuthMethod;
-  readonly ip_address?: string;
-  readonly user_agent?: string;
-  readonly origin?: string;
-  readonly connection_id?: string;
+  readonly ip_address?: string | undefined;
+  readonly user_agent?: string | undefined;
+  readonly origin?: string | undefined;
+  readonly connection_id?: string | undefined;
   readonly refresh_count: number;
-  readonly metadata_json?: string;
+  readonly metadata_json?: string | undefined;
   readonly backup_source: "redis" | "direct" | "recovery";
   readonly backup_timestamp: Date;
   readonly is_active: boolean;
@@ -638,6 +638,9 @@ export class PostgreSQLSessionStore {
       }
 
       const sessionRow = result.data[0];
+      if (!sessionRow) {
+        return null;
+      }
       return SessionDataTransformer.rowToSession(sessionRow);
     } catch (error) {
       this.logger.error("Failed to get session from backup", error as Error, {

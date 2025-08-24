@@ -17,10 +17,10 @@ export enum MiddlewarePriority {
 export interface MiddlewareConfig {
   name: string;
   priority: MiddlewarePriority;
-  dependencies?: string[];
-  optional?: boolean;
-  circuitBreakerConfig?: CircuitBreakerConfig;
-  retryConfig?: RetryConfig;
+  dependencies?: string[] | undefined;
+  optional?: boolean | undefined;
+  circuitBreakerConfig?: CircuitBreakerConfig | undefined;
+  retryConfig?: RetryConfig | undefined;
 }
 
 /**
@@ -145,7 +145,7 @@ class MiddlewareCircuitBreaker {
 interface RegisteredMiddleware {
   config: MiddlewareConfig;
   middleware: WebSocketMiddlewareFunction;
-  circuitBreaker?: MiddlewareCircuitBreaker;
+  circuitBreaker?: MiddlewareCircuitBreaker | undefined;
   executionStats: {
     totalExecutions: number;
     totalFailures: number;
@@ -161,7 +161,7 @@ interface RegisteredMiddleware {
 export class WebSocketMiddlewareChain {
   private readonly middleware: Map<string, RegisteredMiddleware> = new Map();
   private readonly logger: Logger;
-  private readonly metrics?: MetricsCollector;
+  private readonly metrics: MetricsCollector | undefined;
   private executionOrder: string[] = [];
 
   constructor(
