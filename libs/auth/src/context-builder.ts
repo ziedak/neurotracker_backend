@@ -286,7 +286,7 @@ export class UnifiedAuthContextBuilder {
       this.data.session!,
       this.data.authMethod ?? "anonymous",
       this.data.lastActivity ?? now,
-      this.data.userId,
+      this.data.userId ?? "anonymous",
       this.data.user,
       this.data.roles ?? Object.freeze([]),
       this.data.permissions ?? Object.freeze([]),

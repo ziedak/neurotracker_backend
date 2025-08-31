@@ -1,4 +1,4 @@
-// libs/shared/resilience/src/circuit-breaker.ts
+// libs/utils/src/circuit-breaker.ts
 export interface CircuitBreakerConfig {
   threshold: number;
   timeout: number;
@@ -24,13 +24,22 @@ export class CircuitBreaker {
       if (Date.now() - this.lastFailure > this.config.resetTimeout) {
         this.state = "HALF_OPEN";
       } else {
-        throw new Error("Circuit breaker open");
+        throw new Error(
+          `Circuit breaker is OPEN. Retry after ${
+            this.config.resetTimeout - (Date.now() - this.lastFailure)
+          }ms`
+        );
       }
     }
 
     try {
-      const result = await fn();
-      this.reset();
+      const result = await this.withTimeout(fn, this.config.timeout);
+      // If HALF_OPEN and success, close breaker
+      if (this.state === "HALF_OPEN") {
+        this.reset();
+      } else {
+        this.reset();
+      }
       return result;
     } catch (error) {
       this.recordFailure();
@@ -40,6 +49,10 @@ export class CircuitBreaker {
 
   getState(): string {
     return this.state;
+  }
+
+  isOpen(): boolean {
+    return this.state === "OPEN";
   }
 
   getFailureCount(): number {
@@ -56,14 +69,34 @@ export class CircuitBreaker {
     this.lastFailure = 0;
   }
 
-  private recordFailure() {
+  public recordFailure() {
     this.failureCount++;
     this.lastFailure = Date.now();
 
-    if (this.failureCount > this.config.threshold) {
+    if (this.failureCount >= this.config.threshold) {
       this.state = "OPEN";
     } else if (this.state === "HALF_OPEN") {
       this.state = "OPEN";
     }
+  }
+
+  private async withTimeout(
+    fn: () => Promise<any>,
+    timeout: number
+  ): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`Operation timed out after ${timeout}ms`));
+      }, timeout);
+      fn()
+        .then((result) => {
+          clearTimeout(timer);
+          resolve(result);
+        })
+        .catch((err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+    });
   }
 }

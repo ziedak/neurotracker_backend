@@ -1,5 +1,5 @@
-import { Logger } from '@libs/monitoring';
-import { AuthConfig, MiddlewareContext } from '../types';
+import { Logger } from "@libs/monitoring";
+import { AuthConfig, MiddlewareContext } from "../types";
 
 /**
  * User information for authorization
@@ -26,96 +26,107 @@ interface AuthorizationResult {
  */
 export class RoleBasedAuth {
   private readonly config: AuthConfig;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
   // Route-specific permission requirements
   private readonly routePermissions: Map<string, string[]> = new Map([
     // AI Engine routes
-    ['POST /predict', ['predict']],
-    ['POST /batch-predict', ['batch_predict']],
-    ['GET /explain', ['explain']],
-    ['GET /models', ['admin', 'models']],
-    ['POST /models', ['admin']],
-    ['DELETE /cache', ['admin', 'cache_manage']],
-    
+    ["POST /predict", ["predict"]],
+    ["POST /batch-predict", ["batch_predict"]],
+    ["GET /explain", ["explain"]],
+    ["GET /models", ["admin", "models"]],
+    ["POST /models", ["admin"]],
+    ["DELETE /cache", ["admin", "cache_manage"]],
+
     // Data Intelligence routes
-    ['GET /analytics', ['analytics', 'admin']],
-    ['POST /exports', ['data_export', 'admin']],
-    ['GET /features', ['features', 'admin']],
-    ['POST /gdpr', ['gdpr', 'admin']],
-    ['DELETE /gdpr/*', ['gdpr', 'admin']],
-    
+    ["GET /analytics", ["analytics", "admin"]],
+    ["POST /exports", ["data_export", "admin"]],
+    ["GET /features", ["features", "admin"]],
+    ["POST /gdpr", ["gdpr", "admin"]],
+    ["DELETE /gdpr/*", ["gdpr", "admin"]],
+
     // Event Pipeline routes
-    ['POST /events', ['event_ingest']],
-    ['POST /events/batch', ['event_ingest', 'batch_process']],
-    ['GET /deadletter', ['admin', 'event_admin']],
-    
+    ["POST /events", ["event_ingest"]],
+    ["POST /events/batch", ["event_ingest", "batch_process"]],
+    ["GET /deadletter", ["admin", "event_admin"]],
+
     // Common routes
-    ['GET /metrics', ['metrics', 'admin']],
-    ['GET /health', []], // Public
+    ["GET /metrics", ["metrics", "admin"]],
+    ["GET /health", []], // Public
   ]);
 
   // Role hierarchy (higher roles inherit lower role permissions)
   private readonly roleHierarchy: Map<string, string[]> = new Map([
-    ['admin', ['user', 'service', 'data_processor', 'event_processor']],
-    ['service', ['user']],
-    ['data_processor', ['user']],
-    ['event_processor', ['user']],
-    ['user', []]
+    ["admin", ["user", "service", "data_processor", "event_processor"]],
+    ["service", ["user"]],
+    ["data_processor", ["user"]],
+    ["event_processor", ["user"]],
+    ["user", []],
   ]);
 
   // Default permissions for roles
   private readonly rolePermissions: Map<string, string[]> = new Map([
-    ['admin', ['*']], // Admin has all permissions
-    ['service', ['predict', 'event_ingest', 'metrics']],
-    ['data_processor', ['analytics', 'features', 'data_export']],
-    ['event_processor', ['event_ingest', 'batch_process']],
-    ['user', ['predict', 'analytics']]
+    ["admin", ["*"]], // Admin has all permissions
+    ["service", ["predict", "event_ingest", "metrics"]],
+    ["data_processor", ["analytics", "features", "data_export"]],
+    ["event_processor", ["event_ingest", "batch_process"]],
+    ["user", ["predict", "analytics"]],
   ]);
 
-  constructor(config: AuthConfig, logger: Logger) {
+  constructor(config: AuthConfig, logger: ILogger) {
     this.config = config;
-    this.logger = logger.child({ component: 'RoleBasedAuth' });
+    this.logger = logger.child({ component: "RoleBasedAuth" });
   }
 
   /**
    * Check if user is authorized to access resource
    */
-  async checkAuthorization(user: User, context: MiddlewareContext): Promise<AuthorizationResult> {
+  async checkAuthorization(
+    user: User,
+    context: MiddlewareContext
+  ): Promise<AuthorizationResult> {
     try {
       const userRoles = user.roles || [];
       const userPermissions = user.permissions || [];
 
       // Get all effective roles (including inherited)
       const effectiveRoles = this.getEffectiveRoles(userRoles);
-      
+
       // Get all effective permissions (from roles + direct permissions)
-      const effectivePermissions = this.getEffectivePermissions(effectiveRoles, userPermissions);
+      const effectivePermissions = this.getEffectivePermissions(
+        effectiveRoles,
+        userPermissions
+      );
 
       // Check global role requirements
       if (this.config.requiredRoles?.length) {
-        const hasRequiredRole = this.config.requiredRoles.some(role => 
-          effectiveRoles.includes(role) || effectiveRoles.includes('admin')
+        const hasRequiredRole = this.config.requiredRoles.some(
+          (role) =>
+            effectiveRoles.includes(role) || effectiveRoles.includes("admin")
         );
 
         if (!hasRequiredRole) {
           return {
             authorized: false,
-            error: `Required roles: ${this.config.requiredRoles.join(', ')}`
+            error: `Required roles: ${this.config.requiredRoles.join(", ")}`,
           };
         }
       }
 
       // Check global permission requirements
       if (this.config.requiredPermissions?.length) {
-        const hasRequiredPermission = this.config.requiredPermissions.some(permission =>
-          effectivePermissions.includes(permission) || effectivePermissions.includes('*')
+        const hasRequiredPermission = this.config.requiredPermissions.some(
+          (permission) =>
+            effectivePermissions.includes(permission) ||
+            effectivePermissions.includes("*")
         );
 
         if (!hasRequiredPermission) {
           return {
             authorized: false,
-            error: `Required permissions: ${this.config.requiredPermissions.join(', ')}`
+            error: `Required permissions: ${this.config.requiredPermissions.join(
+              ", "
+            )}`,
           };
         }
       }
@@ -123,43 +134,44 @@ export class RoleBasedAuth {
       // Check route-specific permissions
       const routePermissions = this.getRoutePermissions(context);
       if (routePermissions.length > 0) {
-        const hasRoutePermission = routePermissions.some(permission =>
-          effectivePermissions.includes(permission) || effectivePermissions.includes('*')
+        const hasRoutePermission = routePermissions.some(
+          (permission) =>
+            effectivePermissions.includes(permission) ||
+            effectivePermissions.includes("*")
         );
 
         if (!hasRoutePermission) {
           return {
             authorized: false,
-            error: `Route requires permissions: ${routePermissions.join(', ')}`
+            error: `Route requires permissions: ${routePermissions.join(", ")}`,
           };
         }
       }
 
-      this.logger.debug('Authorization successful', {
+      this.logger.debug("Authorization successful", {
         userId: user.id,
         userRoles,
         effectiveRoles,
         userPermissions,
         effectivePermissions,
         routePermissions,
-        path: context.request.url
+        path: context.request.url,
       });
 
       return {
         authorized: true,
         matchedRoles: effectiveRoles,
-        matchedPermissions: effectivePermissions
+        matchedPermissions: effectivePermissions,
       };
-
     } catch (error) {
-      this.logger.error('Authorization check error', error as Error, {
+      this.logger.error("Authorization check error", error as Error, {
         userId: user.id,
-        path: context.request.url
+        path: context.request.url,
       });
 
       return {
         authorized: false,
-        error: 'Authorization check failed'
+        error: "Authorization check failed",
       };
     }
   }
@@ -173,7 +185,7 @@ export class RoleBasedAuth {
     // Add inherited roles
     for (const role of userRoles) {
       const inheritedRoles = this.roleHierarchy.get(role) || [];
-      inheritedRoles.forEach(inherited => effectiveRoles.add(inherited));
+      inheritedRoles.forEach((inherited) => effectiveRoles.add(inherited));
     }
 
     return Array.from(effectiveRoles);
@@ -182,13 +194,16 @@ export class RoleBasedAuth {
   /**
    * Get effective permissions from roles and direct permissions
    */
-  private getEffectivePermissions(roles: string[], directPermissions: string[]): string[] {
+  private getEffectivePermissions(
+    roles: string[],
+    directPermissions: string[]
+  ): string[] {
     const permissions = new Set<string>(directPermissions);
 
     // Add permissions from roles
     for (const role of roles) {
       const rolePerms = this.rolePermissions.get(role) || [];
-      rolePerms.forEach(perm => permissions.add(perm));
+      rolePerms.forEach((perm) => permissions.add(perm));
     }
 
     return Array.from(permissions);
@@ -204,12 +219,12 @@ export class RoleBasedAuth {
 
     // Try exact match first
     let permissions = this.routePermissions.get(routeKey);
-    
+
     if (!permissions) {
       // Try wildcard matches
       for (const [route, perms] of this.routePermissions.entries()) {
-        if (route.includes('*')) {
-          const pattern = route.replace('*', '.*');
+        if (route.includes("*")) {
+          const pattern = route.replace("*", ".*");
           const regex = new RegExp(`^${pattern}$`);
           if (regex.test(routeKey)) {
             permissions = perms;
@@ -227,10 +242,10 @@ export class RoleBasedAuth {
    */
   private normalizePath(url: string | undefined): string {
     // Remove query parameters
-    const path = ((url ?? '') as string).split('?')[0] || '';
+    const path = ((url ?? "") as string).split("?")[0] || "";
 
     // Remove trailing slash
-    return path.endsWith('/') && path.length > 1 ? path.slice(0, -1) : path;
+    return path.endsWith("/") && path.length > 1 ? path.slice(0, -1) : path;
   }
 
   /**
@@ -239,11 +254,17 @@ export class RoleBasedAuth {
   public hasPermission(user: User, permission: string): boolean {
     const userRoles = user.roles || [];
     const userPermissions = user.permissions || [];
-    
+
     const effectiveRoles = this.getEffectiveRoles(userRoles);
-    const effectivePermissions = this.getEffectivePermissions(effectiveRoles, userPermissions);
-    
-    return effectivePermissions.includes(permission) || effectivePermissions.includes('*');
+    const effectivePermissions = this.getEffectivePermissions(
+      effectiveRoles,
+      userPermissions
+    );
+
+    return (
+      effectivePermissions.includes(permission) ||
+      effectivePermissions.includes("*")
+    );
   }
 
   /**
@@ -253,9 +274,10 @@ export class RoleBasedAuth {
     const userRoles = user.roles || [];
     const effectiveRoles = this.getEffectiveRoles(userRoles);
     const requiredRoles = Array.isArray(roles) ? roles : [roles];
-    
-    return requiredRoles.some(role => 
-      effectiveRoles.includes(role) || effectiveRoles.includes('admin')
+
+    return requiredRoles.some(
+      (role) =>
+        effectiveRoles.includes(role) || effectiveRoles.includes("admin")
     );
   }
 
@@ -263,19 +285,23 @@ export class RoleBasedAuth {
    * Check if user is admin
    */
   public isAdmin(user: User): boolean {
-    return this.hasRole(user, 'admin');
+    return this.hasRole(user, "admin");
   }
 
   /**
    * Add route permission requirement
    */
-  public addRoutePermission(method: string, path: string, permissions: string[]): void {
+  public addRoutePermission(
+    method: string,
+    path: string,
+    permissions: string[]
+  ): void {
     const routeKey = `${method.toUpperCase()} ${path}`;
     this.routePermissions.set(routeKey, permissions);
-    
-    this.logger.debug('Route permission added', {
+
+    this.logger.debug("Route permission added", {
       route: routeKey,
-      permissions
+      permissions,
     });
   }
 
@@ -285,23 +311,27 @@ export class RoleBasedAuth {
   public removeRoutePermission(method: string, path: string): void {
     const routeKey = `${method.toUpperCase()} ${path}`;
     this.routePermissions.delete(routeKey);
-    
-    this.logger.debug('Route permission removed', {
-      route: routeKey
+
+    this.logger.debug("Route permission removed", {
+      route: routeKey,
     });
   }
 
   /**
    * Add role to hierarchy
    */
-  public addRole(role: string, inherits: string[] = [], permissions: string[] = []): void {
+  public addRole(
+    role: string,
+    inherits: string[] = [],
+    permissions: string[] = []
+  ): void {
     this.roleHierarchy.set(role, inherits);
     this.rolePermissions.set(role, permissions);
-    
-    this.logger.info('Role added', {
+
+    this.logger.info("Role added", {
       role,
       inherits,
-      permissions: permissions.length
+      permissions: permissions.length,
     });
   }
 

@@ -3,7 +3,7 @@ import { Logger } from "@libs/monitoring";
 
 export class DeduplicationService {
   private redis: any;
-  private logger: Logger;
+  private logger: ILogger;
 
   constructor() {
     this.redis = RedisClient.getInstance();

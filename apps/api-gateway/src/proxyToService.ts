@@ -20,7 +20,7 @@ export async function proxyToService<T = unknown>(
   serviceName: string,
   request: Request,
   serviceRegistry: EndpointRegistryService,
-  logger: Logger,
+  logger: ILogger,
   options?: {
     authHeader?: string;
     loadBalancingStrategy?: LoadBalancingStrategy;
@@ -65,7 +65,7 @@ export async function proxyToService<T = unknown>(
       "Content-Type": request.headers.get("Content-Type") || "application/json",
     };
     if (options?.authHeader) {
-      headers.Authorization = options.authHeader;
+      headers["Authorization"] = options.authHeader;
     }
     const axiosConfig = {
       url: targetUrl,

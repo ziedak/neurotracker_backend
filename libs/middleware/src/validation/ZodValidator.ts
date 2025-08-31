@@ -13,10 +13,10 @@ import {
  */
 export class ZodValidator implements Validator {
   private readonly config: ValidationConfig;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly schemas: Map<string, z.ZodSchema>;
 
-  constructor(config: ValidationConfig, logger: Logger) {
+  constructor(config: ValidationConfig, logger: ILogger) {
     this.config = config;
     this.logger = logger.child({ component: "ZodValidator" });
     this.schemas = new Map();

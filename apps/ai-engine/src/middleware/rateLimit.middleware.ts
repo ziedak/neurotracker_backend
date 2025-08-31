@@ -77,10 +77,10 @@ export class RateLimitMiddleware {
     };
   }
   private readonly redis: Redis;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
-  constructor(redis: Redis, logger: Logger, metrics: MetricsCollector) {
+  constructor(redis: Redis, logger: ILogger, metrics: MetricsCollector) {
     this.redis = redis;
     this.logger = logger;
     this.metrics = metrics;

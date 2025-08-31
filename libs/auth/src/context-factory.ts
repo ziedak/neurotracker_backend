@@ -6,7 +6,7 @@
 import {
   EnhancedJWTService,
   type TokenVerificationResult,
-} from "./services/enhanced-jwt-service-v2";
+} from "./services/jwt/enhanced-jwt-service-v2";
 import { type JWTPayload } from "./types/jwt-types";
 import {
   UnifiedAuthContext,

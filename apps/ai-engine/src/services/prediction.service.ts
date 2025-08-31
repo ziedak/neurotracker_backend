@@ -19,7 +19,7 @@ export class PredictionService {
   private readonly modelService: ModelService;
   private readonly featureService: FeatureService;
   private readonly cacheService: CacheService;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
   // Prediction configuration
@@ -44,7 +44,7 @@ export class PredictionService {
     modelService: ModelService,
     featureService: FeatureService,
     cacheService: CacheService,
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector
   ) {
     this.modelService = modelService;

@@ -43,10 +43,10 @@ export class DataExportService {
     BATCH_SIZE_SMALL: 5000,
     BATCH_SIZE_LARGE: 10000,
   };
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
-  constructor(logger: Logger, metrics: MetricsCollector) {
+  constructor(logger: ILogger, metrics: MetricsCollector) {
     this.logger = logger;
     this.metrics = metrics;
   }

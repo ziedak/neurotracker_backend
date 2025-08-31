@@ -15,7 +15,7 @@ const PORT = parseInt(process.env.PORT || "3006");
 // Initialize services
 let wsGateway: WebSocketGateway;
 let deliveryService: DeliveryService;
-let logger: Logger;
+let logger: ILogger;
 let metrics: MetricsCollector;
 
 // Initialize container and services

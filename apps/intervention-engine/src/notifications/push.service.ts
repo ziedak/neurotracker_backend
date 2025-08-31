@@ -11,7 +11,7 @@ export class PushService {
   private config: PushConfig;
 
   constructor(
-    private logger: Logger,
+    private logger: ILogger,
     private metrics: MetricsCollector,
     private templateService: TemplateService
   ) {

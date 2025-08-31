@@ -20,9 +20,9 @@ interface JwtPayload {
  */
 export class JwtAuth {
   private readonly config: AuthConfig;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
-  constructor(config: AuthConfig, logger: Logger) {
+  constructor(config: AuthConfig, logger: ILogger) {
     this.config = config;
     this.logger = logger.child({ component: "JwtAuth" });
   }

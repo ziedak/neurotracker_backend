@@ -4,7 +4,7 @@ import { AnalyticsService } from "./analytics.service";
 
 export const createAnalyticsController = (
   analyticsService: AnalyticsService,
-  logger: Logger,
+  logger: ILogger,
   metrics: MetricsCollector
 ) => {
   return (

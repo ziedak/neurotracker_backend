@@ -6,7 +6,6 @@
     "rootDir": "src"
   },
   "references": [
-    { "path": "../../libs/models" },
     { "path": "../../libs/utils" },
     { "path": "../../libs/config" },
     { "path": "../../libs/messaging" },

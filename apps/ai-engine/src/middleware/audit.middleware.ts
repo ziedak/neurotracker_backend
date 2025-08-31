@@ -38,7 +38,7 @@ interface AuditConfig {
  * Comprehensive logging and monitoring of all API interactions
  */
 export class AuditMiddleware {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
   private readonly config: AuditConfig;
 
@@ -56,7 +56,7 @@ export class AuditMiddleware {
   };
 
   constructor(
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector,
     config?: Partial<AuditConfig>
   ) {

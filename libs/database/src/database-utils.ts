@@ -1,6 +1,6 @@
-import { PostgreSQLClient } from "./postgress/pgClient";
+import { PostgreSQLClient } from "./postgress/PostgreSQLClient";
 import { ClickHouseClient } from "./clickhouse/clickhouseClient";
-import { RedisClient } from "./redisClient";
+import { RedisClient } from "./redis/redisClient";
 import { FeatureQueryBuilder } from "./postgress/query-builder";
 import { ClickHouseQueryBuilder } from "./clickhouse/clickhouse-query-builder";
 import { Prisma } from "@prisma/client";
@@ -110,74 +110,74 @@ export class DatabaseUtils {
   /**
    * Store features with upsert logic and caching
    */
-  static async storeFeatures(
-    cartId: string,
-    features: Record<string, Prisma.InputJsonValue>,
-    options: {
-      version?: string;
-      cacheKeyPrefix?: string;
-      cacheTTL?: number;
-    } = {}
-  ): Promise<void> {
-    const {
-      version = "1.0.0",
-      cacheKeyPrefix = "features",
-      cacheTTL = 3600,
-    } = options;
+  // static async storeFeatures(
+  //   cartId: string,
+  //   features: Record<string, Prisma.InputJsonValue>,
+  //   options: {
+  //     version?: string;
+  //     cacheKeyPrefix?: string;
+  //     cacheTTL?: number;
+  //   } = {}
+  // ): Promise<void> {
+  //   const {
+  //     version = "1.0.0",
+  //     cacheKeyPrefix = "features",
+  //     cacheTTL = 3600,
+  //   } = options;
 
-    const prisma = PostgreSQLClient.getInstance();
+  //   const prisma = PostgreSQLClient.getInstance();
 
-    // Use transaction for consistency
-    await prisma.$transaction(async (tx) => {
-      const upsertPromises = Object.entries(features).map(
-        async ([name, value]) => {
-          const existing = await tx.feature.findFirst({
-            where: { cartId, name },
-          });
-          if (existing) {
-            return tx.feature.update({
-              where: { id: existing.id },
-              data: {
-                value: value as Prisma.InputJsonValue,
-                updatedAt: new Date(),
-              },
-            });
-          } else {
-            return tx.feature.create({
-              data: {
-                cartId,
-                name,
-                value: value as Prisma.InputJsonValue,
-                createdAt: new Date(),
-                updatedAt: new Date(),
-              },
-            });
-          }
-        }
-      );
-      await Promise.all(upsertPromises);
-    });
+  //   // Use transaction for consistency
+  //   await prisma.$transaction(async (tx) => {
+  //     const upsertPromises = Object.entries(features).map(
+  //       async ([name, value]) => {
+  //         const existing = await tx.feature.findFirst({
+  //           where: { cartId, name },
+  //         });
+  //         if (existing) {
+  //           return tx.feature.update({
+  //             where: { id: existing.id },
+  //             data: {
+  //               value: value as Prisma.InputJsonValue,
+  //               updatedAt: new Date(),
+  //             },
+  //           });
+  //         } else {
+  //           return tx.feature.create({
+  //             data: {
+  //               cartId,
+  //               name,
+  //               value: value as Prisma.InputJsonValue,
+  //               createdAt: new Date(),
+  //               updatedAt: new Date(),
+  //             },
+  //           });
+  //         }
+  //       }
+  //     );
+  //     await Promise.all(upsertPromises);
+  //   });
 
-    // Update cache
-    try {
-      const cacheKey = `${cacheKeyPrefix}:${cartId}`;
-      const cacheData = {
-        ...features,
-        _version: version,
-        _cached_at: new Date().toISOString(),
-      };
-      await RedisClient.getInstance().setex(
-        cacheKey,
-        cacheTTL,
-        JSON.stringify(cacheData)
-      );
-    } catch (error) {
-      console.warn(
-        `[DatabaseUtils] Cache update failed for cartId=${cartId}:`,
-        error
-      );
-    }
-  }
+  //   // Update cache
+  //   try {
+  //     const cacheKey = `${cacheKeyPrefix}:${cartId}`;
+  //     const cacheData = {
+  //       ...features,
+  //       _version: version,
+  //       _cached_at: new Date().toISOString(),
+  //     };
+  //     await RedisClient.getInstance().setex(
+  //       cacheKey,
+  //       cacheTTL,
+  //       JSON.stringify(cacheData)
+  //     );
+  //   } catch (error) {
+  //     console.warn(
+  //       `[DatabaseUtils] Cache update failed for cartId=${cartId}:`,
+  //       error
+  //     );
+  //   }
+  // }
 
   /**
    * Analytics query with safe aggregation
@@ -194,10 +194,10 @@ export class DatabaseUtils {
       string | number | boolean | Date | { operator: string; value: any } | null
     > = {},
     options: {
-      groupBy?: string[];
-      dateFrom?: string;
-      dateTo?: string;
-      limit?: number;
+      groupBy?: string[] | undefined;
+      dateFrom?: string | undefined;
+      dateTo?: string | undefined;
+      limit?: number | undefined;
     } = {}
   ): Promise<any[]> {
     const allowedTables = [
@@ -601,7 +601,11 @@ export class DatabaseUtils {
       string,
       string | number | boolean | Date | { operator: string; value: any } | null
     >,
-    options: { dateFrom?: string; dateTo?: string; groupBy?: string }
+    options: {
+      dateFrom?: string | undefined;
+      dateTo?: string | undefined;
+      groupBy?: string | undefined;
+    }
   ): Promise<any[]> {
     const aggregations = [
       { field: "userId", function: "COUNT" as const, alias: "unique_users" },
@@ -623,7 +627,11 @@ export class DatabaseUtils {
       string,
       string | number | boolean | Date | { operator: string; value: any } | null
     >,
-    options: { dateFrom?: string; dateTo?: string; groupBy?: string }
+    options: {
+      dateFrom?: string | undefined;
+      dateTo?: string | undefined;
+      groupBy?: string | undefined;
+    }
   ): Promise<any[]> {
     const aggregations = [
       { field: "total", function: "SUM" as const, alias: "total_revenue" },
@@ -646,7 +654,11 @@ export class DatabaseUtils {
       string,
       string | number | boolean | Date | { operator: string; value: any } | null
     >,
-    options: { dateFrom?: string; dateTo?: string; groupBy?: string }
+    options: {
+      dateFrom?: string | undefined;
+      dateTo?: string | undefined;
+      groupBy?: string | undefined;
+    }
   ): Promise<any[]> {
     const aggregations = [
       { field: "name", function: "COUNT" as const, alias: "usage_count" },

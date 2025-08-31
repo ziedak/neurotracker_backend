@@ -13,9 +13,9 @@ import { Campaign, CampaignExecution } from "./types";
 
 export class ExecutionService {
   private redis: Redis;
-  private logger: Logger;
+  private logger: ILogger;
 
-  constructor(redis: Redis, logger: Logger) {
+  constructor(redis: Redis, logger: ILogger) {
     this.redis = redis;
     this.logger = logger;
   }

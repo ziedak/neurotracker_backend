@@ -4,7 +4,7 @@ import { TrackingService } from "./tracking.service";
 
 export const createTrackingController = (
   trackingService: TrackingService,
-  logger: Logger,
+  logger: ILogger,
   metrics: MetricsCollector
 ) => {
   return (

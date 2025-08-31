@@ -5,7 +5,7 @@ import { SegmentDefinition, UserProfile } from "./types";
 
 export class SegmentService {
   private redis: any;
-  constructor(private logger: Logger) {
+  constructor(private logger: ILogger) {
     this.redis = RedisClient.getInstance();
   }
 

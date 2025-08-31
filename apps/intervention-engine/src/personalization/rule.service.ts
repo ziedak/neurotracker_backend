@@ -64,7 +64,7 @@ export class RuleService {
     return path.split(".").reduce((current, key) => current?.[key], data);
   }
   private redis: any;
-  constructor(private logger: Logger) {
+  constructor(private logger: ILogger) {
     this.redis = RedisClient.getInstance();
   }
 

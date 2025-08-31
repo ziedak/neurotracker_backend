@@ -101,7 +101,7 @@ export class QueueCleanupService {
     maxCompletedJobs?: number;
     maxFailedJobs?: number;
   } = {};
-  constructor(private logger: Logger) {
+  constructor(private logger: ILogger) {
     this.redis = RedisClient.getInstance();
   }
 

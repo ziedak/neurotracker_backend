@@ -273,11 +273,11 @@ export class RecommendationService {
       imageUrl: p.imageUrl,
     }));
   }
-  public logger: Logger;
+  public logger: ILogger;
   public metrics: MetricsCollector;
   public dataAccess: DataAccessService;
   constructor(
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector,
     dataAccess: DataAccessService
   ) {

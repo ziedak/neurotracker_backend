@@ -30,7 +30,7 @@ export interface CustomError extends Error {
  * Framework-agnostic implementation for consistent error handling across all services
  */
 export class ErrorMiddleware {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly defaultConfig: ErrorConfig = {
     includeStackTrace: false,
     logErrors: true,
@@ -46,7 +46,7 @@ export class ErrorMiddleware {
     sensitiveFields: ["password", "token", "secret", "key", "auth"],
   };
 
-  constructor(logger: Logger) {
+  constructor(logger: ILogger) {
     this.logger = logger;
   }
 

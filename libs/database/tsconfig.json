@@ -7,9 +7,9 @@
     "tsBuildInfoFile": "../../dist/libs/database/tsconfig.tsbuildinfo"
   },
   "references": [
-    { "path": "../../libs/models" },
     { "path": "../../libs/utils" },
-    { "path": "../../libs/config" }
+    { "path": "../../libs/config" },
+    { "path": "../../libs/monitoring" }
   ],
   "include": ["src/**/*"],
   "exclude": ["node_modules"]

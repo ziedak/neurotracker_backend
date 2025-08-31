@@ -32,7 +32,7 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
 
   constructor(
     config: RateLimitConfig,
-    logger: Logger,
+    logger: ILogger,
     metrics?: MetricsCollector
   ) {
     super("rateLimit", config, logger, metrics);

@@ -12,9 +12,9 @@ export interface AuthMiddlewareOptions {
  */
 export class AuthMiddleware {
   private readonly securityService: SecurityService;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
-  constructor(securityService: SecurityService, logger: Logger) {
+  constructor(securityService: SecurityService, logger: ILogger) {
     this.securityService = securityService;
     this.logger = logger;
   }

@@ -57,21 +57,21 @@ export interface APIKey {
   keyHash: string; // Never store the actual key
   keyPrefix: string; // First 8 chars for identification
   name: string;
-  description?: string;
+  description?: string | undefined;
   scope: APIKeyScope;
   permissions: string[];
   status: APIKeyStatus;
   createdAt: Date;
   updatedAt: Date;
-  expiresAt?: Date;
-  lastUsedAt?: Date;
+  expiresAt?: Date | undefined;
+  lastUsedAt?: Date | undefined;
   usageCount: number;
   rateLimit: {
     requestsPerHour: number;
     requestsPerDay: number;
     burstLimit: number;
   };
-  ipWhitelist?: string[];
+  ipWhitelist?: string[] | undefined;
   metadata: Record<string, any>;
 }
 
@@ -119,10 +119,10 @@ export interface APIKeyUsage {
   method: string;
   responseStatus: number;
   responseTime: number;
-  userAgent?: string;
+  userAgent?: string | undefined;
   ipAddress: string;
-  requestSize?: number;
-  responseSize?: number;
+  requestSize?: number | undefined;
+  responseSize?: number | undefined;
   metadata: Record<string, any>;
 }
 
@@ -141,7 +141,7 @@ export interface RateLimitResult {
     daily: Date;
     burst: Date;
   };
-  retryAfter?: number; // seconds
+  retryAfter?: number | undefined; // seconds
 }
 
 /**
@@ -464,6 +464,7 @@ class APIKeyCacheManager {
 
       for (let i = 0; i < Math.min(removeCount, allEntries.length); i++) {
         const entry = allEntries[i];
+        if (!entry) continue;
         switch (entry.cache) {
           case "key":
             this.keyCache.delete(entry.key);
@@ -611,14 +612,14 @@ class RateLimiter {
  * Enterprise-grade API key management with comprehensive features
  */
 export class APIKeyService implements IAPIKeyService {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly db: DatabaseUtils;
   private readonly crypto: ICryptoService;
   private readonly cache: APIKeyCacheManager;
   private readonly rateLimiter: RateLimiter;
   private readonly metrics: Map<string, number> = new Map();
 
-  constructor(db: DatabaseUtils, logger: Logger) {
+  constructor(db: DatabaseUtils, logger: ILogger) {
     this.db = db;
     this.logger = logger;
     this.crypto = new CryptoService();
@@ -747,7 +748,7 @@ export class APIKeyService implements IAPIKeyService {
 
       return { apiKey, keyValue };
     } catch (error) {
-      this.logger.error("Failed to generate API key", {
+      this.logger.error("Failed to generate API key", error as Error, {
         userId,
         name: options.name,
         error: this.getErrorMessage(error),
@@ -885,7 +886,7 @@ export class APIKeyService implements IAPIKeyService {
 
       return validation;
     } catch (error) {
-      this.logger.error("Failed to validate API key", {
+      this.logger.error("Failed to validate API key", error as Error, {
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
@@ -934,7 +935,7 @@ export class APIKeyService implements IAPIKeyService {
 
       return apiKey;
     } catch (error) {
-      this.logger.error("Failed to get API key", {
+      this.logger.error("Failed to get API key", error as Error, {
         keyId,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -971,7 +972,7 @@ export class APIKeyService implements IAPIKeyService {
 
       return apiKeys;
     } catch (error) {
-      this.logger.error("Failed to get user API keys", {
+      this.logger.error("Failed to get user API keys", error as Error, {
         userId,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1035,9 +1036,8 @@ export class APIKeyService implements IAPIKeyService {
 
       return updatedKey;
     } catch (error) {
-      this.logger.error("Failed to update API key", {
+      this.logger.error("Failed to update API key", error as Error, {
         keyId,
-        error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
       throw error;
@@ -1081,7 +1081,7 @@ export class APIKeyService implements IAPIKeyService {
         duration: Date.now() - startTime,
       });
     } catch (error) {
-      this.logger.error("Failed to revoke API key", {
+      this.logger.error("Failed to revoke API key", error as Error, {
         keyId,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1147,7 +1147,7 @@ export class APIKeyService implements IAPIKeyService {
 
       return { apiKey: rotatedKey, keyValue: newKeyValue };
     } catch (error) {
-      this.logger.error("Failed to rotate API key", {
+      this.logger.error("Failed to rotate API key", error as Error, {
         keyId,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1177,7 +1177,7 @@ export class APIKeyService implements IAPIKeyService {
           apiKey.scope === APIKeyScope.FULL_ACCESS
       );
     } catch (error) {
-      this.logger.error("Failed to check permissions", {
+      this.logger.error("Failed to check permissions", error as Error, {
         keyId,
         requiredPermissions,
         error: this.getErrorMessage(error),
@@ -1225,7 +1225,7 @@ export class APIKeyService implements IAPIKeyService {
         status: usage.responseStatus,
       });
     } catch (error) {
-      this.logger.error("Failed to track API key usage", {
+      this.logger.error("Failed to track API key usage", error as Error, {
         keyId,
         error: this.getErrorMessage(error),
       });
@@ -1254,7 +1254,7 @@ export class APIKeyService implements IAPIKeyService {
 
       return usage;
     } catch (error) {
-      this.logger.error("Failed to get API key usage", {
+      this.logger.error("Failed to get API key usage", error as Error, {
         keyId,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1309,7 +1309,7 @@ export class APIKeyService implements IAPIKeyService {
 
       return analytics;
     } catch (error) {
-      this.logger.error("Failed to get API key analytics", {
+      this.logger.error("Failed to get API key analytics", error as Error, {
         keyId,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1351,7 +1351,7 @@ export class APIKeyService implements IAPIKeyService {
 
       return rateLimitResult;
     } catch (error) {
-      this.logger.error("Failed to enforce rate limit", {
+      this.logger.error("Failed to enforce rate limit", error as Error, {
         keyId,
         error: this.getErrorMessage(error),
       });
@@ -1369,7 +1369,7 @@ export class APIKeyService implements IAPIKeyService {
 
       this.logger.info("Rate limit reset", { keyId });
     } catch (error) {
-      this.logger.error("Failed to reset rate limit", {
+      this.logger.error("Failed to reset rate limit", error as Error, {
         keyId,
         error: this.getErrorMessage(error),
       });
@@ -1424,7 +1424,7 @@ export class APIKeyService implements IAPIKeyService {
 
       return results;
     } catch (error) {
-      this.logger.error("Failed to batch validate API keys", {
+      this.logger.error("Failed to batch validate API keys", error as Error, {
         count: keyValues.length,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1461,7 +1461,7 @@ export class APIKeyService implements IAPIKeyService {
         duration: Date.now() - startTime,
       });
     } catch (error) {
-      this.logger.error("Failed to batch revoke API keys", {
+      this.logger.error("Failed to batch revoke API keys", error as Error, {
         count: keyIds.length,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1496,7 +1496,7 @@ export class APIKeyService implements IAPIKeyService {
 
       return expiredKeyIds.length;
     } catch (error) {
-      this.logger.error("Failed to cleanup expired keys", {
+      this.logger.error("Failed to cleanup expired keys", error as Error, {
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
       });
@@ -1556,7 +1556,7 @@ export class APIKeyService implements IAPIKeyService {
 
       return report;
     } catch (error) {
-      this.logger.error("Failed to generate usage report", {
+      this.logger.error("Failed to generate usage report", error as Error, {
         userId,
         error: this.getErrorMessage(error),
         duration: Date.now() - startTime,
@@ -1709,7 +1709,7 @@ export class APIKeyService implements IAPIKeyService {
     }
 
     const regions = ["US-East", "US-West", "EU-West", "Asia-Pacific"];
-    return regions[Math.floor(Math.random() * regions.length)];
+    return regions[Math.floor(Math.random() * regions.length)] ?? "Unknown";
   }
 
   // Mock database operations - would use actual database in production
@@ -1796,7 +1796,7 @@ export class APIKeyService implements IAPIKeyService {
 // Export for dependency injection
 export const createAPIKeyService = (
   db: DatabaseUtils,
-  logger: Logger
+  logger: ILogger
 ): APIKeyService => {
   return new APIKeyService(db, logger);
 };

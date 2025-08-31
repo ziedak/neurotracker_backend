@@ -82,7 +82,7 @@ class WebSocketRateLimitMiddleware extends BaseWebSocketMiddleware<RateLimitConf
 
   constructor(
     config: RateLimitConfig,
-    logger: Logger = Logger.getInstance("WebSocketRateLimit"),
+    logger: ILogger = Logger.getInstance("WebSocketRateLimit"),
     metrics?: MetricsCollector
   ) {
     super("rate-limit", config, logger, metrics);
@@ -171,7 +171,7 @@ class WebSocketRateLimitMiddleware extends BaseWebSocketMiddleware<RateLimitConf
 class WebSocketOriginValidationMiddleware extends BaseWebSocketMiddleware<OriginValidationConfig> {
   constructor(
     config: OriginValidationConfig,
-    logger: Logger = Logger.getInstance("WebSocketOriginValidation"),
+    logger: ILogger = Logger.getInstance("WebSocketOriginValidation"),
     metrics?: MetricsCollector
   ) {
     super("origin-validation", config, logger, metrics);
@@ -251,11 +251,11 @@ class WebSocketOriginValidationMiddleware extends BaseWebSocketMiddleware<Origin
  * Creates optimized middleware chains with enterprise-grade features
  */
 export class WebSocketMiddlewareChainFactory {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
   constructor(
-    logger: Logger = Logger.getInstance("WebSocketMiddlewareChainFactory"),
+    logger: ILogger = Logger.getInstance("WebSocketMiddlewareChainFactory"),
     metrics?: MetricsCollector
   ) {
     this.logger = logger;

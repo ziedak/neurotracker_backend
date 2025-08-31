@@ -12,7 +12,7 @@ import {
 export abstract class BaseWebSocketMiddleware<
   TConfig extends WebSocketMiddlewareOptions = WebSocketMiddlewareOptions
 > {
-  protected readonly logger: Logger;
+  protected readonly logger: ILogger;
   protected readonly metrics: MetricsCollector | undefined;
   protected readonly config: TConfig;
   protected readonly name: string;
@@ -20,7 +20,7 @@ export abstract class BaseWebSocketMiddleware<
   constructor(
     name: string,
     config: TConfig,
-    logger: Logger,
+    logger: ILogger,
     metrics?: MetricsCollector
   ) {
     this.name = name;
@@ -107,7 +107,11 @@ export abstract class BaseWebSocketMiddleware<
   /**
    * Record a metric counter
    */
-  protected async recordMetric(name: string, value: number = 1): Promise<void> {
+  protected async recordMetric(
+    name: string,
+    value: number = 1,
+    p0: { source: "local" | "remote"; messageType: string; realm: string }
+  ): Promise<void> {
     if (this.metrics) {
       await this.metrics.recordCounter(name, value, {
         middleware: this.name,
@@ -119,7 +123,11 @@ export abstract class BaseWebSocketMiddleware<
   /**
    * Record a timing metric
    */
-  protected async recordTimer(name: string, duration: number): Promise<void> {
+  protected async recordTimer(
+    name: string,
+    duration: number,
+    p0: { authenticated: string; messageType: string; realm: string }
+  ): Promise<void> {
     if (this.metrics) {
       await this.metrics.recordTimer(name, duration, {
         middleware: this.name,

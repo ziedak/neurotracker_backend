@@ -57,7 +57,7 @@ export class WebSocketAuthMiddleware extends BaseWebSocketMiddleware<WebSocketAu
   constructor(
     config: WebSocketAuthConfig,
     sessionManager: UnifiedSessionManager,
-    logger: Logger = Logger.getInstance("WebSocketAuthMiddleware"),
+    logger: ILogger = Logger.getInstance("WebSocketAuthMiddleware"),
     metrics?: MetricsCollector,
     permissionService?: PermissionService
   ) {
@@ -925,7 +925,7 @@ export class WebSocketAuthMiddleware extends BaseWebSocketMiddleware<WebSocketAu
   static create(
     config: WebSocketAuthConfig,
     sessionManager: UnifiedSessionManager,
-    logger: Logger,
+    logger: ILogger,
     metrics?: MetricsCollector
   ): WebSocketMiddlewareFunction {
     const middleware = new WebSocketAuthMiddleware(

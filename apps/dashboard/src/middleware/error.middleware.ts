@@ -29,7 +29,7 @@ export interface CustomError extends Error {
  * Provides comprehensive error handling with logging and response formatting
  */
 export class ErrorMiddleware {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly defaultConfig: ErrorConfig = {
     includeStackTrace: false,
     logErrors: true,
@@ -45,7 +45,7 @@ export class ErrorMiddleware {
     sensitiveFields: ["password", "token", "secret", "key", "auth"],
   };
 
-  constructor(logger: Logger) {
+  constructor(logger: ILogger) {
     this.logger = logger;
   }
 

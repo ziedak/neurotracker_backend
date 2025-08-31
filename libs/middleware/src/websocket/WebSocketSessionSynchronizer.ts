@@ -53,7 +53,7 @@ export interface WebSocketConnection {
  * Cross-protocol session synchronizer using Redis pub/sub
  */
 export class WebSocketSessionSynchronizer {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
   private readonly redis: any; // ioredis Redis instance
   private readonly subscriber: any; // Separate subscriber instance
@@ -65,7 +65,7 @@ export class WebSocketSessionSynchronizer {
   private readonly SESSION_DELETE_CHANNEL = "session:deleted";
   private readonly SESSION_EXPIRE_CHANNEL = "session:expired";
 
-  constructor(logger: Logger, metrics: MetricsCollector, redis?: any) {
+  constructor(logger: ILogger, metrics: MetricsCollector, redis?: any) {
     this.logger = logger.child({ component: "WebSocketSessionSynchronizer" });
     this.metrics = metrics;
     this.redis = redis || RedisClient.getInstance();

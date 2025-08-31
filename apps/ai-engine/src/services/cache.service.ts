@@ -10,7 +10,7 @@ import { performance } from "perf_hooks";
  */
 export class CacheService {
   private readonly redis: Redis;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
   // Cache configuration
@@ -31,7 +31,7 @@ export class CacheService {
     STATS: "ai:stats",
   };
 
-  constructor(redis: Redis, logger: Logger, metrics: MetricsCollector) {
+  constructor(redis: Redis, logger: ILogger, metrics: MetricsCollector) {
     this.redis = redis;
     this.logger = logger;
     this.metrics = metrics;

@@ -11,7 +11,7 @@ export class EmailService {
   private config: EmailConfig;
 
   constructor(
-    private logger: Logger,
+    private logger: ILogger,
     private metrics: MetricsCollector,
     private templateService: TemplateService
   ) {

@@ -57,10 +57,14 @@ export class QueryBuilder {
     if (dateFrom || dateTo) {
       conditions[field] = {};
       if (dateFrom) {
-        (conditions[field] as { gte?: Date; lte?: Date }).gte = new Date(dateFrom);
+        (conditions[field] as { gte?: Date; lte?: Date }).gte = new Date(
+          dateFrom
+        );
       }
       if (dateTo) {
-        (conditions[field] as { gte?: Date; lte?: Date }).lte = new Date(dateTo);
+        (conditions[field] as { gte?: Date; lte?: Date }).lte = new Date(
+          dateTo
+        );
       }
     }
     return conditions;
@@ -103,7 +107,10 @@ export class QueryBuilder {
     if (typeof input !== "string") {
       throw new Error("Input must be a string");
     }
-    return input.replace(/[\0\b\n\r\t\Z]/g, "").replace(/['"`]/g, "").trim();
+    return input
+      .replace(/[\0\b\n\r\t\Z]/g, "")
+      .replace(/['"`]/g, "")
+      .trim();
   }
 
   /**
@@ -115,7 +122,9 @@ export class QueryBuilder {
     }
     return input
       .filter((item) => item !== null && item !== undefined)
-      .map((item) => (typeof item === "string" ? this.sanitizeString(item) : item));
+      .map((item) =>
+        typeof item === "string" ? this.sanitizeString(item) : item
+      );
   }
 
   /**
@@ -137,7 +146,10 @@ export class QueryBuilder {
           conditions[key] = typeof value === "number" ? value : Number(value);
           break;
         case "date":
-          conditions[key] = value instanceof Date ? value : new Date(value as string | number | Date);
+          conditions[key] =
+            value instanceof Date
+              ? value
+              : new Date(value as string | number | Date);
           break;
         case "boolean":
           conditions[key] = Boolean(value);
@@ -159,11 +171,11 @@ export class FeatureQueryBuilder extends QueryBuilder {
    * Build safe feature query conditions
    */
   static buildFeatureWhere(filters: {
-    cartId?: string;
-    featureNames?: string[];
-    dateFrom?: string;
-    dateTo?: string;
-    includeExpired?: boolean;
+    cartId?: string | undefined;
+    featureNames?: string[] | undefined;
+    dateFrom?: string | undefined;
+    dateTo?: string | undefined;
+    includeExpired?: boolean | undefined;
   }): Prisma.FeatureWhereInput {
     const where: Prisma.FeatureWhereInput = {};
 
@@ -178,7 +190,10 @@ export class FeatureQueryBuilder extends QueryBuilder {
     }
 
     if (filters.dateFrom || filters.dateTo) {
-      Object.assign(where, this.buildDateRange("updatedAt", filters.dateFrom, filters.dateTo));
+      Object.assign(
+        where,
+        this.buildDateRange("updatedAt", filters.dateFrom, filters.dateTo)
+      );
     }
 
     if (filters.includeExpired === false) {
@@ -190,7 +205,6 @@ export class FeatureQueryBuilder extends QueryBuilder {
     return where;
   }
 }
-
 
 /**
  * Cart query builder with safe conditions
@@ -221,7 +235,10 @@ export class CartQueryBuilder extends QueryBuilder {
     }
 
     if (filters.dateFrom || filters.dateTo) {
-      Object.assign(where, this.buildDateRange("createdAt", filters.dateFrom, filters.dateTo));
+      Object.assign(
+        where,
+        this.buildDateRange("createdAt", filters.dateFrom, filters.dateTo)
+      );
     }
 
     if (filters.minTotal !== undefined || filters.maxTotal !== undefined) {
@@ -237,7 +254,6 @@ export class CartQueryBuilder extends QueryBuilder {
     return where;
   }
 }
-
 
 /**
  * User event query builder for analytics
@@ -278,7 +294,10 @@ export class UserEventQueryBuilder extends QueryBuilder {
     }
 
     if (filters.dateFrom || filters.dateTo) {
-      Object.assign(where, this.buildDateRange("timestamp", filters.dateFrom, filters.dateTo));
+      Object.assign(
+        where,
+        this.buildDateRange("timestamp", filters.dateFrom, filters.dateTo)
+      );
     }
 
     return where;

@@ -18,8 +18,8 @@
 
 import { Logger } from "@libs/monitoring";
 import { DatabaseUtils } from "../utils/database-utils";
-import { PasswordService } from "./password-service";
-import { UnifiedSessionManager } from "./unified-session-manager";
+import { PasswordService } from "./password/password-service";
+import { UnifiedSessionManager } from "./session/unified-session-manager";
 // import { PermissionService } from "./permission-service.ts.old";
 import {
   User,
@@ -222,7 +222,7 @@ class UserCacheManager {
  * Enterprise-grade user management with comprehensive features
  */
 export class UserService implements IUserService {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly db: DatabaseUtils;
   private readonly passwordService: PasswordService;
   private readonly sessionManager: UnifiedSessionManager;
@@ -235,7 +235,7 @@ export class UserService implements IUserService {
     passwordService: PasswordService,
     sessionManager: UnifiedSessionManager,
     // permissionService: PermissionService,
-    logger: Logger
+    logger: ILogger
   ) {
     this.db = db;
     this.passwordService = passwordService;
@@ -361,10 +361,9 @@ export class UserService implements IUserService {
         {
           message: this.getErrorMessage(error),
           duration: Date.now() - startTime,
-          metadata: { email: userData.email }
+          metadata: { email: userData.email },
         }
       );
-
 
       throw error;
     }
@@ -463,11 +462,15 @@ export class UserService implements IUserService {
 
       return user;
     } catch (error) {
-      this.logger.error("Failed to get user by email", error instanceof Error ? error : undefined, {
-        email,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to get user by email",
+        error instanceof Error ? error : undefined,
+        {
+          email,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -545,11 +548,15 @@ export class UserService implements IUserService {
 
       return updatedUser;
     } catch (error) {
-      this.logger.error("Failed to update user", error instanceof Error ? error : undefined, {
-        userId,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to update user",
+        error instanceof Error ? error : undefined,
+        {
+          userId,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -607,11 +614,15 @@ export class UserService implements IUserService {
         duration: Date.now() - startTime,
       });
     } catch (error) {
-      this.logger.error("Failed to delete user", error instanceof Error ? error : undefined, {
-        userId,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to delete user",
+        error instanceof Error ? error : undefined,
+        {
+          userId,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -707,11 +718,15 @@ export class UserService implements IUserService {
 
       return updatedUser;
     } catch (error) {
-      this.logger.error("Authentication failed", error instanceof Error ? error : undefined, {
-        email,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Authentication failed",
+        error instanceof Error ? error : undefined,
+        {
+          email,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -752,11 +767,15 @@ export class UserService implements IUserService {
         duration: Date.now() - startTime,
       });
     } catch (error) {
-      this.logger.error("Failed to update user password", error instanceof Error ? error : undefined, {
-        userId,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to update user password",
+        error instanceof Error ? error : undefined,
+        {
+          userId,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -799,12 +818,16 @@ export class UserService implements IUserService {
         duration: Date.now() - startTime,
       });
     } catch (error) {
-      this.logger.error("Failed to lock user account", error instanceof Error ? error : undefined, {
-        userId,
-        reason,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to lock user account",
+        error instanceof Error ? error : undefined,
+        {
+          userId,
+          reason,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -879,12 +902,16 @@ export class UserService implements IUserService {
 
       return updatedUser;
     } catch (error) {
-      this.logger.error("Failed to revoke user role", error instanceof Error ? error : undefined, {
-        userId,
-        revokedBy,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to revoke user role",
+        error instanceof Error ? error : undefined,
+        {
+          userId,
+          revokedBy,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -940,11 +967,15 @@ export class UserService implements IUserService {
         duration: Date.now() - startTime,
       });
     } catch (error) {
-      this.logger.error("Failed to unlock user account", error instanceof Error ? error : undefined, {
-        userId,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to unlock user account",
+        error instanceof Error ? error : undefined,
+        {
+          userId,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -1000,11 +1031,15 @@ export class UserService implements IUserService {
 
       return result;
     } catch (error) {
-      this.logger.error("Failed to batch get users", error instanceof Error ? error : undefined, {
-        userIds: userIds.length,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to batch get users",
+        error instanceof Error ? error : undefined,
+        {
+          userIds: userIds.length,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -1032,7 +1067,10 @@ export class UserService implements IUserService {
           if (result.status === "fulfilled") {
             createdUsers.push(result.value);
           } else {
-            this.logger.error("Failed to create user in batch",  new Error(result.reason.message));
+            this.logger.error(
+              "Failed to create user in batch",
+              new Error(result.reason.message)
+            );
           }
         }
       }
@@ -1046,11 +1084,15 @@ export class UserService implements IUserService {
 
       return createdUsers;
     } catch (error) {
-      this.logger.error("Failed to batch create users", error instanceof Error ? error : undefined, {
-        count: usersData.length,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to batch create users",
+        error instanceof Error ? error : undefined,
+        {
+          count: usersData.length,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -1080,7 +1122,10 @@ export class UserService implements IUserService {
           if (result.status === "fulfilled") {
             updatedUsers.push(result.value);
           } else {
-            this.logger.error("Failed to update user in batch", new Error(result.reason.message));
+            this.logger.error(
+              "Failed to update user in batch",
+              new Error(result.reason.message)
+            );
           }
         }
       }
@@ -1094,11 +1139,15 @@ export class UserService implements IUserService {
 
       return updatedUsers;
     } catch (error) {
-      this.logger.error("Failed to batch update users", error instanceof Error ? error : undefined, {
-        count: updates.length,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to batch update users",
+        error instanceof Error ? error : undefined,
+        {
+          count: updates.length,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -1147,11 +1196,15 @@ export class UserService implements IUserService {
 
       return securityProfile;
     } catch (error) {
-      this.logger.error("Failed to get user security profile", error instanceof Error ? error : undefined, {
-        userId,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to get user security profile",
+        error instanceof Error ? error : undefined,
+        {
+          userId,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -1205,11 +1258,15 @@ export class UserService implements IUserService {
         duration: Date.now() - startTime,
       });
     } catch (error) {
-      this.logger.error("Failed to update user security settings", error instanceof Error ? error : undefined, {
-        userId,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to update user security settings",
+        error instanceof Error ? error : undefined,
+        {
+          userId,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -1237,11 +1294,15 @@ export class UserService implements IUserService {
       // In a real implementation, this would go to a security audit log
       this.logger.info("Security event logged", securityEvent);
     } catch (error) {
-      this.logger.error("Failed to log security event", error instanceof Error ? error : undefined, {
-        userId,
-        event,
-        error: this.getErrorMessage(error),
-      });
+      this.logger.error(
+        "Failed to log security event",
+        error instanceof Error ? error : undefined,
+        {
+          userId,
+          event,
+          error: this.getErrorMessage(error),
+        }
+      );
     }
   }
 
@@ -1268,11 +1329,15 @@ export class UserService implements IUserService {
         duration: Date.now() - startTime,
       });
     } catch (error) {
-      this.logger.error("Failed to preload user data",error instanceof Error ? error : undefined, {
-        count: userIds.length,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to preload user data",
+        error instanceof Error ? error : undefined,
+        {
+          count: userIds.length,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -1288,10 +1353,14 @@ export class UserService implements IUserService {
         this.logger.debug("User cache warmed", { userId });
       }
     } catch (error) {
-      this.logger.error("Failed to warm user cache", error instanceof Error ? error : undefined, {
-        userId,
-        error: this.getErrorMessage(error),
-      });
+      this.logger.error(
+        "Failed to warm user cache",
+        error instanceof Error ? error : undefined,
+        {
+          userId,
+          error: this.getErrorMessage(error),
+        }
+      );
       throw error;
     }
   }
@@ -1319,11 +1388,15 @@ export class UserService implements IUserService {
 
       return history;
     } catch (error) {
-      this.logger.error("Failed to get user login history", error instanceof Error ? error : undefined, {
-        userId,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to get user login history",
+        error instanceof Error ? error : undefined,
+        {
+          userId,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -1365,11 +1438,15 @@ export class UserService implements IUserService {
 
       return summary;
     } catch (error) {
-      this.logger.error("Failed to get user activity summary", error instanceof Error ? error : undefined, {
-        userId,
-        error: this.getErrorMessage(error),
-        duration: Date.now() - startTime,
-      });
+      this.logger.error(
+        "Failed to get user activity summary",
+        error instanceof Error ? error : undefined,
+        {
+          userId,
+          error: this.getErrorMessage(error),
+          duration: Date.now() - startTime,
+        }
+      );
       throw error;
     }
   }
@@ -1467,10 +1544,14 @@ export class UserService implements IUserService {
 
       this.logger.debug("Storing user in database", { userId: user.id });
     } catch (error) {
-      this.logger.error("Failed to store user in database", error instanceof Error ? error : undefined, {
-        userId: user.id,
-        error: this.getErrorMessage(error),
-      });
+      this.logger.error(
+        "Failed to store user in database",
+        error instanceof Error ? error : undefined,
+        {
+          userId: user.id,
+          error: this.getErrorMessage(error),
+        }
+      );
       throw error;
     }
   }
@@ -1514,10 +1595,14 @@ export class UserService implements IUserService {
       this.logger.debug("Fetching user from database", { userId });
       return null; // Mock: user not found
     } catch (error) {
-      this.logger.error("Failed to fetch user from database", error instanceof Error ? error : undefined, {
-        userId,
-        error: this.getErrorMessage(error),
-      });
+      this.logger.error(
+        "Failed to fetch user from database",
+        error instanceof Error ? error : undefined,
+        {
+          userId,
+          error: this.getErrorMessage(error),
+        }
+      );
       return null;
     }
   }
@@ -1606,7 +1691,11 @@ export class UserService implements IUserService {
       this.logger.debug("Role resolved", { roleId, role: mockRole.name });
       return mockRole;
     } catch (error) {
-      this.logger.error("Failed to resolve role", error instanceof Error ? error : undefined, { roleId, error });
+      this.logger.error(
+        "Failed to resolve role",
+        error instanceof Error ? error : undefined,
+        { roleId, error }
+      );
 
       // Return default customer role on failure
       return {
@@ -1638,7 +1727,7 @@ export const createUserService = (
   passwordService: PasswordService,
   sessionManager: UnifiedSessionManager,
   // permissionService: PermissionService,
-  logger: Logger
+  logger: ILogger
 ): UserService => {
   return new UserService(
     db,

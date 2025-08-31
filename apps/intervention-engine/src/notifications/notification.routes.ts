@@ -9,7 +9,7 @@ export const createNotificationRoutes = (
   emailService: EmailService,
   smsService: SMSService,
   pushService: PushService,
-  logger: Logger,
+  logger: ILogger,
   metrics: MetricsCollector
 ) => {
   return (

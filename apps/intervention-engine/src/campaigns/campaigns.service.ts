@@ -87,7 +87,7 @@ export class RedisCampaignsService implements CampaignsService {
   private lifecycleService: ILifecycleService;
   private executionService: IExecutionService;
   private metricsService: IMetricsService;
-  private logger: Logger;
+  private logger: ILogger;
   private metrics: MetricsCollector;
   // Centralized Redis key builder
   private static keys = {
@@ -124,7 +124,7 @@ export class RedisCampaignsService implements CampaignsService {
     redis: any,
     repository: CampaignRepository,
     indexRepository: CampaignIndexRepository,
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector,
     lifecycleService?: ILifecycleService,
     executionService?: IExecutionService,

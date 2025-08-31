@@ -9,13 +9,13 @@ import { RateLimitResult } from "./RateLimitMiddleware";
  */
 export class RedisRateLimit {
   private readonly config: RateLimitConfig;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics?: MetricsCollector;
   private redis?: any; // RedisClient instance
 
   constructor(
     config: RateLimitConfig,
-    logger: Logger,
+    logger: ILogger,
     metrics?: MetricsCollector
   ) {
     this.config = config;

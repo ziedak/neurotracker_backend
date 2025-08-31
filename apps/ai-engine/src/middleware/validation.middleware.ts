@@ -102,7 +102,7 @@ interface ValidationConfig {
  * Handles request validation, sanitization, and parameter checking
  */
 export class ValidationMiddleware {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
   private readonly config: ValidationConfig;
 
@@ -114,7 +114,7 @@ export class ValidationMiddleware {
   };
 
   constructor(
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector,
     config?: Partial<ValidationConfig>
   ) {

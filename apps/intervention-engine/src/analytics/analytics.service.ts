@@ -284,7 +284,7 @@ export class RedisAnalyticsService implements AnalyticsService {
    */
   private channels: string[];
 
-  constructor(redis: any, private logger: Logger) {
+  constructor(redis: any, private logger: ILogger) {
     this.redis = redis || RedisClient.getInstance();
     this.channels = ["email", "sms", "push", "websocket"];
   }
@@ -467,8 +467,6 @@ export class RedisAnalyticsService implements AnalyticsService {
       };
     }, "get AB test results");
   }
-
-
 }
 
 // Service implementation complete

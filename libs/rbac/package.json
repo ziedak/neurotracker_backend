@@ -15,8 +15,6 @@
   },
   "dependencies": {
     "@libs/database": "workspace:*",
-    "@libs/models": "workspace:*",
-    "@libs/monitoring": "workspace:*",
     "@libs/utils": "workspace:*",
     "ioredis": "^5.3.2",
     "reflect-metadata": "^0.1.13",

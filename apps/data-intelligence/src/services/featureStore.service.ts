@@ -131,7 +131,7 @@ export class FeatureStoreService {
   private readonly redis: RedisClient;
   private readonly clickhouse: ClickHouseClient;
   private readonly postgres: PostgreSQLClient;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
   private readonly circuitBreaker: import("@libs/utils").CircuitBreaker;
   private readonly lruCache: import("@libs/utils").LRUCache<
@@ -148,7 +148,7 @@ export class FeatureStoreService {
     redis: RedisClient,
     clickhouse: ClickHouseClient,
     postgres: PostgreSQLClient,
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector,
     circuitBreaker: import("@libs/utils").CircuitBreaker,
     lruCache: import("@libs/utils").LRUCache<string, Record<string, any>>

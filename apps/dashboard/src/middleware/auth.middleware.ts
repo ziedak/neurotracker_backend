@@ -5,9 +5,9 @@ import { Logger } from "@libs/monitoring";
  * Basic implementation for development purposes
  */
 export class AuthMiddleware {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
-  constructor(logger: Logger) {
+  constructor(logger: ILogger) {
     this.logger = logger;
   }
 

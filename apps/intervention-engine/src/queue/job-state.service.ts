@@ -4,7 +4,7 @@ import { QueueJob, JobResult } from "./types";
 
 export class JobStateService {
   private redis: any;
-  constructor(private logger: Logger, private metrics: MetricsCollector) {
+  constructor(private logger: ILogger, private metrics: MetricsCollector) {
     this.redis = RedisClient.getInstance();
   }
 

@@ -7,7 +7,7 @@ import { Logger } from "@libs/monitoring";
  */
 export class BatchedRedisOperations {
   private redis: any;
-  private logger: Logger;
+  private logger: ILogger;
 
   constructor(redisClient?: any) {
     this.redis = redisClient || RedisClient.getInstance();

@@ -20,9 +20,9 @@ export class MiddlewareChain {
     error: Error,
     context: MiddlewareContext
   ) => any;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
-  constructor(config: MiddlewareChainConfig, logger: Logger) {
+  constructor(config: MiddlewareChainConfig, logger: ILogger) {
     this.logger = logger.child({ component: "MiddlewareChain" });
     this.errorHandler = config.errorHandler;
 

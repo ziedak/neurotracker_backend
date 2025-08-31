@@ -10,7 +10,7 @@ export class WebSocketGateway {
   private connections: Map<string, WebSocketConnection> = new Map();
   private heartbeatInterval?: NodeJS.Timeout;
 
-  constructor(private logger: Logger, private metrics: MetricsCollector) {
+  constructor(private logger: ILogger, private metrics: MetricsCollector) {
     this.startHeartbeat();
   }
 

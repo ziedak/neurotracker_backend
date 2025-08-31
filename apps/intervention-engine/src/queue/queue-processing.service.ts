@@ -23,7 +23,7 @@ export class QueueProcessingService {
   public jobState: JobStateService;
   public cleanup: QueueCleanupService;
   public config: QueueConfig;
-  public logger: Logger;
+  public logger: ILogger;
   public metrics: MetricsCollector;
 
   private rateLimit: number = 100; // jobs per minute
@@ -31,7 +31,7 @@ export class QueueProcessingService {
   private priorityQueue: QueueJob[] = [];
 
   constructor(
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector,
     jobState: JobStateService,
     cleanup: QueueCleanupService,

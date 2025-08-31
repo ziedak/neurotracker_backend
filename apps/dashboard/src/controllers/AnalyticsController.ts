@@ -27,12 +27,12 @@ export interface ReportRequest {
 export class AnalyticsController {
   private readonly analyticsService: AnalyticsService;
   private readonly metricsService: MetricsService;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
   constructor(
     analyticsService: AnalyticsService,
     metricsService: MetricsService,
-    logger: Logger
+    logger: ILogger
   ) {
     this.analyticsService = analyticsService;
     this.metricsService = metricsService;

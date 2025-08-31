@@ -83,7 +83,7 @@ export class WebSocketGateway {
   private redis: any;
   private routingService: RoutingService;
   private validationService: ValidationService;
-  private logger: Logger;
+  private logger: ILogger;
 
   constructor() {
     // ✅ Uses ServiceContainer for dependency injection

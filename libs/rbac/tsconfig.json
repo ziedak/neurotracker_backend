@@ -7,7 +7,6 @@
     "tsBuildInfoFile": "../../dist/libs/rbac/tsconfig.tsbuildinfo"
   },
   "references": [
-    { "path": "../../libs/models" },
     { "path": "../../libs/utils" },
     { "path": "../../libs/config" },
     { "path": "../../libs/database" },

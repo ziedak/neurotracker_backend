@@ -27,7 +27,7 @@ export class PersonalizationService implements IPersonalizationService {
   private ruleService: RuleService;
   private recommendationService: RecommendationService;
 
-  constructor(private logger: Logger, private metrics: MetricsCollector) {
+  constructor(private logger: ILogger, private metrics: MetricsCollector) {
     this.redis = RedisClient.getInstance();
     this.userProfileService = new UserProfileService(logger, metrics);
     this.segmentService = new SegmentService(logger);

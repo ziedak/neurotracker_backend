@@ -6,13 +6,13 @@
 import { PostgreSQLClient } from "@libs/database";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { UserService } from "./user-service";
-import { SessionManager } from "./session.service";
+import { SessionManager } from "./session/session.service";
 // import { PermissionService } from "./permission-service.ts.old";
-import { PasswordService } from "../password";
+import { PasswordService } from "./password/password";
 import {
   EnhancedJWTService,
   type TokenGenerationResult,
-} from "./enhanced-jwt-service-v2";
+} from "./jwt/enhanced-jwt-service-v2";
 import { type JWTPayload } from "../types/jwt-types";
 import { UserIdentity, UserRole, UserStatus } from "../unified-context";
 import { Role } from "../models";
@@ -67,14 +67,14 @@ export class AuthenticationService {
   private readonly sessionManager: SessionManager;
   // private readonly permissionService: PermissionService;
   private readonly jwtService: EnhancedJWTService;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
   constructor(
     userService: UserService,
     sessionManager: SessionManager,
     // permissionService: PermissionService,
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector
   ) {
     this.userService = userService;

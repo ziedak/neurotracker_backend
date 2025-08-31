@@ -57,7 +57,7 @@ export interface SystemBaseline {
  * Performance benchmarking service
  */
 export class PerformanceBenchmark {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly redis: any;
   private readonly measurements: PerformanceMetrics[] = [];
 

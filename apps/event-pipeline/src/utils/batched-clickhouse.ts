@@ -7,7 +7,7 @@ import { Logger } from "@libs/monitoring";
  */
 export class BatchedClickHouseOperations {
   private clickhouse: any;
-  private logger: Logger;
+  private logger: ILogger;
   private batchSize: number;
   private pendingEvents: any[] = [];
   private flushTimer: NodeJS.Timeout | null = null;

@@ -8,7 +8,11 @@ export const validateEmail = (email: string): boolean => {
 
 export const validateUUID = (uuid: string): boolean => {
   const uuidSchema = z.string().uuid();
-  return uuidSchema.safeParse(uuid).success;
+  const separator = "_";
+  const parts = uuid.split(separator);
+  let uuid_to_validate =
+    parts.length > 1 ? parts.slice(1, 0).join(separator) : uuid;
+  return uuidSchema.safeParse(uuid_to_validate).success;
 };
 
 // Formatting utilities
@@ -41,7 +45,11 @@ export const addMinutes = (date: Date, minutes: number): Date => {
 export const generateId = (prefix = ""): string => {
   const timestamp = Date.now().toString(36);
   const random = Math.random().toString(36).substr(2, 9);
-  return prefix ? `${prefix}_${timestamp}_${random}` : `${timestamp}_${random}`;
+  return prefix ? `${prefix}_${timestamp}-${random}` : `${timestamp}-${random}`;
+};
+export const generateUUId = (prefix = ""): string => {
+  const uuid = crypto.randomUUID();
+  return prefix ? `${prefix}_${uuid}` : uuid;
 };
 
 export const sanitizeString = (str: string): string => {
@@ -57,53 +65,34 @@ export const chunkArray = <T>(array: T[], size: number): T[][] => {
   return chunks;
 };
 
-// Error utilities
-export class AppError extends Error {
-  public statusCode: number;
-  public isOperational: boolean;
+export const deepMerge = (
+  target: Record<string, unknown>,
+  source: Record<string, unknown>
+): Record<string, unknown> => {
+  const result = { ...target };
 
-  constructor(message: string, statusCode = 500, isOperational = true) {
-    super(message);
-    this.statusCode = statusCode;
-    this.isOperational = isOperational;
-
-    // Only capture stack trace if available (Node.js specific)
-    if ((Error as any).captureStackTrace) {
-      (Error as any).captureStackTrace(this, this.constructor);
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined || value === null) {
+      continue;
     }
-  }
-}
 
-export const handleAsyncError = <T extends any[], R>(
-  fn: (...args: T) => Promise<R>
-) => {
-  return (...args: T): Promise<R> => {
-    return Promise.resolve(fn(...args)).catch((error) => {
-      throw new AppError(error.message, error.statusCode || 500);
-    });
-  };
-};
-
-// Retry utility
-export const retryWithBackoff = async <T>(
-  fn: () => Promise<T>,
-  maxRetries = 3,
-  baseDelay = 1000
-): Promise<T> => {
-  let lastError: Error;
-
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn();
-    } catch (error) {
-      lastError = error as Error;
-
-      if (i === maxRetries - 1) break;
-
-      const delay = baseDelay * Math.pow(2, i);
-      await new Promise((resolve) => setTimeout(resolve, delay));
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      key in result &&
+      typeof result[key] === "object" &&
+      result[key] !== null &&
+      !Array.isArray(result[key])
+    ) {
+      result[key] = deepMerge(
+        result[key] as Record<string, unknown>,
+        value as Record<string, unknown>
+      );
+    } else {
+      result[key] = value;
     }
   }
 
-  throw lastError!;
+  return result;
 };

@@ -1,5 +1,5 @@
 import { getEnv } from "@libs/config";
-import { RedisClient } from "@libs/database";
+// import { RedisClient } from "@libs/database";
 import { setImmediate } from "timers";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -21,7 +21,19 @@ export interface LogEntry {
   meta?: any;
 }
 
-export class Logger {
+export interface ILogger {
+  info(message: string, meta?: any): void;
+  warn(message: string, meta?: any): void;
+  error(message: string, error?: any, meta?: any): void;
+  debug(message: string, meta?: any): void;
+  child(context: Record<string, any>): ILogger;
+  setLevel(level: LogLevel): void;
+  setTransports(transports: LogTransport[]): void;
+  setFormatter(formatter: (entry: LogEntry) => string): void;
+  setCustomTransport(transport: (entry: LogEntry) => Promise<void>): void;
+}
+
+export class Logger implements ILogger {
   private service: string;
   private level: LogLevel;
   private transports: LogTransport[];
@@ -79,15 +91,15 @@ export class Logger {
           });
           break;
         case "redis":
-          try {
-            const redis = RedisClient.getInstance();
-            await redis.lpush(`logs:${this.service}`, this.formatter(entry));
-            await redis.ltrim(`logs:${this.service}`, 0, 999);
-          } catch (error) {
-            setImmediate(() => {
-              console.error("Failed to send log to Redis:", error);
-            });
-          }
+          // try {
+          //   const redis = RedisClient.getInstance();
+          //   await redis.lpush(`logs:${this.service}`, this.formatter(entry));
+          //   await redis.ltrim(`logs:${this.service}`, 0, 999);
+          // } catch (error) {
+          //   setImmediate(() => {
+          //     console.error("Failed to send log to Redis:", error);
+          //   });
+          // }
           break;
         case "custom":
           if (this.customTransport) {
@@ -124,16 +136,25 @@ export class Logger {
     this.log("warn", message, meta);
   }
 
-  error(message: string, error?: Error, meta?: any) {
-    this.log("error", error?.message || message, {
-      stack: error?.stack,
-      ...meta,
-    });
+  error(message: string, error: any, meta?: any) {
+    if (error instanceof Error) {
+      this.log("error", error.message || message, {
+        stack: error.stack,
+        ...meta,
+      });
+    } else {
+      this.log("error", String(error), meta);
+    }
+  }
+  debug(message: string, meta?: any) {
+    if (getEnv("NODE_ENV") === "development") {
+      this.log("debug", message, meta);
+    }
   }
   /**
    * Create a child logger with additional context (e.g., component, requestId)
    */
-  child(context: Record<string, any>): Logger {
+  child(context: Record<string, any>): ILogger {
     const parentFormatter = this.formatter;
     const mergedFormatter = (entry: LogEntry) => {
       return parentFormatter({ ...entry, ...context });
@@ -145,11 +166,6 @@ export class Logger {
       formatter: mergedFormatter,
       customTransport: this.customTransport,
     });
-  }
-  debug(message: string, meta?: any) {
-    if (getEnv("NODE_ENV") === "development") {
-      this.log("debug", message, meta);
-    }
   }
 
   setLevel(level: LogLevel) {

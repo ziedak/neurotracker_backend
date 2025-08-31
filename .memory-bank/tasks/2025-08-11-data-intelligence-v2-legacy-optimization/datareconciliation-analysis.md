@@ -143,7 +143,7 @@ constructor(
   private readonly redis: RedisClient,
   private readonly clickhouse: ClickHouseClient,
   private readonly postgres: PostgreSQLClient,
-  private readonly logger: Logger,
+  private readonly logger: ILogger,
   private readonly metrics: MetricsCollector
 ) {
   // Use injected dependencies instead of static calls

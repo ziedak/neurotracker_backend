@@ -46,7 +46,7 @@ export {
   DEFAULT_BLACKLIST_CONFIG,
   type OperationResult,
   type BatchOperationResult,
-} from "./services/jwt-blacklist-manager";
+} from "./services/jwt/jwt-blacklist-manager";
 
 // Enhanced JWT Service - Step 2.2
 export {
@@ -56,7 +56,7 @@ export {
   type TokenVerificationResult,
   type TokenRotationResult,
   type ServiceHealthStatus,
-} from "./services/enhanced-jwt-service-v2";
+} from "./services/jwt/enhanced-jwt-service-v2";
 
 // JWT Token Rotation Manager - Step 2.3
 export {
@@ -67,19 +67,19 @@ export {
   type TokenOperation,
   type TokenRotationResult as RotationResult,
   type TokenReuseDetectionResult,
-} from "./services/jwt-rotation-manager";
+} from "./services/jwt/jwt-rotation-manager";
 
 // ===================================================================
 // ENTERPRISE RBAC PERMISSION SYSTEM (Phase 2C - Step 3)
 // ===================================================================
 
 // Permission Cache - Step 3.2
-export {
-  PermissionCache,
-  type PermissionCacheConfig,
-  type CacheStats,
-  DEFAULT_PERMISSION_CACHE_CONFIG,
-} from "./services/permission-cache.ts.old";
+// export {
+//   PermissionCache,
+//   type PermissionCacheConfig,
+//   type CacheStats,
+//   DEFAULT_PERMISSION_CACHE_CONFIG,
+// } from "./services/permission-cache.ts.old";
 
 // ===================================================================
 // AUTHENTICATION GUARDS AND MIDDLEWARE
@@ -158,7 +158,7 @@ export {
   type IPasswordService,
   type PasswordStrengthResult,
   createPasswordService,
-} from "./services/password-service";
+} from "./services/password/password-service";
 
 // API Key Service - Step 5.1
 export {
@@ -193,28 +193,28 @@ export {
 // } from "./services/user.service.ts.old";
 
 // Permission Service - Step 3.3
-export {
-  PermissionService,
-  type PermissionServiceConfig,
-  type PermissionCheckResult,
-  type ConditionEvaluationResult,
-  type BatchPermissionCheckResult,
-  type PermissionAssignmentResult,
-  type RoleAssignmentResult,
-  type PermissionAnalytics,
-  DEFAULT_PERMISSION_SERVICE_CONFIG,
-} from "./services/permission-service.ts.old";
+// export {
+//   PermissionService,
+//   type PermissionServiceConfig,
+//   type PermissionCheckResult,
+//   type ConditionEvaluationResult,
+//   type BatchPermissionCheckResult,
+//   type PermissionAssignmentResult,
+//   type RoleAssignmentResult,
+//   type PermissionAnalytics,
+//   DEFAULT_PERMISSION_SERVICE_CONFIG,
+// } from "./services/permission-service.ts.old";
 // export type {
 //   Permission,
 //   RolePermissions,
 // } from "./services/permission.service.ts.old";
 
 // Core Session Management - alias for UnifiedSessionManager
-export { UnifiedSessionManager as SessionManager } from "./services/unified-session-manager";
+export { UnifiedSessionManager as SessionManager } from "./services/session/unified-session-manager";
 export type {
   SessionInfo,
   SessionValidationResult,
-} from "./services/session.service";
+} from "./services/session/session.service";
 
 // Enterprise Session Models
 export {
@@ -244,21 +244,21 @@ export {
   RedisSessionStore,
   type RedisSessionConfig,
   DEFAULT_REDIS_SESSION_CONFIG,
-} from "./services/redis-session-store";
+} from "./services/session/redis-session-store";
 
 // PostgreSQL Session Store
 export {
   PostgreSQLSessionStore,
   type PostgreSQLSessionConfig,
   DEFAULT_POSTGRESQL_SESSION_CONFIG,
-} from "./services/postgresql-session-store";
+} from "./services/session/postgresql-session-store";
 
 // Unified Session Manager
 export {
   UnifiedSessionManager,
   type UnifiedSessionManagerConfig,
   DEFAULT_UNIFIED_SESSION_MANAGER_CONFIG,
-} from "./services/unified-session-manager";
+} from "./services/session/unified-session-manager";
 
 // ===================================================================
 // PERFORMANCE OPTIMIZATION SERVICES (Phase 1)

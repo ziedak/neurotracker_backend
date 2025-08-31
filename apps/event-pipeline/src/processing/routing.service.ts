@@ -2,7 +2,7 @@ import { Logger } from "@libs/monitoring";
 import { HttpClient } from "@libs/messaging";
 
 export class RoutingService {
-  private logger: Logger;
+  private logger: ILogger;
 
   constructor() {
     this.logger = Logger.getInstance("RoutingService");

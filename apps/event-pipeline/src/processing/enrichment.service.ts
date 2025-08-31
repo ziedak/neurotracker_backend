@@ -3,7 +3,7 @@ import { Logger } from "@libs/monitoring";
 
 export class EnrichmentService {
   private db: any;
-  private logger: Logger;
+  private logger: ILogger;
 
   constructor() {
     this.db = PostgreSQLClient.getInstance();

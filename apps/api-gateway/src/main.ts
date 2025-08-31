@@ -67,7 +67,7 @@ type ServerType = {
 function createWebSocketHandler(
   builder: any,
   registry: EndpointRegistryService,
-  logger: Logger
+  logger: ILogger
 ) {
   return {
     open: (ws: { data: { connectionId: string } }) => {

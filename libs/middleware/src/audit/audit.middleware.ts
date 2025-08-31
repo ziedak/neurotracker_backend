@@ -59,7 +59,7 @@ export interface AuditConfig {
 export class AuditMiddleware {
   private readonly redis: RedisClient;
   private readonly clickhouse: ClickHouseClient;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
   private readonly defaultConfig: AuditConfig = {
     includeBody: false,
@@ -74,7 +74,7 @@ export class AuditMiddleware {
   constructor(
     redis: RedisClient,
     clickhouse: ClickHouseClient,
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector
   ) {
     this.redis = redis;

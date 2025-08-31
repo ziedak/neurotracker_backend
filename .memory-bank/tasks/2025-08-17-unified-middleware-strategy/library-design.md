@@ -63,26 +63,31 @@ libs/middleware/
 ## Core Design Principles
 
 ### 1. **Composability**
+
 - Middleware can be easily combined and chained
 - Each middleware is independent and focused
 - Clear interfaces for middleware composition
 
 ### 2. **Configuration-Driven**
+
 - All middleware accepts configuration objects
 - Default configurations for common use cases
 - Environment-specific overrides
 
 ### 3. **Framework Agnostic**
+
 - Works with Elysia (primary) but extensible
 - Clear abstraction layer for context and request/response
 - Plugin architecture for framework-specific adapters
 
 ### 4. **Performance First**
+
 - Minimal overhead and optimized execution
 - Async operations where beneficial
 - Caching and batching for expensive operations
 
 ### 5. **Type Safety**
+
 - Full TypeScript support with strict typing
 - Generic interfaces for extensibility
 - Runtime type validation where needed
@@ -144,18 +149,22 @@ export interface ConfigurableMiddleware<T = any> {
 
 ```typescript
 // libs/middleware/src/base/BaseMiddleware.ts
-import { Logger, MetricsCollector } from '@libs/monitoring';
-import { MiddlewareContext, MiddlewareFunction, MiddlewareOptions } from '../types';
+import { Logger, MetricsCollector } from "@libs/monitoring";
+import {
+  MiddlewareContext,
+  MiddlewareFunction,
+  MiddlewareOptions,
+} from "../types";
 
 export abstract class BaseMiddleware<TConfig = any> {
-  protected logger: Logger;
+  protected logger: ILogger;
   protected metrics?: MetricsCollector;
   protected config: TConfig & MiddlewareOptions;
 
   constructor(
     name: string,
     config: TConfig & MiddlewareOptions,
-    logger: Logger,
+    logger: ILogger,
     metrics?: MetricsCollector
   ) {
     this.logger = logger.child({ middleware: name });
@@ -163,7 +172,10 @@ export abstract class BaseMiddleware<TConfig = any> {
     this.config = { enabled: true, priority: 0, skipPaths: [], ...config };
   }
 
-  abstract execute(context: MiddlewareContext, next: () => Promise<void>): Promise<void | any>;
+  abstract execute(
+    context: MiddlewareContext,
+    next: () => Promise<void>
+  ): Promise<void | any>;
 
   public middleware(): MiddlewareFunction {
     return async (context: MiddlewareContext, next: () => Promise<void>) => {
@@ -180,13 +192,15 @@ export abstract class BaseMiddleware<TConfig = any> {
   }
 
   protected shouldSkip(context: MiddlewareContext): boolean {
-    const path = context.request.url.split('?')[0];
-    return this.config.skipPaths?.some(skipPath => {
-      if (skipPath.endsWith('*')) {
-        return path.startsWith(skipPath.slice(0, -1));
-      }
-      return path === skipPath || path.startsWith(skipPath + '/');
-    }) || false;
+    const path = context.request.url.split("?")[0];
+    return (
+      this.config.skipPaths?.some((skipPath) => {
+        if (skipPath.endsWith("*")) {
+          return path.startsWith(skipPath.slice(0, -1));
+        }
+        return path === skipPath || path.startsWith(skipPath + "/");
+      }) || false
+    );
   }
 
   protected async recordMetric(name: string, value: number = 1): Promise<void> {
@@ -220,56 +234,59 @@ export class AuthMiddleware extends BaseMiddleware<AuthConfig> {
   private apiKeyAuth: ApiKeyAuth;
   private jwtAuth: JwtAuth;
 
-  constructor(config: AuthConfig, logger: Logger, metrics?: MetricsCollector) {
-    super('auth', config, logger, metrics);
+  constructor(config: AuthConfig, logger: ILogger, metrics?: MetricsCollector) {
+    super("auth", config, logger, metrics);
     this.apiKeyAuth = new ApiKeyAuth(config, logger);
     this.jwtAuth = new JwtAuth(config, logger);
   }
 
-  async execute(context: MiddlewareContext, next: () => Promise<void>): Promise<void | any> {
+  async execute(
+    context: MiddlewareContext,
+    next: () => Promise<void>
+  ): Promise<void | any> {
     const startTime = performance.now();
 
     try {
       const authResult = await this.authenticate(context);
-      
+
       if (!authResult.authenticated) {
         context.set.status = 401;
-        await this.recordMetric('auth_failed');
+        await this.recordMetric("auth_failed");
         return {
-          error: 'Authentication failed',
+          error: "Authentication failed",
           message: authResult.error,
-          code: 'AUTH_FAILED'
+          code: "AUTH_FAILED",
         };
       }
 
       // Check authorization
-      if (!await this.authorize(authResult, context)) {
+      if (!(await this.authorize(authResult, context))) {
         context.set.status = 403;
-        await this.recordMetric('auth_forbidden');
+        await this.recordMetric("auth_forbidden");
         return {
-          error: 'Insufficient permissions',
-          code: 'INSUFFICIENT_PERMISSIONS'
+          error: "Insufficient permissions",
+          code: "INSUFFICIENT_PERMISSIONS",
         };
       }
 
       context.user = authResult.user;
-      await this.recordMetric('auth_success');
+      await this.recordMetric("auth_success");
       await next();
     } catch (error) {
-      this.logger.error('Authentication error', error as Error);
+      this.logger.error("Authentication error", error as Error);
       context.set.status = 500;
       return {
-        error: 'Authentication service error',
-        code: 'AUTH_SERVICE_ERROR'
+        error: "Authentication service error",
+        code: "AUTH_SERVICE_ERROR",
       };
     } finally {
-      await this.recordTimer('auth_duration', performance.now() - startTime);
+      await this.recordTimer("auth_duration", performance.now() - startTime);
     }
   }
 
   private async authenticate(context: MiddlewareContext): Promise<AuthResult> {
     const authHeader = context.request.headers.authorization;
-    const apiKey = context.request.headers['x-api-key'];
+    const apiKey = context.request.headers["x-api-key"];
 
     if (this.config.allowAnonymous && !authHeader && !apiKey) {
       return { authenticated: true, user: { anonymous: true } };
@@ -283,27 +300,33 @@ export class AuthMiddleware extends BaseMiddleware<AuthConfig> {
       return this.jwtAuth.authenticate(authHeader);
     }
 
-    return { authenticated: false, error: 'No authentication provided' };
+    return { authenticated: false, error: "No authentication provided" };
   }
 
-  private async authorize(authResult: AuthResult, context: MiddlewareContext): Promise<boolean> {
+  private async authorize(
+    authResult: AuthResult,
+    context: MiddlewareContext
+  ): Promise<boolean> {
     if (!authResult.user || authResult.user.anonymous) {
       return this.config.allowAnonymous || false;
     }
 
     // Check roles
     if (this.config.requiredRoles?.length) {
-      const hasRole = this.config.requiredRoles.some(role => 
-        authResult.user.roles?.includes(role) || authResult.user.roles?.includes('admin')
+      const hasRole = this.config.requiredRoles.some(
+        (role) =>
+          authResult.user.roles?.includes(role) ||
+          authResult.user.roles?.includes("admin")
       );
       if (!hasRole) return false;
     }
 
     // Check permissions
     if (this.config.requiredPermissions?.length) {
-      const hasPermission = this.config.requiredPermissions.some(permission =>
-        authResult.user.permissions?.includes(permission) || 
-        authResult.user.permissions?.includes('*')
+      const hasPermission = this.config.requiredPermissions.some(
+        (permission) =>
+          authResult.user.permissions?.includes(permission) ||
+          authResult.user.permissions?.includes("*")
       );
       if (!hasPermission) return false;
     }
@@ -320,7 +343,7 @@ export class AuthMiddleware extends BaseMiddleware<AuthConfig> {
 export interface RateLimitConfig extends MiddlewareOptions {
   windowMs: number;
   maxRequests: number;
-  keyStrategy: 'ip' | 'user' | 'apiKey' | 'custom';
+  keyStrategy: "ip" | "user" | "apiKey" | "custom";
   customKeyGenerator?: (context: MiddlewareContext) => string;
   redis?: {
     enabled: boolean;
@@ -334,13 +357,20 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
   private redisRateLimit: RedisRateLimit;
   private strategies: Map<string, RateLimitStrategy>;
 
-  constructor(config: RateLimitConfig, logger: Logger, metrics?: MetricsCollector) {
-    super('rateLimit', config, logger, metrics);
+  constructor(
+    config: RateLimitConfig,
+    logger: ILogger,
+    metrics?: MetricsCollector
+  ) {
+    super("rateLimit", config, logger, metrics);
     this.redisRateLimit = new RedisRateLimit(config, logger);
     this.initializeStrategies();
   }
 
-  async execute(context: MiddlewareContext, next: () => Promise<void>): Promise<void | any> {
+  async execute(
+    context: MiddlewareContext,
+    next: () => Promise<void>
+  ): Promise<void | any> {
     const startTime = performance.now();
 
     try {
@@ -352,13 +382,13 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
         if (this.config.standardHeaders) {
           this.setRateLimitHeaders(context, result);
         }
-        
-        await this.recordMetric('rate_limit_exceeded');
+
+        await this.recordMetric("rate_limit_exceeded");
         return {
-          error: 'Rate limit exceeded',
-          message: this.config.message || 'Too many requests',
+          error: "Rate limit exceeded",
+          message: this.config.message || "Too many requests",
           retryAfter: result.resetTime,
-          code: 'RATE_LIMIT_EXCEEDED'
+          code: "RATE_LIMIT_EXCEEDED",
         };
       }
 
@@ -367,20 +397,25 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
       }
 
       await next();
-      await this.recordMetric('rate_limit_allowed');
+      await this.recordMetric("rate_limit_allowed");
     } catch (error) {
-      this.logger.error('Rate limit error', error as Error);
+      this.logger.error("Rate limit error", error as Error);
       // Fail open - allow request on error
       await next();
     } finally {
-      await this.recordTimer('rate_limit_duration', performance.now() - startTime);
+      await this.recordTimer(
+        "rate_limit_duration",
+        performance.now() - startTime
+      );
     }
   }
 
   private generateKey(context: MiddlewareContext): string {
     const strategy = this.strategies.get(this.config.keyStrategy);
     if (!strategy) {
-      throw new Error(`Unknown rate limit strategy: ${this.config.keyStrategy}`);
+      throw new Error(
+        `Unknown rate limit strategy: ${this.config.keyStrategy}`
+      );
     }
     return strategy.generateKey(context);
   }
@@ -394,7 +429,7 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
 ```typescript
 // libs/middleware/src/validation/ValidationMiddleware.ts
 export interface ValidationConfig extends MiddlewareOptions {
-  engine: 'zod' | 'rules';
+  engine: "zod" | "rules";
   schemas?: Record<string, any>;
   maxRequestSize?: number;
   sanitizeInputs?: boolean;
@@ -405,51 +440,61 @@ export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
   private zodValidator?: ZodValidator;
   private ruleValidator?: RuleValidator;
 
-  constructor(config: ValidationConfig, logger: Logger, metrics?: MetricsCollector) {
-    super('validation', config, logger, metrics);
-    
-    if (config.engine === 'zod') {
+  constructor(
+    config: ValidationConfig,
+    logger: ILogger,
+    metrics?: MetricsCollector
+  ) {
+    super("validation", config, logger, metrics);
+
+    if (config.engine === "zod") {
       this.zodValidator = new ZodValidator(config, logger);
     } else {
       this.ruleValidator = new RuleValidator(config, logger);
     }
   }
 
-  async execute(context: MiddlewareContext, next: () => Promise<void>): Promise<void | any> {
+  async execute(
+    context: MiddlewareContext,
+    next: () => Promise<void>
+  ): Promise<void | any> {
     const startTime = performance.now();
 
     try {
       const validator = this.zodValidator || this.ruleValidator;
       if (!validator) {
-        throw new Error('No validator configured');
+        throw new Error("No validator configured");
       }
 
       const result = await validator.validate(context);
-      
+
       if (!result.valid) {
         context.set.status = 400;
-        await this.recordMetric('validation_failed');
+        await this.recordMetric("validation_failed");
         return {
-          error: 'Validation failed',
-          message: 'Request contains invalid data',
+          error: "Validation failed",
+          message: "Request contains invalid data",
           details: result.errors,
-          code: 'VALIDATION_ERROR'
+          code: "VALIDATION_ERROR",
         };
       }
 
       // Attach validated data to context
       context.validated = result.data;
-      await this.recordMetric('validation_success');
+      await this.recordMetric("validation_success");
       await next();
     } catch (error) {
-      this.logger.error('Validation error', error as Error);
+      this.logger.error("Validation error", error as Error);
       context.set.status = 500;
       return {
-        error: 'Validation service error',
-        code: 'VALIDATION_SERVICE_ERROR'
+        error: "Validation service error",
+        code: "VALIDATION_SERVICE_ERROR",
       };
     } finally {
-      await this.recordTimer('validation_duration', performance.now() - startTime);
+      await this.recordTimer(
+        "validation_duration",
+        performance.now() - startTime
+      );
     }
   }
 }
@@ -459,26 +504,38 @@ export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
 
 ```typescript
 // libs/middleware/src/index.ts
-export * from './types';
-export * from './base';
-export * from './auth';
-export * from './validation';
-export * from './rateLimit';
-export * from './audit';
-export * from './logging';
-export * from './error';
+export * from "./types";
+export * from "./base";
+export * from "./auth";
+export * from "./validation";
+export * from "./rateLimit";
+export * from "./audit";
+export * from "./logging";
+export * from "./error";
 
 // Factory functions for quick middleware creation
 export const createAuthMiddleware = (config: AuthConfig) => {
-  return new AuthMiddleware(config, Logger.getInstance(), MetricsCollector.getInstance()).middleware();
+  return new AuthMiddleware(
+    config,
+    Logger.getInstance(),
+    MetricsCollector.getInstance()
+  ).middleware();
 };
 
 export const createRateLimitMiddleware = (config: RateLimitConfig) => {
-  return new RateLimitMiddleware(config, Logger.getInstance(), MetricsCollector.getInstance()).middleware();
+  return new RateLimitMiddleware(
+    config,
+    Logger.getInstance(),
+    MetricsCollector.getInstance()
+  ).middleware();
 };
 
 export const createValidationMiddleware = (config: ValidationConfig) => {
-  return new ValidationMiddleware(config, Logger.getInstance(), MetricsCollector.getInstance()).middleware();
+  return new ValidationMiddleware(
+    config,
+    Logger.getInstance(),
+    MetricsCollector.getInstance()
+  ).middleware();
 };
 
 // Common configurations
@@ -486,25 +543,25 @@ export const commonConfigs = {
   auth: {
     apiGateway: {
       allowAnonymous: true,
-      bypassRoutes: ['/health', '/metrics'],
+      bypassRoutes: ["/health", "/metrics"],
     },
     aiEngine: {
-      requiredPermissions: ['predict'],
-      apiKeys: new Set(['ai-engine-key-prod-2024']),
+      requiredPermissions: ["predict"],
+      apiKeys: new Set(["ai-engine-key-prod-2024"]),
     },
     dataIntelligence: {
-      requiredRoles: ['user', 'admin'],
+      requiredRoles: ["user", "admin"],
       strictMode: true,
     },
   },
   rateLimit: {
-    general: { windowMs: 60000, maxRequests: 1000, keyStrategy: 'ip' as const },
-    strict: { windowMs: 60000, maxRequests: 100, keyStrategy: 'user' as const },
-    api: { windowMs: 60000, maxRequests: 5000, keyStrategy: 'apiKey' as const },
+    general: { windowMs: 60000, maxRequests: 1000, keyStrategy: "ip" as const },
+    strict: { windowMs: 60000, maxRequests: 100, keyStrategy: "user" as const },
+    api: { windowMs: 60000, maxRequests: 5000, keyStrategy: "apiKey" as const },
   },
   validation: {
-    zod: { engine: 'zod' as const, strictMode: true },
-    rules: { engine: 'rules' as const, sanitizeInputs: true },
+    zod: { engine: "zod" as const, strictMode: true },
+    rules: { engine: "rules" as const, sanitizeInputs: true },
   },
 };
 ```
@@ -513,11 +570,15 @@ export const commonConfigs = {
 
 ```typescript
 // Service integration example
-import { createAuthMiddleware, createRateLimitMiddleware, commonConfigs } from '@libs/middleware';
+import {
+  createAuthMiddleware,
+  createRateLimitMiddleware,
+  commonConfigs,
+} from "@libs/middleware";
 
 const authMiddleware = createAuthMiddleware({
   ...commonConfigs.auth.aiEngine,
-  requiredPermissions: ['predict', 'batch_predict'],
+  requiredPermissions: ["predict", "batch_predict"],
 });
 
 const rateLimitMiddleware = createRateLimitMiddleware({
@@ -526,30 +587,31 @@ const rateLimitMiddleware = createRateLimitMiddleware({
 });
 
 // Apply to Elysia app
-app
-  .use(authMiddleware)
-  .use(rateLimitMiddleware)
-  .post('/predict', handler);
+app.use(authMiddleware).use(rateLimitMiddleware).post("/predict", handler);
 ```
 
 ## Migration Strategy
 
 ### Phase 1: Create Library (Current)
+
 1. Design and implement base classes
 2. Create auth, validation, rate limit middleware
 3. Set up testing framework
 
 ### Phase 2: Parallel Implementation
+
 1. Implement shared middleware alongside existing
 2. Create service-specific configurations
 3. Test compatibility with existing functionality
 
 ### Phase 3: Gradual Migration
+
 1. Start with least complex service (Event Pipeline)
 2. Migrate one middleware type at a time
 3. Validate functionality and performance
 
 ### Phase 4: Cleanup
+
 1. Remove old middleware implementations
 2. Optimize shared library based on usage
 3. Update documentation and examples
@@ -557,11 +619,13 @@ app
 ## Benefits
 
 ### Immediate
+
 - Reduced code duplication
 - Consistent middleware behavior
 - Easier testing and debugging
 
 ### Long-term
+
 - Faster development of new services
 - Centralized security and compliance
 - Simplified maintenance and updates

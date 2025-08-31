@@ -1,0 +1,654 @@
+/**
+ * Keycloak Authentication Middleware
+ *
+ * Extends BaseMiddleware to provide Keycloak-based authentication
+ * for Elysia applications with comprehensive security features.
+ */
+
+// Note: Replace @libs/elysia-server with the actual Elysia import based on your setup\nimport { Elysia } from "elysia";
+import { BaseMiddleware } from "../base/BaseMiddleware";
+import { MiddlewareContext, MiddlewareOptions } from "../types";
+import { Logger, MetricsCollector, type ILogger } from "@libs/monitoring";
+import { KeycloakService } from "./service";
+import {
+  KeycloakMiddlewareConfig,
+  KeycloakAuthContext,
+  KeycloakUserInfo,
+  KeycloakError,
+  KeycloakErrorType,
+} from "./types";
+
+/**
+ * Keycloak middleware configuration extending base middleware options
+ */
+export interface KeycloakMiddlewareOptions extends MiddlewareOptions {
+  keycloak: KeycloakMiddlewareConfig;
+}
+
+/**
+ * Extended context with Keycloak authentication data
+ */
+export interface KeycloakMiddlewareContext extends MiddlewareContext {
+  keycloak: KeycloakAuthContext;
+}
+
+/**
+ * Keycloak Authentication Middleware
+ *
+ * Provides JWT-based authentication using Keycloak as the identity provider.
+ * Supports both local and remote token verification, role-based access control,
+ * and comprehensive caching for production performance.
+ */
+export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions> {
+  private readonly keycloakService: KeycloakService;
+  private readonly requireAuth: boolean;
+
+  constructor(
+    config: KeycloakMiddlewareOptions,
+    logger?: ILogger,
+    metrics?: MetricsCollector
+  ) {
+    super(
+      "keycloak-auth",
+      config,
+      logger || Logger.getInstance("KeycloakMiddleware"),
+      metrics
+    );
+
+    this.keycloakService = new KeycloakService(config.keycloak, this.logger);
+    this.requireAuth = config.keycloak.requireAuth ?? true;
+
+    this.logger.info("Keycloak middleware initialized", {
+      serverUrl: config.keycloak.serverUrl,
+      realm: config.keycloak.realm,
+      clientId: config.keycloak.clientId,
+      requireAuth: this.requireAuth,
+      verifyTokenLocally: config.keycloak.verifyTokenLocally ?? true,
+    });
+  }
+
+  /**
+   * Execute Keycloak authentication
+   */
+  async execute(
+    context: KeycloakMiddlewareContext,
+    next: () => Promise<void>
+  ): Promise<void> {
+    const startTime = performance.now();
+    const requestId = this.getRequestId(context);
+
+    try {
+      // Initialize Keycloak context
+      context.keycloak = {
+        authenticated: false,
+        roles: [],
+        groups: [],
+        permissions: [],
+        clientRoles: {},
+      };
+
+      // Extract token from request
+      const token = this.extractToken(context);
+
+      if (!token) {
+        if (this.requireAuth) {
+          await this.handleAuthenticationError(
+            context,
+            new KeycloakError(
+              "No authentication token provided",
+              KeycloakErrorType.INVALID_TOKEN
+            )
+          );
+          return;
+        } else {
+          // Allow unauthenticated requests
+          await this.recordMetric("keycloak_unauthenticated_allowed");
+          await next();
+          return;
+        }
+      }
+
+      // Verify token with Keycloak
+      const verification = await this.keycloakService.verifyToken(token);
+
+      if (!verification.valid) {
+        await this.handleAuthenticationError(
+          context,
+          new KeycloakError(
+            verification.error || "Token verification failed",
+            this.getErrorTypeFromMessage(verification.error)
+          )
+        );
+        return;
+      }
+
+      // Set authenticated context
+      await this.setAuthenticatedContext(
+        context,
+        verification.userInfo!,
+        token
+      );
+
+      // Log successful authentication
+      this.logger.debug("Keycloak authentication successful", {
+        requestId,
+        userId: verification.userInfo!.sub,
+        username: verification.userInfo!.preferredUsername,
+        roles: verification.userInfo!.roles.length,
+        groups: verification.userInfo!.groups.length,
+        source: verification.source,
+      });
+
+      await this.recordMetric("keycloak_auth_success", 1, {
+        source: verification.source,
+        realm: this.config.keycloak.realm,
+      });
+
+      // Continue to next middleware
+      await next();
+    } catch (error) {
+      const keycloakError =
+        error instanceof KeycloakError
+          ? error
+          : new KeycloakError(
+              (error as Error).message,
+              KeycloakErrorType.INVALID_TOKEN
+            );
+
+      await this.handleAuthenticationError(context, keycloakError);
+    } finally {
+      const duration = performance.now() - startTime;
+      await this.recordTimer("keycloak_auth_duration", duration, {
+        authenticated: context.keycloak.authenticated.toString(),
+        realm: this.config.keycloak.realm,
+      });
+    }
+  }
+
+  /**
+   * Extract JWT token from request headers or query parameters
+   */
+  private extractToken(context: MiddlewareContext): string | null {
+    const { headers } = context.request;
+
+    // Try Authorization header first
+    const authHeader = headers["authorization"] || headers["Authorization"];
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      return authHeader.substring(7);
+    }
+
+    // Try query parameter as fallback
+    const url = new URL(context.request.url);
+    return url.searchParams.get("access_token") || null;
+  }
+
+  /**
+   * Set authenticated context with user information
+   */
+  private async setAuthenticatedContext(
+    context: KeycloakMiddlewareContext,
+    userInfo: KeycloakUserInfo,
+    token: string
+  ): Promise<void> {
+    context.keycloak = {
+      authenticated: true,
+      user: userInfo,
+      token,
+      roles: userInfo.roles,
+      groups: userInfo.groups,
+      permissions: this.mapRolesToPermissions(userInfo.roles),
+      clientRoles: userInfo.clientRoles,
+    };
+
+    // Set user information in request context for other middleware
+    // Set user information in request context for other middleware
+    context["userId"] = userInfo.sub;
+    context["userEmail"] = userInfo.email;
+    context["userRole"] = userInfo.roles[0]; // Primary role
+  }
+
+  /**
+   * Map Keycloak roles to permissions
+   * Override this method to implement custom role-to-permission mapping
+   */
+  protected mapRolesToPermissions(roles: string[]): string[] {
+    // Basic mapping - can be overridden for more complex scenarios
+    const permissions: string[] = [];
+
+    roles.forEach((role) => {
+      switch (role.toLowerCase()) {
+        case "admin":
+        case "administrator":
+          permissions.push(
+            "user:read",
+            "user:write",
+            "user:delete",
+            "system:admin",
+            "api:full_access"
+          );
+          break;
+        case "manager":
+          permissions.push(
+            "user:read",
+            "user:write",
+            "reports:read",
+            "api:write"
+          );
+          break;
+        case "user":
+        case "customer":
+          permissions.push("user:read", "api:read");
+          break;
+        default:
+          // Custom role handling
+          permissions.push(`role:${role}`);
+      }
+    });
+
+    return [...new Set(permissions)]; // Remove duplicates
+  }
+
+  /**
+   * Handle authentication errors with enhanced security measures
+   */
+  private async handleAuthenticationError(
+    context: KeycloakMiddlewareContext,
+    error: KeycloakError
+  ): Promise<void> {
+    const requestId = this.getRequestId(context);
+    const clientIp = context.request.headers['x-forwarded-for'] || 
+                     context.request.headers['x-real-ip'] || 'unknown';
+
+    // Apply rate limiting for failed auth attempts
+    const isRateLimited = await this.checkRateLimit(clientIp);
+    if (isRateLimited) {
+      this.logger.warn("Authentication rate limit exceeded", {
+        requestId,
+        clientIp
+      });
+      
+      // Return 429 Too Many Requests
+      const rateLimitError = new Error('Rate limit exceeded') as any;
+      rateLimitError.status = 429;
+      rateLimitError.code = 'RATE_LIMIT_EXCEEDED';
+      rateLimitError.details = {
+        error: "rate_limit_exceeded",
+        error_description: "Too many authentication attempts",
+        retry_after: 60, // 1 minute
+        timestamp: new Date().toISOString(),
+        request_id: requestId,
+      };
+      throw rateLimitError;
+    }
+
+    // Enhanced logging for security monitoring
+    this.logger.warn("Keycloak authentication failed", {
+      requestId,
+      error: error.message,
+      type: error.type,
+      statusCode: error.statusCode,
+      path: context.request.url,
+      clientIp,
+      userAgent: context.request.headers["user-agent"],
+      method: context.request.method,
+      timestamp: new Date().toISOString()
+    });
+
+    await this.recordMetric("keycloak_auth_failed", 1, {
+      error_type: error.type,
+      realm: this.config.keycloak.realm,
+      client_ip: this.hashClientIp(clientIp)
+    });
+
+    // Determine HTTP status code
+    const statusCode = this.getHttpStatusForError(error);
+
+    // Create standardized error response
+    const errorResponse = {
+      error: "authentication_failed",
+      error_description: this.sanitizeErrorMessage(error.message, error.type),
+      error_type: error.type,
+      timestamp: new Date().toISOString(),
+      request_id: requestId,
+      retry_after: this.getRetryAfter(error.type)
+    };
+
+    // Throw structured error
+    const httpError = new Error(error.message) as any;
+    httpError.status = statusCode;
+    httpError.code = error.type;
+    httpError.details = errorResponse;
+
+    throw httpError;
+  }
+
+  /**
+   * Map Keycloak error types to HTTP status codes
+   */
+  private getHttpStatusForError(error: KeycloakError): number {
+    switch (error.type) {
+      case KeycloakErrorType.INVALID_TOKEN:
+      case KeycloakErrorType.INVALID_SIGNATURE:
+        return 401;
+      case KeycloakErrorType.TOKEN_EXPIRED:
+        return 401;
+      case KeycloakErrorType.PERMISSION_DENIED:
+        return 403;
+      case KeycloakErrorType.INVALID_ISSUER:
+      case KeycloakErrorType.INVALID_AUDIENCE:
+        return 401;
+      case KeycloakErrorType.CONNECTION_ERROR:
+        return 503;
+      case KeycloakErrorType.CONFIGURATION_ERROR:
+        return 500;
+      default:
+        return 401;
+    }
+  }
+
+  /**
+   * Determine error type from error message
+   */
+  private getErrorTypeFromMessage(message?: string): KeycloakErrorType {
+    if (!message) return KeycloakErrorType.INVALID_TOKEN;
+
+    if (message.includes("expired")) return KeycloakErrorType.TOKEN_EXPIRED;
+    if (message.includes("signature"))
+      return KeycloakErrorType.INVALID_SIGNATURE;
+    if (message.includes("issuer")) return KeycloakErrorType.INVALID_ISSUER;
+    if (message.includes("audience")) return KeycloakErrorType.INVALID_AUDIENCE;
+    if (message.includes("connection"))
+      return KeycloakErrorType.CONNECTION_ERROR;
+    if (message.includes("permission"))
+      return KeycloakErrorType.PERMISSION_DENIED;
+
+    return KeycloakErrorType.INVALID_TOKEN;
+  }
+
+  /**
+   * Create Elysia plugin for easy integration
+   */
+  public plugin() {
+    return new Elysia({ name: "keycloak-auth" })
+      .decorate("keycloak", {
+        service: this.keycloakService,
+        requireRole: this.requireRole.bind(this),
+        requirePermission: this.requirePermission.bind(this),
+        requireGroup: this.requireGroup.bind(this),
+      })
+      .derive(async ({ headers, request }) => {
+        const normalizedHeaders: Record<string, string> = Object.fromEntries(
+          Object.entries(headers).map(([k, v]) => [k, v ?? ""])
+        );
+
+        const context: KeycloakMiddlewareContext = {
+          request: {
+            ...request,
+            headers: normalizedHeaders,
+            url: request.url,
+          },
+          keycloak: {
+            authenticated: false,
+            roles: [],
+            groups: [],
+            permissions: [],
+            clientRoles: {},
+          },
+          set: {
+            status: undefined,
+            headers: {}
+          }
+        };
+
+        await this.execute(context, async () => {});
+
+        return {
+          keycloak: context.keycloak,
+          userId: context["userId"],
+          userEmail: context["userEmail"],
+          userRole: context["userRole"],
+        };
+      });
+  }
+
+  /**
+   * Require specific role guard
+   */
+  public requireRole(requiredRole: string | string[]) {
+    const roles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
+
+    return new Elysia().guard({
+      beforeHandle: ({ keycloak }: { keycloak: KeycloakAuthContext }) => {
+        if (!keycloak.authenticated) {
+          throw new Error("Authentication required");
+        }
+
+        const hasRole = roles.some((role) => keycloak.roles.includes(role));
+        if (!hasRole) {
+          throw new Error(
+            `Insufficient privileges. Required roles: ${roles.join(", ")}`
+          );
+        }
+      },
+    });
+  }
+
+  /**
+   * Require specific permission guard
+   */
+  public requirePermission(requiredPermission: string | string[]) {
+    const permissions = Array.isArray(requiredPermission)
+      ? requiredPermission
+      : [requiredPermission];
+
+    return new Elysia().guard({
+      beforeHandle: ({ keycloak }: { keycloak: KeycloakAuthContext }) => {
+        if (!keycloak.authenticated) {
+          throw new Error("Authentication required");
+        }
+
+        const hasPermission = permissions.some((permission) =>
+          keycloak.permissions.includes(permission)
+        );
+        if (!hasPermission) {
+          throw new Error(
+            `Insufficient permissions. Required: ${permissions.join(", ")}`
+          );
+        }
+      },
+    });
+  }
+
+  /**
+   * Require specific group membership guard
+   */
+  public requireGroup(requiredGroup: string | string[]) {
+    const groups = Array.isArray(requiredGroup)
+      ? requiredGroup
+      : [requiredGroup];
+
+    return new Elysia().guard({
+      beforeHandle: ({ keycloak }: { keycloak: KeycloakAuthContext }) => {
+        if (!keycloak.authenticated) {
+          throw new Error("Authentication required");
+        }
+
+        const hasGroup = groups.some((group) =>
+          keycloak.groups.includes(group)
+        );
+        if (!hasGroup) {
+          throw new Error(`Group membership required: ${groups.join(", ")}`);
+        }
+      },
+    });
+  }
+
+  /**
+   * Get Keycloak service instance
+   */
+  public getService(): KeycloakService {
+    return this.keycloakService;
+  }
+
+  /**
+   * Get cache statistics
+   */
+  public async getCacheStats(): Promise<Record<string, number>> {
+    return await this.keycloakService.getCacheStats();
+  }
+
+  /**
+   * Clear authentication caches
+   */
+  public clearCache(): void {
+    this.keycloakService.clearCache();
+  }
+
+  /**
+   * Sanitize error messages to prevent information disclosure
+   */
+  private sanitizeErrorMessage(message: string, errorType: KeycloakErrorType): string {
+    // Don't expose detailed error information that could aid attackers
+    switch (errorType) {
+      case KeycloakErrorType.INVALID_TOKEN:
+      case KeycloakErrorType.INVALID_SIGNATURE:
+      case KeycloakErrorType.TOKEN_EXPIRED:
+        return "Invalid or expired authentication token";
+      case KeycloakErrorType.INVALID_ISSUER:
+      case KeycloakErrorType.INVALID_AUDIENCE:
+        return "Token validation failed";
+      case KeycloakErrorType.CONNECTION_ERROR:
+        return "Authentication service temporarily unavailable";
+      case KeycloakErrorType.PERMISSION_DENIED:
+        return "Access denied";
+      default:
+        return "Authentication failed";
+    }
+  }
+
+  /**
+   * Get retry-after value based on error type
+   */
+  private getRetryAfter(errorType: KeycloakErrorType): number | undefined {
+    switch (errorType) {
+      case KeycloakErrorType.CONNECTION_ERROR:
+        return 30; // 30 seconds for connection issues
+      case KeycloakErrorType.TOKEN_EXPIRED:
+        return 1; // Immediate retry for token refresh
+      default:
+        return undefined;
+    }
+  }
+
+  /**
+   * Hash client IP for privacy-safe logging
+   */
+  private hashClientIp(ip: string): string {
+    const crypto = require('crypto');
+    return crypto.createHash('sha256').update(ip + this.config.keycloak.clientId).digest('hex').substring(0, 16);
+  }
+
+  /**
+   * Check rate limiting for IP address
+   */
+  private async checkRateLimit(clientIp: string): Promise<boolean> {
+    try {
+      const key = `rate-limit:keycloak-auth:${this.hashClientIp(clientIp)}`;
+      // Simple Redis-based rate limiting check
+      const current = await this.keycloakService['redis'].incr(key);
+      if (current === 1) {
+        await this.keycloakService['redis'].expire(key, 60); // 1 minute window
+      }
+      return current > 10; // More than 10 attempts in window
+    } catch (error) {
+      this.logger.warn('Rate limiting check failed', error as Error);
+      return false; // Don't block on rate limiter errors
+    }
+  }
+
+  /**
+   * Get service health status
+   */
+  public async getHealthStatus(): Promise<{ status: string; details: any }> {
+    try {
+      const serviceHealth = await this.keycloakService.getHealthStatus();
+      const cacheStats = await this.keycloakService.getCacheStats();
+      
+      return {
+        status: serviceHealth.status,
+        details: {
+          ...serviceHealth.details,
+          cacheStats,
+          rateLimiter: 'active',
+          middleware: 'healthy'
+        }
+      };
+    } catch (_error) {
+      return {
+        status: 'unhealthy',
+        details: {
+          error: 'Health check failed',
+          middleware: 'error'
+        }
+      };
+    }
+  }
+
+  /**
+   * Cleanup resources
+   */
+  public destroy(): void {
+    this.keycloakService.destroy();
+    super.handleError = () => Promise.resolve();
+  }
+}
+
+/**
+ * Create Keycloak middleware plugin for Elysia
+ */
+export function createKeycloakPlugin(config: KeycloakMiddlewareOptions) {
+  const middleware = new KeycloakMiddleware(config);
+  return middleware.plugin();
+}
+
+/**
+ * Keycloak authentication guards for easy use
+ */
+export const keycloakGuards = {
+  /**
+   * Require authentication
+   */
+  authenticated: new Elysia().guard({
+    beforeHandle: ({ keycloak }: { keycloak: KeycloakAuthContext }) => {
+      if (!keycloak.authenticated) {
+        throw new Error("Authentication required");
+      }
+    },
+  }),
+
+  /**
+   * Require admin role
+   */
+  admin: new Elysia().guard({
+    beforeHandle: ({ keycloak }: { keycloak: KeycloakAuthContext }) => {
+      if (!keycloak.authenticated) {
+        throw new Error("Authentication required");
+      }
+      if (
+        !keycloak.roles.includes("admin") &&
+        !keycloak.roles.includes("administrator")
+      ) {
+        throw new Error("Administrator access required");
+      }
+    },
+  }),
+
+  /**
+   * Optional authentication (allows unauthenticated)
+   */
+  optional: new Elysia().guard({
+    beforeHandle: () => {
+      // No requirements - allows both authenticated and unauthenticated
+    },
+  }),
+};

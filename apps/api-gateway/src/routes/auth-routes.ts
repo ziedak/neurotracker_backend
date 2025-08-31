@@ -23,7 +23,7 @@ const RegisterSchema = t.Object({
  * @param logger - Logger instance
  * @returns Elysia server instance with auth routes
  */
-export function setupAuthRoutes(app: Elysia, logger: Logger): any {
+export function setupAuthRoutes(app: Elysia, logger: ILogger): any {
   const { AuthService } = require("../services/authService");
   const authService = new AuthService(
     logger,

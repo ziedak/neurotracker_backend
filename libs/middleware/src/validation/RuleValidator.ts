@@ -37,10 +37,10 @@ export interface ValidationRuleSet {
  */
 export class RuleValidator implements Validator {
   private readonly config: ValidationConfig;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly ruleSets: Map<string, ValidationRuleSet>;
 
-  constructor(config: ValidationConfig, logger: Logger) {
+  constructor(config: ValidationConfig, logger: ILogger) {
     this.config = config;
     this.logger = logger.child({ component: "RuleValidator" });
     this.ruleSets = new Map();

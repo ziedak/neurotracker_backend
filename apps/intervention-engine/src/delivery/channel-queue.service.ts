@@ -14,7 +14,7 @@ const DELIVERY_CONFIG = {
 
 export class ChannelQueueService {
   private redis: any;
-  constructor(private logger: Logger, private metrics: MetricsCollector) {
+  constructor(private logger: ILogger, private metrics: MetricsCollector) {
     this.redis = RedisClient.getInstance();
   }
 

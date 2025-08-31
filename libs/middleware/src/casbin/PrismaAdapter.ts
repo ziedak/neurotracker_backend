@@ -16,13 +16,13 @@ import type { DatabaseAdapterConfig } from "./types";
  */
 export class PrismaAdapter implements Adapter {
   private readonly prisma: PrismaClient;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly config: DatabaseAdapterConfig;
   private filtered = false;
 
   constructor(
     prisma: PrismaClient,
-    logger: Logger,
+    logger: ILogger,
     config: DatabaseAdapterConfig
   ) {
     this.prisma = prisma;

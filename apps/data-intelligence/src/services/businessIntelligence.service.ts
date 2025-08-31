@@ -33,14 +33,14 @@ export class BusinessIntelligenceService {
   private readonly clickhouse: ClickHouseClient;
   private readonly postgres: PostgreSQLClient;
   private readonly redis: RedisClient;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
   constructor(
     clickhouse: ClickHouseClient,
     postgres: PostgreSQLClient,
     redis: RedisClient,
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector
   ) {
     this.clickhouse = clickhouse;

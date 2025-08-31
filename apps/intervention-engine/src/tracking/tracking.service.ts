@@ -65,7 +65,7 @@ export class TrackingService {
     windowDays: 7,
   };
 
-  constructor(private logger: Logger, private metrics: MetricsCollector) {
+  constructor(private logger: ILogger, private metrics: MetricsCollector) {
     this.redis = RedisClient.getInstance();
   }
 

@@ -57,7 +57,7 @@ const createTestMiddleware = (
 
 describe("WebSocketMiddlewareChain", () => {
   let chain: WebSocketMiddlewareChain;
-  let logger: Logger;
+  let logger: ILogger;
   let metrics: MetricsCollector;
 
   beforeEach(() => {

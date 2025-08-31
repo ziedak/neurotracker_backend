@@ -39,7 +39,7 @@ export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
 
   constructor(
     config: ValidationConfig,
-    logger: Logger,
+    logger: ILogger,
     metrics?: MetricsCollector
   ) {
     super("validation", config, logger, metrics);
@@ -229,7 +229,7 @@ export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
   public static forSchema(
     schemaName: string,
     engine: "zod" | "rules" = "zod",
-    logger: Logger
+    logger: ILogger
   ): ValidationMiddleware {
     const config: ValidationConfig = {
       engine,

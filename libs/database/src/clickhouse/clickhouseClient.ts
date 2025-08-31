@@ -1,7 +1,9 @@
 import { createClient, ClickHouseClient as CHClient } from "@clickhouse/client";
 import { getEnv, getNumberEnv, getBooleanEnv } from "@libs/config";
-
+import { Logger } from "@libs/monitoring";
+import { executeWithRetry } from "@libs/utils";
 export class ClickHouseClient {
+  private static logger = new Logger({ service: "ClickHouseClient" });
   private static instance: CHClient;
   private static isConnected = false;
 
@@ -41,7 +43,7 @@ export class ClickHouseClient {
       const result = await ClickHouseClient.getInstance().ping();
       return result.success;
     } catch (error) {
-      console.error("ClickHouse ping failed:", error);
+      ClickHouseClient.logger.error("ClickHouse ping failed", error);
       return false;
     }
   }
@@ -67,12 +69,14 @@ export class ClickHouseClient {
         return {
           status: "healthy",
           latency,
-          version: version[0]?.version,
+          ...(typeof version[0]?.version === "string" && {
+            version: version[0].version,
+          }),
         };
       }
       return { status: "unhealthy" };
     } catch (error) {
-      console.error("ClickHouse health check failed:", error);
+      ClickHouseClient.logger.error("ClickHouse health check failed", error);
       return { status: "unhealthy" };
     }
   }
@@ -86,14 +90,21 @@ export class ClickHouseClient {
     values?: Record<string, unknown>
   ): Promise<any> {
     try {
-      const result = await ClickHouseClient.getInstance().query({
-        query,
-        query_params: values,
-        format: "JSONEachRow",
-      });
-      return await result.json();
+      return await executeWithRetry(
+        async () => {
+          const result = await ClickHouseClient.getInstance().query({
+            query,
+            query_params: values ?? {},
+            format: "JSONEachRow",
+          });
+          return await result.json();
+        },
+        (error: unknown) => {
+          ClickHouseClient.logger.error("ClickHouse query failed", error);
+        }
+      );
     } catch (error) {
-      console.error("ClickHouse query failed:", error);
+      ClickHouseClient.logger.error("ClickHouse query failed (final)", error);
       throw error;
     }
   }
@@ -104,13 +115,19 @@ export class ClickHouseClient {
     format = "JSONEachRow"
   ): Promise<void> {
     try {
-      await ClickHouseClient.getInstance().insert({
-        table,
-        values: data,
-        format: format as any,
-      });
+      await executeWithRetry(
+        async () => {
+          await ClickHouseClient.getInstance().insert({
+            table,
+            values: data,
+            format: format as any,
+          });
+        },
+        (error: unknown) =>
+          ClickHouseClient.logger.error("ClickHouse insert failed", error)
+      );
     } catch (error) {
-      console.error("ClickHouse insert failed:", error);
+      ClickHouseClient.logger.error("ClickHouse insert failed (final)", error);
       throw error;
     }
   }

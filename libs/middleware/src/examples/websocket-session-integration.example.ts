@@ -18,7 +18,7 @@ import { type WebSocketAuthConfig } from "../types";
  * Example WebSocket server setup with session integration
  */
 export class WebSocketServerExample {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
   private readonly sessionManager: UnifiedSessionManager;
   private readonly authMiddleware: WebSocketAuthMiddleware;

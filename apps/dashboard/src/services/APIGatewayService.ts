@@ -29,12 +29,12 @@ export interface GatewayHealth {
  */
 export class APIGatewayService {
   private readonly cache: CacheService;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
   private readonly gatewayUrl: string;
   private readonly defaultTimeout: number = 30000; // 30 seconds
 
-  constructor(cache: CacheService, logger: Logger, metrics: MetricsCollector) {
+  constructor(cache: CacheService, logger: ILogger, metrics: MetricsCollector) {
     this.cache = cache;
     this.logger = logger;
     this.metrics = metrics;

@@ -20,7 +20,7 @@ export class AuthMiddleware extends BaseMiddleware<AuthConfig> {
 
   constructor(
     config: AuthConfig,
-    logger: Logger,
+    logger: ILogger,
     metrics?: MetricsCollector,
     services?: {
       permissionService?: PermissionService;

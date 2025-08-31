@@ -18,7 +18,7 @@ export class WebSocketRateLimitMiddleware extends BaseWebSocketMiddleware<WebSoc
 
   constructor(
     config: WebSocketRateLimitConfig,
-    logger: Logger,
+    logger: ILogger,
     metrics?: MetricsCollector
   ) {
     super("ws-rate-limit", config, logger, metrics);
@@ -388,7 +388,7 @@ export class WebSocketRateLimitMiddleware extends BaseWebSocketMiddleware<WebSoc
    */
   static create(
     config: WebSocketRateLimitConfig,
-    logger: Logger,
+    logger: ILogger,
     metrics?: MetricsCollector
   ): WebSocketMiddlewareFunction {
     const middleware = new WebSocketRateLimitMiddleware(

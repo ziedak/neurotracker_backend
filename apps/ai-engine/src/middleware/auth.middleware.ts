@@ -92,7 +92,7 @@ export class AuthMiddleware {
       : apiKey.substring(0, 2) + "...";
   }
   private readonly config: AuthConfig;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
   // In production, these would be loaded from environment/database
@@ -108,7 +108,7 @@ export class AuthMiddleware {
   };
 
   constructor(
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector,
     config?: Partial<AuthConfig>
   ) {

@@ -53,7 +53,7 @@ export interface AnomalyDetectionResult {
  * Strict TypeScript, Clean Architecture, SOLID, DRY, KISS, YAGNI principles
  */
 export class DataQualityService {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
   // Magic values as constants
@@ -64,7 +64,7 @@ export class DataQualityService {
   private static readonly ANOMALY_LIMIT = 1000;
   private static readonly RECENT_DAYS = 7;
 
-  constructor(logger: Logger, metrics: MetricsCollector) {
+  constructor(logger: ILogger, metrics: MetricsCollector) {
     this.logger = logger;
     this.metrics = metrics;
   }

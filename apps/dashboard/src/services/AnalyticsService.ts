@@ -42,7 +42,7 @@ export class AnalyticsService {
   private readonly postgres: PostgreSQLClient;
   private readonly cache: CacheService;
   private readonly apiGateway: APIGatewayService;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
   constructor(
@@ -50,7 +50,7 @@ export class AnalyticsService {
     postgres: PostgreSQLClient,
     cache: CacheService,
     apiGateway: APIGatewayService,
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector
   ) {
     this.clickhouse = clickhouse;

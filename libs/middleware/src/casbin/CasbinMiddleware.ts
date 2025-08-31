@@ -146,7 +146,7 @@ export class CasbinMiddleware extends BaseMiddleware<CasbinConfig> {
   constructor(
     config: CasbinConfig,
     prisma: PrismaClient,
-    logger: Logger,
+    logger: ILogger,
     metricsCollector?: MetricsCollector,
     redis?: RedisClient
   ) {

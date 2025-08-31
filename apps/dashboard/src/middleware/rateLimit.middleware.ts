@@ -26,7 +26,7 @@ interface RateLimitRecord {
  * Provides configurable rate limiting with in-memory storage
  */
 export class RateLimitMiddleware {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly store: Map<string, RateLimitRecord> = new Map();
   private readonly defaultConfig: RateLimitConfig = {
     maxRequests: 100,
@@ -35,7 +35,7 @@ export class RateLimitMiddleware {
     skipFailedRequests: false,
   };
 
-  constructor(logger: Logger) {
+  constructor(logger: ILogger) {
     this.logger = logger;
 
     // Clean up expired entries every 10 minutes

@@ -7,7 +7,7 @@ import { AuthResult } from "./types";
  */
 export class ApiKeyAuth {
   private readonly config: AuthConfig;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
   // In production, these would be loaded from environment/database
   private readonly keyPermissions: Record<string, string[]> = {
@@ -42,7 +42,7 @@ export class ApiKeyAuth {
     "api-gateway-key": ["service", "gateway"],
   };
 
-  constructor(config: AuthConfig, logger: Logger) {
+  constructor(config: AuthConfig, logger: ILogger) {
     this.config = config;
     this.logger = logger.child({ component: "ApiKeyAuth" });
   }

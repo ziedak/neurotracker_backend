@@ -25,9 +25,9 @@ export interface ReportRequest {
  */
 export class MetricsController {
   private readonly metricsService: MetricsService;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
-  constructor(metricsService: MetricsService, logger: Logger) {
+  constructor(metricsService: MetricsService, logger: ILogger) {
     this.metricsService = metricsService;
     this.logger = logger;
   }

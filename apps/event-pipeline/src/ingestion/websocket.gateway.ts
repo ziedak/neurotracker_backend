@@ -17,7 +17,7 @@ export class WebSocketGateway {
   private redis: any;
   private routingService: RoutingService;
   private validationService: ValidationService;
-  private logger: Logger;
+  private logger: ILogger;
 
   constructor() {
     // Get services from container to avoid duplicate instantiation

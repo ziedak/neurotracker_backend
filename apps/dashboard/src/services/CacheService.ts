@@ -20,7 +20,7 @@ export interface CacheStats {
  */
 export class CacheService {
   private readonly redis: RedisClient;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
   private readonly defaultTTL: number = 300; // 5 minutes
   private readonly keyPrefix: string = "dashboard:";
@@ -33,7 +33,7 @@ export class CacheService {
     errors: 0,
   };
 
-  constructor(redis: RedisClient, logger: Logger, metrics: MetricsCollector) {
+  constructor(redis: RedisClient, logger: ILogger, metrics: MetricsCollector) {
     this.redis = redis;
     this.logger = logger;
     this.metrics = metrics;

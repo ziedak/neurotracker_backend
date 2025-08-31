@@ -26,7 +26,7 @@ const CIRCUIT_BREAKER_TIMEOUT: number = 10000;
  */
 export class DataIntelligenceClient {
   private readonly httpClient: AxiosInstance;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
   private readonly circuitBreaker: CircuitBreaker;
   private readonly baseUrl: string;
@@ -38,7 +38,7 @@ export class DataIntelligenceClient {
   private readonly circuit_breaker_timeout: number = 10000;
 
   constructor(
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector,
     config?: {
       timeoutMs?: number;

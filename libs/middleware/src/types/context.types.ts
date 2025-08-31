@@ -18,7 +18,7 @@ export interface MiddlewareContext {
     body?: any;
   };
   set: {
-    status?: number;
+    status?: number | undefined;
     headers: Record<string, string>;
   };
   user?: {

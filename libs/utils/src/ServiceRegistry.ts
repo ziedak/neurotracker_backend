@@ -1,4 +1,33 @@
-// core/ServiceRegistry.ts
+/**
+ * Critique & Areas for Improvement
+Global State:
+
+All registries are module-level singletons. Child containers only override instances, not factories, so true isolation is limited.
+Consider encapsulating all registries in a class instance for better isolation and testability.
+No Dependency Graph:
+
+No support for automatic dependency injection (constructor or property injection). All dependencies must be manually resolved.
+Most npm DI libraries (e.g., tsyringe, inversify) support auto-wiring via decorators or metadata.
+Async/Sync Ambiguity:
+
+If a service is registered as async, calling resolve throws an error, and vice versa. This is clear, but can be error-prone for users.
+Consider a unified resolve that returns a promise for both sync/async, or clearer API separation.
+No Disposal Hooks:
+
+No support for cleanup/disposal of services (e.g., closing DB connections). Npm libraries often support lifecycle hooks.
+No Parameter Injection:
+
+Factories must be zero-argument. No support for passing parameters or context at resolve time.
+No Metadata or Tagging:
+
+No support for service tags, scopes, or metadata, which are useful for advanced scenarios.
+Child Container Limitations:
+
+Child containers only override instances, not factories. This limits their usefulness for true isolation.
+Error Handling:
+
+Errors are thrown for missing services or wrong resolve type, but could be more descriptive or customizable.
+ */
 
 /**
  * Factory for synchronous services

@@ -79,6 +79,9 @@ export * from "./cors/cors.middleware";
 // Export security middleware
 export * from "./security/security.middleware";
 
+// Export Keycloak authentication middleware
+export * from "./keycloak";
+
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import { RedisClient, ClickHouseClient } from "@libs/database";
 import {
@@ -153,6 +156,13 @@ export const createCorsMiddleware = (config?: CorsConfig) => {
 export const createSecurityMiddleware = (config?: SecurityConfig) => {
   const middleware = new SecurityMiddleware(config);
   return middleware.elysia();
+};
+
+export const createKeycloakMiddleware = (config: import("./keycloak/types").KeycloakMiddlewareOptions) => {
+  const logger = Logger.getInstance("KeycloakMiddleware");
+  const metrics = MetricsCollector.getInstance();
+  const { KeycloakMiddleware } = require("./keycloak/middleware");
+  return new KeycloakMiddleware(config, logger, metrics).plugin();
 };
 
 /**

@@ -160,10 +160,10 @@ export class DataReconciliationService {
     }
   }
 
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
-  constructor(logger: Logger, metrics: MetricsCollector) {
+  constructor(logger: ILogger, metrics: MetricsCollector) {
     this.logger = logger;
     this.metrics = metrics;
   }

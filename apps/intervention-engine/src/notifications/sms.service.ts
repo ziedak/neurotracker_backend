@@ -11,7 +11,7 @@ export class SMSService {
   private config: SMSConfig;
 
   constructor(
-    private logger: Logger,
+    private logger: ILogger,
     private metrics: MetricsCollector,
     private templateService: TemplateService
   ) {

@@ -95,7 +95,7 @@ import { LRUCache } from "libs/utils/src/lru-cache";
  */
 export class ModelService {
   private readonly cacheService: CacheService;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
   // Model configuration
@@ -120,7 +120,7 @@ export class ModelService {
 
   constructor(
     cacheService: CacheService,
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector
   ) {
     this.cacheService = cacheService;

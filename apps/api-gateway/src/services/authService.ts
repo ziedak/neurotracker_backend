@@ -16,7 +16,7 @@ import {
  */
 export class AuthService {
   constructor(
-    private readonly logger: Logger,
+    private readonly logger: ILogger,
     private readonly metrics: MetricsCollector,
     private readonly jwtService: EnhancedJWTService
   ) {}

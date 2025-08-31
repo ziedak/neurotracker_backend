@@ -39,7 +39,7 @@ export interface ResponseLogData {
  * Provides comprehensive request/response logging with configurable options
  */
 export class LoggingMiddleware {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly defaultConfig: LoggingConfig = {
     logLevel: "info",
     logRequestBody: false,
@@ -51,7 +51,7 @@ export class LoggingMiddleware {
     sensitiveFields: ["password", "token", "secret", "key", "auth"],
   };
 
-  constructor(logger: Logger) {
+  constructor(logger: ILogger) {
     this.logger = logger;
   }
 

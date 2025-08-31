@@ -66,7 +66,7 @@ export class AuthCacheService {
   private static instance: AuthCacheService;
 
   private readonly config: CacheConfig;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly redis: any;
 
   // L1 Cache (in-memory)
@@ -88,9 +88,9 @@ export class AuthCacheService {
     compressions: 0,
   };
 
-  private constructor(config: Partial<CacheConfig> = {}) {
+  private constructor(logger: ILogger, config: Partial<CacheConfig> = {}) {
     this.config = { ...DEFAULT_CACHE_CONFIG, ...config };
-    this.logger = new Logger({ service: "AuthCacheService" });
+    this.logger = new Logger.c({ service: "AuthCacheService" });
     this.redis = RedisClient.getInstance();
 
     this.setupCleanupInterval();
@@ -186,7 +186,7 @@ export class AuthCacheService {
       try {
         await this.setInL2(key, data, ttl);
       } catch (error) {
-       this.logger.error(`L2 cache error for key: ${key}`, error as Error);
+        this.logger.error(`L2 cache error for key: ${key}`, error as Error);
       }
     }
   }
@@ -206,7 +206,10 @@ export class AuthCacheService {
       try {
         await this.redis.del(this.getRedisKey(key));
       } catch (error) {
-        this.logger.error(`L2 cache invalidation error for key: ${key}`, error as Error);
+        this.logger.error(
+          `L2 cache invalidation error for key: ${key}`,
+          error as Error
+        );
       }
     }
 
@@ -246,7 +249,10 @@ export class AuthCacheService {
           }
         }
       } catch (error) {
-        this.logger.error(`L2 pattern invalidation error for pattern: ${pattern}`, error as Error);
+        this.logger.error(
+          `L2 pattern invalidation error for pattern: ${pattern}`,
+          error as Error
+        );
       }
     }
 
@@ -302,7 +308,10 @@ export class AuthCacheService {
 
       return entry;
     } catch (error) {
-      this.logger.error(`L2 cache deserialization error for key: ${key}`, error as Error);
+      this.logger.error(
+        `L2 cache deserialization error for key: ${key}`,
+        error as Error
+      );
       await this.redis.del(redisKey); // Clean up corrupted entry
       return null;
     }

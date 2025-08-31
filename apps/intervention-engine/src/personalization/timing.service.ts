@@ -3,7 +3,7 @@ import { getEnv } from "@libs/config";
 import { OptimalTiming, UserProfile } from "./types";
 
 export class TimingService {
-  constructor(private logger: Logger) {}
+  constructor(private logger: ILogger) {}
 
   async getOptimalSendTime(
     userId: string,

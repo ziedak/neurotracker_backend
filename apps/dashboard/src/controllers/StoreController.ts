@@ -32,9 +32,9 @@ export interface CartRequest {
  */
 export class StoreController {
   private readonly storeService: StoreService;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
-  constructor(storeService: StoreService, logger: Logger) {
+  constructor(storeService: StoreService, logger: ILogger) {
     this.storeService = storeService;
     this.logger = logger;
   }

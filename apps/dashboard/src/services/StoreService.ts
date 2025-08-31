@@ -87,13 +87,13 @@ export class StoreService {
   private readonly db = PostgreSQLClient.getInstance();
   private readonly cache: CacheService;
   private readonly gateway: APIGatewayService;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
   constructor(
     cache: CacheService,
     gateway: APIGatewayService,
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector
   ) {
     this.cache = cache;

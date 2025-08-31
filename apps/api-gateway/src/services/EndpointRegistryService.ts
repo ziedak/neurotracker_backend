@@ -21,7 +21,7 @@ export class EndpointRegistryService {
   private services = new Map<string, ServiceInstance[]>();
   private roundRobinIndex = new Map<string, number>();
 
-  constructor(private logger: Logger) {}
+  constructor(private logger: ILogger) {}
 
   /**
    * Register a new service instance URL

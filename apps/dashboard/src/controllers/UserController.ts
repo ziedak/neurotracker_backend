@@ -37,9 +37,9 @@ export interface UserAnalyticsRequest {
  */
 export class UserController {
   private readonly userService: UserService;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
-  constructor(userService: UserService, logger: Logger) {
+  constructor(userService: UserService, logger: ILogger) {
     this.userService = userService;
     this.logger = logger;
   }

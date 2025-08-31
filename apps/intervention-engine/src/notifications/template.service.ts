@@ -8,7 +8,7 @@ import {
 export class TemplateService {
   private templates: Map<string, NotificationTemplate> = new Map();
 
-  constructor(private logger: Logger, private metrics: MetricsCollector) {
+  constructor(private logger: ILogger, private metrics: MetricsCollector) {
     this.initializeDefaultTemplates();
   }
 

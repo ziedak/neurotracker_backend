@@ -15,7 +15,7 @@ import {
 import { type RandomReader } from "@oslojs/crypto/random";
 import { hmac } from "@oslojs/crypto/hmac";
 import { constantTimeEqual } from "@oslojs/crypto/subtle";
-import { scrypt } from "node:crypto";
+import { scrypt } from "crypto";
 import { promisify } from "node:util";
 import { Logger } from "@libs/monitoring";
 
@@ -87,7 +87,7 @@ export interface JWTPayload {
  */
 export class OsloCryptographicService {
   private readonly config: OsloCryptoConfig;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
   constructor(config: Partial<OsloCryptoConfig> = {}) {
     this.config = { ...DEFAULT_OSLO_CONFIG, ...config };

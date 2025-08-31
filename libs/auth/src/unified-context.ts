@@ -88,10 +88,10 @@ export interface WebSocketAuthContext {
   readonly metadata: {
     readonly headers: Record<string, string>;
     readonly query: Record<string, string>;
-    readonly origin?: string;
-    readonly protocol?: string;
+    readonly origin?: string | undefined;
+    readonly protocol?: string | undefined;
     readonly connectedAt: Date;
-    readonly lastMessageAt?: Date;
+    readonly lastMessageAt?: Date | undefined;
   };
 
   // WebSocket-specific methods

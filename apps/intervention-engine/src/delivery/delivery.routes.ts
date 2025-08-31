@@ -5,7 +5,7 @@ import { InterventionTrigger } from "./types";
 
 export const createDeliveryController = (
   deliveryService: DeliveryService,
-  logger: Logger,
+  logger: ILogger,
   metrics: MetricsCollector
 ) => {
   return (

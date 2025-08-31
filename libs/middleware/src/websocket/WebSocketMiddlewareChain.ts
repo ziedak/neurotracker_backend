@@ -73,7 +73,7 @@ class MiddlewareCircuitBreaker {
   constructor(
     private readonly config: CircuitBreakerConfig,
     private readonly middlewareName: string,
-    private readonly logger: Logger
+    private readonly logger: ILogger
   ) {}
 
   async execute<T>(operation: () => Promise<T>): Promise<T> {
@@ -160,12 +160,12 @@ interface RegisteredMiddleware {
  */
 export class WebSocketMiddlewareChain {
   private readonly middleware: Map<string, RegisteredMiddleware> = new Map();
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector | undefined;
   private executionOrder: string[] = [];
 
   constructor(
-    logger: Logger = Logger.getInstance("WebSocketMiddlewareChain"),
+    logger: ILogger = Logger.getInstance("WebSocketMiddlewareChain"),
     metrics?: MetricsCollector
   ) {
     this.logger = logger;

@@ -8,7 +8,7 @@ import type { EndpointRegistryService } from "../services/EndpointRegistryServic
 export function setupApiRoutes(
   app: Elysia,
   endpointRegistryService: EndpointRegistryService,
-  logger: Logger
+  logger: ILogger
 ): Elysia {
   return app
     .all("/api/events/*", async (context) => {

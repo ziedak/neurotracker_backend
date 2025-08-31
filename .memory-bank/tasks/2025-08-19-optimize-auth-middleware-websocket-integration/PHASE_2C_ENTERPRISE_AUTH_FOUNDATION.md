@@ -54,7 +54,7 @@
 ```typescript
 export class RedisSessionStore {
   private redis: Redis.Cluster | Redis;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
   // Core session operations with full implementation
@@ -104,7 +104,7 @@ export class RedisSessionStore {
 ```typescript
 export class PostgreSQLSessionStore {
   private readonly db: DatabaseUtils;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
   // Backup operations
@@ -188,7 +188,7 @@ export class UnifiedSessionManager implements SessionManager {
 ```typescript
 export class JWTBlacklistManager {
   private readonly redis: Redis;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
   // Token revocation with full implementation
   async revokeToken(tokenId: string, expiresAt: Date): Promise<void>;
@@ -297,7 +297,7 @@ export class PermissionValidator {
 ```typescript
 export class PermissionCache {
   private readonly redis: Redis;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
   // Full caching implementation with proper error handling
@@ -336,7 +336,7 @@ export class PermissionCache {
 export class PermissionService implements IPermissionService {
   private readonly db: DatabaseUtils;
   private readonly cache: PermissionCache;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
   // Full RBAC implementation
   async getUserPermissions(userId: string): Promise<Permission[]>;
@@ -433,7 +433,7 @@ export class APIKeyService implements IAPIKeyService {
   private readonly db: DatabaseUtils;
   private readonly crypto: CryptoService;
   private readonly cache: Redis;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
   // Full API key management
   async generateAPIKey(userId: string, options: APIKeyOptions): Promise<APIKey>;

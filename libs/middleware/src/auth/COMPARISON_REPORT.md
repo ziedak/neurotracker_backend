@@ -122,7 +122,7 @@ export class AuthenticationService {
   private readonly sessionManager: SessionManager;
   private readonly permissionService: PermissionService;
   private readonly jwtService: EnhancedJWTService;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
   // 300+ lines of complex login logic

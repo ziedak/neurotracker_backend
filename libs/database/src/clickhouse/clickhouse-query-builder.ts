@@ -65,22 +65,21 @@ export class ClickHouseQueryBuilder {
   static buildSelectQuery(
     table: string,
     options: {
-      select?: string[];
+      select?: string[] | undefined;
       where?: Record<
-        string,
-        | string
-        | number
-        | boolean
-        | Date
-        | null
-        | { operator: string; value: any }
-      >;
-      groupBy?: string[];
-      orderBy?: { field: string; direction: "ASC" | "DESC" }[];
-      limit?: number;
-      offset?: number;
-      allowedTables?: readonly string[];
-      allowedFields?: readonly string[];
+        string, string |
+        number |
+        boolean |
+        Date |
+        null |
+        { operator: string; value: any; }
+      > | undefined;
+      groupBy?: string[] | undefined;
+      orderBy?: { field: string; direction: "ASC" | "DESC"; }[] | undefined;
+      limit?: number | undefined;
+      offset?: number | undefined;
+      allowedTables?: readonly string[] | undefined;
+      allowedFields?: readonly string[] | undefined;
     } = {}
   ): { query: string; params: Record<string, any> } {
     const {
@@ -167,26 +166,24 @@ export class ClickHouseQueryBuilder {
     }[],
     options: {
       where?: Record<
-        string,
-        | string
-        | number
-        | boolean
-        | Date
-        | null
-        | { operator: string; value: any }
-      >;
-      groupBy?: string[];
+        string, string |
+        number |
+        boolean |
+        Date |
+        null |
+        { operator: string; value: any; }
+      > | undefined;
+      groupBy?: string[] | undefined;
       having?: Record<
-        string,
-        | string
-        | number
-        | boolean
-        | Date
-        | null
-        | { operator: string; value: any }
-      >;
-      allowedTables?: readonly string[];
-      allowedFields?: readonly string[];
+        string, string |
+        number |
+        boolean |
+        Date |
+        null |
+        { operator: string; value: any; }
+      > | undefined;
+      allowedTables?: readonly string[] | undefined;
+      allowedFields?: readonly string[] | undefined;
     } = {}
   ): { query: string; params: Record<string, any> } {
     const {
@@ -241,20 +238,19 @@ export class ClickHouseQueryBuilder {
     dateField: string,
     interval: "minute" | "hour" | "day" | "week" | "month",
     options: {
-      select?: string[];
+      select?: string[] | undefined;
       where?: Record<
-        string,
-        | string
-        | number
-        | boolean
-        | Date
-        | null
-        | { operator: string; value: any }
-      >;
-      dateFrom?: string | Date;
-      dateTo?: string | Date;
-      allowedTables?: readonly string[];
-      allowedFields?: readonly string[];
+        string, string |
+        number |
+        boolean |
+        Date |
+        null |
+        { operator: string; value: any; }
+      > | undefined;
+      dateFrom?: string | Date | undefined;
+      dateTo?: string | Date | undefined;
+      allowedTables?: readonly string[] | undefined;
+      allowedFields?: readonly string[] | undefined;
     } = {}
   ): { query: string; params: Record<string, any> } {
     const {
@@ -479,7 +475,7 @@ export class ClickHouseQueryBuilder {
           conditions.push(
             `${this.escapeIdentifier(dateField)} >= {dateFrom:DateTime}`
           );
-          params.dateFrom = new Date(value).toISOString();
+          params["dateFrom"] = new Date(value).toISOString();
         }
       } else if (key === `${dateField}_to`) {
         if (
@@ -490,7 +486,7 @@ export class ClickHouseQueryBuilder {
           conditions.push(
             `${this.escapeIdentifier(dateField)} <= {dateTo:DateTime}`
           );
-          params.dateTo = new Date(value).toISOString();
+          params["dateTo"] = new Date(value).toISOString();
         }
       } else if (this.isValidIdentifier(key)) {
         if (Array.isArray(value)) {

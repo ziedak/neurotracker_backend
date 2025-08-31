@@ -17,7 +17,7 @@ export class RedisQueueService implements QueueService {
   private processingService: QueueProcessingService;
   private queues: Map<string, QueueProcessingService> = new Map();
 
-  constructor(private logger: Logger, private metrics: MetricsCollector) {
+  constructor(private logger: ILogger, private metrics: MetricsCollector) {
     const jobState = new JobStateService(logger, metrics);
     const cleanup = new QueueCleanupService(logger);
     const config: QueueConfig = {

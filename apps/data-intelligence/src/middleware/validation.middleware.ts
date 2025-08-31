@@ -29,9 +29,9 @@ export interface ValidationError {
  * Validation middleware for data intelligence service
  */
 export class ValidationMiddleware {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
-  constructor(logger: Logger) {
+  constructor(logger: ILogger) {
     this.logger = logger;
   }
 

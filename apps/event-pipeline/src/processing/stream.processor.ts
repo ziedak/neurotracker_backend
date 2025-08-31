@@ -2,7 +2,7 @@ import { KafkaClient } from "@libs/messaging";
 import { Logger } from "@libs/monitoring";
 
 export class StreamProcessor {
-  private logger: Logger;
+  private logger: ILogger;
 
   constructor() {
     this.logger = Logger.getInstance("StreamProcessor");

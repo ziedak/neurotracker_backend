@@ -16,7 +16,7 @@ import { performance } from "perf_hooks";
 export class FeatureService {
   private readonly dataIntelligenceClient: DataIntelligenceClient;
   private readonly cacheService: CacheService;
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
 
   // Feature configuration
@@ -35,7 +35,7 @@ export class FeatureService {
   constructor(
     dataIntelligenceClient: DataIntelligenceClient,
     cacheService: CacheService,
-    logger: Logger,
+    logger: ILogger,
     metrics: MetricsCollector
   ) {
     this.dataIntelligenceClient = dataIntelligenceClient;

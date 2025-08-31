@@ -137,7 +137,7 @@ export class RedisSessionStore {
 
   constructor(
     private config: RedisSessionConfig,
-    private logger: Logger,
+    private logger: ILogger,
     private metrics: MetricsCollector
   ) {
     this.redis = this.createRedisConnection();
@@ -330,7 +330,7 @@ export interface RedisSessionConfig {
 export class PostgreSQLSessionStore {
   constructor(
     private db: DatabaseUtils,
-    private logger: Logger,
+    private logger: ILogger,
     private metrics: MetricsCollector
   ) {}
 
@@ -534,7 +534,7 @@ export class UnifiedSessionManager implements SessionManager {
     private redisStore: RedisSessionStore,
     private postgresStore: PostgreSQLSessionStore,
     private config: SessionManagerConfig,
-    private logger: Logger,
+    private logger: ILogger,
     private metrics: MetricsCollector
   ) {}
 

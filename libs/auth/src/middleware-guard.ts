@@ -3,7 +3,7 @@ import { type JWTPayload } from "./types/jwt-types";
 import {
   EnhancedJWTService,
   type TokenVerificationResult,
-} from "./services/enhanced-jwt-service-v2";
+} from "./services/jwt/enhanced-jwt-service-v2";
 import { Logger, MetricsCollector } from "@libs/monitoring";
 import {
   PermissionService,
@@ -50,14 +50,14 @@ export interface AuthorizationRequirements {
  * Bridges JWT-based authentication with optional service-based authorization
  */
 export class MiddlewareAuthGuard extends AuthGuard {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
   private readonly metrics?: MetricsCollector;
   private readonly permissionService?: PermissionService;
   private readonly userService?: UserService;
   private readonly sessionManager?: SessionManager;
 
   constructor(
-    logger: Logger,
+    logger: ILogger,
     metrics?: MetricsCollector,
     services?: {
       permissionService?: PermissionService;

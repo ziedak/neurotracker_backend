@@ -25,9 +25,9 @@ export interface ValidationErrorItem {
  * Provides comprehensive request validation with schema support
  */
 export class ValidationMiddleware {
-  private readonly logger: Logger;
+  private readonly logger: ILogger;
 
-  constructor(logger: Logger) {
+  constructor(logger: ILogger) {
     this.logger = logger;
   }
 

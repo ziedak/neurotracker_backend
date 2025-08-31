@@ -30,7 +30,7 @@ Types are well-defined for triggers, deliveries, messages, and connection pools.
  */
 export class DeliveryService {
   constructor(
-    private logger: Logger,
+    private logger: ILogger,
     private metrics: MetricsCollector,
     private wsGateway: WebSocketGateway,
     private channelQueue: ChannelQueueService,
