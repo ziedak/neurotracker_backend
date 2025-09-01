@@ -96,3 +96,11 @@ export const deepMerge = (
 
   return result;
 };
+
+/**
+ * Pattern matching for cache keys
+ */
+export const matchPattern = (key: string, pattern: string): boolean => {
+  const regex = new RegExp(pattern.replace(/\*/g, ".*"));
+  return regex.test(key);
+};

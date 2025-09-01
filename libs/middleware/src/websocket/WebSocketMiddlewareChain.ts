@@ -1,4 +1,4 @@
-import { Logger, MetricsCollector } from "@libs/monitoring";
+import { Logger, MetricsCollector, type ILogger } from "@libs/monitoring";
 import { WebSocketContext, WebSocketMiddlewareFunction } from "../types";
 
 /**
@@ -165,10 +165,10 @@ export class WebSocketMiddlewareChain {
   private executionOrder: string[] = [];
 
   constructor(
-    logger: ILogger = Logger.getInstance("WebSocketMiddlewareChain"),
+    logger: ILogger ,
     metrics?: MetricsCollector
   ) {
-    this.logger = logger;
+    this.logger =  logger.child({component: "WebSocketMiddlewareChain"});
     this.metrics = metrics;
   }
 

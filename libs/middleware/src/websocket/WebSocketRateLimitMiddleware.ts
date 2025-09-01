@@ -4,8 +4,9 @@ import {
   WebSocketRateLimitConfig,
 } from "../types";
 import { BaseWebSocketMiddleware } from "./BaseWebSocketMiddleware";
-import { Logger, MetricsCollector } from "@libs/monitoring";
-import { RedisClient } from "@libs/database";
+import { type ILogger, type IMetricsCollector } from "@libs/monitoring";
+import { type RedisClient } from "@libs/database";
+import { inject } from "@libs/utils";
 import type Redis from "ioredis";
 
 /**
@@ -17,12 +18,13 @@ export class WebSocketRateLimitMiddleware extends BaseWebSocketMiddleware<WebSoc
   private readonly connectionCounts: Map<string, number> = new Map();
 
   constructor(
-    config: WebSocketRateLimitConfig,
-    logger: ILogger,
-    metrics?: MetricsCollector
+    @inject("ILogger") logger: ILogger,
+    @inject("IMetricsCollector") metrics: IMetricsCollector,
+    @inject("RedisClient") redisClient: RedisClient,
+    config: WebSocketRateLimitConfig
   ) {
     super("ws-rate-limit", config, logger, metrics);
-    this.redis = RedisClient.getInstance();
+    this.redis = redisClient.getRedis();
   }
 
   /**
@@ -148,8 +150,6 @@ export class WebSocketRateLimitMiddleware extends BaseWebSocketMiddleware<WebSoc
     context: WebSocketContext,
     rateLimitKey: string
   ): Promise<void> {
-    const now = Date.now();
-
     // Check minute-based rate limit
     if (this.config.maxMessagesPerMinute) {
       await this.checkSlidingWindowRateLimit(
@@ -384,17 +384,103 @@ export class WebSocketRateLimitMiddleware extends BaseWebSocketMiddleware<WebSoc
   }
 
   /**
+   * Create new instance of this middleware with different config
+   * NOTE: This method is for DI container usage
+   */
+  protected createInstance(
+    config: WebSocketRateLimitConfig
+  ): WebSocketRateLimitMiddleware {
+    // This would typically be handled by the DI container
+    // For now, create with same dependencies but new config
+    return new WebSocketRateLimitMiddleware(
+      this.logger,
+      this.metrics!,
+      { getRedis: () => this.redis } as RedisClient,
+      config
+    );
+  }
+
+  /**
+   * Factory method for common WebSocket rate limit configurations
+   * NOTE: DI-friendly version. Use DI container to inject dependencies.
+   */
+  public static createTyped(
+    type: "general" | "strict" | "game" | "chat" | "api" | "data-stream",
+    logger: ILogger,
+    metrics: IMetricsCollector,
+    redisClient: RedisClient,
+    customConfig?: Partial<WebSocketRateLimitConfig>
+  ): WebSocketRateLimitMiddleware {
+    const configs = {
+      general: {
+        maxConnections: 1000,
+        maxMessagesPerMinute: 60,
+        maxMessagesPerHour: 1000,
+        name: "ws-rate-limit-general",
+      },
+      strict: {
+        maxConnections: 100,
+        maxMessagesPerMinute: 10,
+        maxMessagesPerHour: 200,
+        name: "ws-rate-limit-strict",
+      },
+      game: {
+        maxConnections: 500,
+        maxMessagesPerMinute: 120, // Fast-paced games need higher limits
+        maxMessagesPerHour: 3000,
+        name: "ws-rate-limit-game",
+      },
+      chat: {
+        maxConnections: 200,
+        maxMessagesPerMinute: 30,
+        maxMessagesPerHour: 500,
+        name: "ws-rate-limit-chat",
+      },
+      api: {
+        maxConnections: 2000,
+        maxMessagesPerMinute: 100,
+        maxMessagesPerHour: 2000,
+        name: "ws-rate-limit-api",
+      },
+      "data-stream": {
+        maxConnections: 50,
+        maxMessagesPerMinute: 300, // High frequency data streams
+        maxMessagesPerHour: 10000,
+        name: "ws-rate-limit-data-stream",
+      },
+    };
+
+    const config = {
+      ...configs[type],
+      enabled: true,
+      priority: 100,
+      skipMessageTypes: ["ping", "pong", "heartbeat"],
+      ...customConfig,
+    };
+
+    return new WebSocketRateLimitMiddleware(
+      logger,
+      metrics,
+      redisClient,
+      config
+    );
+  }
+
+  /**
    * Create factory function for easy instantiation
+   * NOTE: For DI usage, inject dependencies through DI container instead
    */
   static create(
     config: WebSocketRateLimitConfig,
     logger: ILogger,
-    metrics?: MetricsCollector
+    metrics: IMetricsCollector,
+    redisClient: RedisClient
   ): WebSocketMiddlewareFunction {
     const middleware = new WebSocketRateLimitMiddleware(
-      config,
       logger,
-      metrics
+      metrics,
+      redisClient,
+      config
     );
     return middleware.middleware();
   }

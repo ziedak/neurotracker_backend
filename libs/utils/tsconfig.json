@@ -6,6 +6,11 @@
     "outDir": "../../dist/libs/utils",
     "tsBuildInfoFile": "../../dist/libs/utils/tsconfig.tsbuildinfo"
   },
-  "include": ["src/**/*"],
+  "references": [
+    { "path": "../../libs/config" },
+    { "path": "../../libs/database" },
+    { "path": "../../libs/monitoring" }
+  ],
+  "include": ["src/**/*", "../database/src/cache/cache.service.ts"],
   "exclude": ["node_modules"]
 }

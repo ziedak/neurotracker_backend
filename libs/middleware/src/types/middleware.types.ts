@@ -1,4 +1,4 @@
-import { MiddlewareContext } from './context.types';
+import { MiddlewareContext } from "./context.types";
 
 /**
  * Core middleware function signature
@@ -35,5 +35,7 @@ export interface MiddlewareChainConfig {
     priority?: number;
     enabled?: boolean;
   }>;
-  errorHandler?: (error: Error, context: MiddlewareContext) => any;
+  errorHandler?:
+    | ((error: Error, context: MiddlewareContext) => any)
+    | undefined;
 }

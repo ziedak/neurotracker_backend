@@ -1,5 +1,5 @@
+import { injectable } from "@libs/utils";
 import { getEnv } from "@libs/config";
-// import { RedisClient } from "@libs/database";
 import { setImmediate } from "timers";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -33,13 +33,14 @@ export interface ILogger {
   setCustomTransport(transport: (entry: LogEntry) => Promise<void>): void;
 }
 
+@injectable()
 export class Logger implements ILogger {
   private service: string;
   private level: LogLevel;
   private transports: LogTransport[];
   private formatter: (entry: LogEntry) => string;
   private customTransport: (entry: LogEntry) => Promise<void>;
-  private static instances: Map<string, Logger> = new Map();
+  // DI manages logger lifecycle; no static singleton needed
   private logQueue: LogEntry[] = [];
   private isProcessing: boolean = false;
 
@@ -49,16 +50,6 @@ export class Logger implements ILogger {
     this.transports = options.transports || ["console", "redis"];
     this.formatter = options.formatter || ((entry) => JSON.stringify(entry));
     this.customTransport = options.customTransport || (async () => {});
-  }
-
-  static getInstance(
-    service: string,
-    options?: Partial<LoggerOptions>
-  ): Logger {
-    if (!Logger.instances.has(service)) {
-      Logger.instances.set(service, new Logger({ service, ...options }));
-    }
-    return Logger.instances.get(service)!;
   }
 
   private shouldLog(level: LogLevel): boolean {

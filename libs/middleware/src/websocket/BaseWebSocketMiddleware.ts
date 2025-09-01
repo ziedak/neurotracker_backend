@@ -1,4 +1,4 @@
-import { Logger, MetricsCollector } from "@libs/monitoring";
+import { type ILogger, type IMetricsCollector } from "@libs/monitoring";
 import {
   WebSocketContext,
   WebSocketMiddlewareFunction,
@@ -13,7 +13,7 @@ export abstract class BaseWebSocketMiddleware<
   TConfig extends WebSocketMiddlewareOptions = WebSocketMiddlewareOptions
 > {
   protected readonly logger: ILogger;
-  protected readonly metrics: MetricsCollector | undefined;
+  protected readonly metrics: IMetricsCollector | undefined;
   protected readonly config: TConfig;
   protected readonly name: string;
 
@@ -21,7 +21,7 @@ export abstract class BaseWebSocketMiddleware<
     name: string,
     config: TConfig,
     logger: ILogger,
-    metrics?: MetricsCollector
+    metrics?: IMetricsCollector
   ) {
     this.name = name;
     this.logger = logger.child({ wsMiddleware: name });
@@ -101,7 +101,11 @@ export abstract class BaseWebSocketMiddleware<
       userId: context.userId,
     });
 
-    await this.recordMetric(`${this.name}_ws_error`);
+    await this.recordMetric(`${this.name}_ws_error`, 1, {
+      messageType: context.message.type,
+      authenticated: context.authenticated ? "true" : "false",
+      realm: "websocket",
+    });
   }
 
   /**
@@ -110,12 +114,13 @@ export abstract class BaseWebSocketMiddleware<
   protected async recordMetric(
     name: string,
     value: number = 1,
-    p0: { source: "local" | "remote"; messageType: string; realm: string }
+    tags?: Record<string, string>
   ): Promise<void> {
     if (this.metrics) {
       await this.metrics.recordCounter(name, value, {
         middleware: this.name,
         type: "websocket",
+        ...tags,
       });
     }
   }
@@ -126,12 +131,13 @@ export abstract class BaseWebSocketMiddleware<
   protected async recordTimer(
     name: string,
     duration: number,
-    p0: { authenticated: string; messageType: string; realm: string }
+    tags?: Record<string, string>
   ): Promise<void> {
     if (this.metrics) {
       await this.metrics.recordTimer(name, duration, {
         middleware: this.name,
         type: "websocket",
+        ...tags,
       });
     }
   }

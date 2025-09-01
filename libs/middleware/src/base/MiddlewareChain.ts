@@ -3,12 +3,14 @@ import {
   MiddlewareFunction,
   MiddlewareChainConfig,
 } from "../types";
-import { Logger } from "@libs/monitoring";
+import { injectable, inject } from "@libs/utils";
+import { ILogger } from "@libs/monitoring";
 
 /**
  * Utility class for chaining multiple middleware functions
  * Handles priority ordering and error propagation
  */
+@injectable()
 export class MiddlewareChain {
   private readonly middlewares: Array<{
     name: string;
@@ -16,17 +18,14 @@ export class MiddlewareChain {
     priority: number;
     enabled: boolean;
   }>;
-  private readonly errorHandler?: (
-    error: Error,
-    context: MiddlewareContext
-  ) => any;
+
   private readonly logger: ILogger;
 
-  constructor(config: MiddlewareChainConfig, logger: ILogger) {
+  constructor(
+    @inject("MiddlewareChainConfig") config: MiddlewareChainConfig,
+    @inject("ILogger") logger: ILogger
+  ) {
     this.logger = logger.child({ component: "MiddlewareChain" });
-    this.errorHandler = config.errorHandler;
-
-    // Sort middlewares by priority (higher priority executes first)
     this.middlewares = config.middlewares
       .filter((m) => m.enabled !== false)
       .map((m) => ({
@@ -36,7 +35,6 @@ export class MiddlewareChain {
         enabled: m.enabled ?? true,
       }))
       .sort((a, b) => b.priority - a.priority);
-
     this.logger.info("Middleware chain initialized", {
       count: this.middlewares.length,
       middlewares: this.middlewares.map((m) => ({
@@ -64,6 +62,13 @@ export class MiddlewareChain {
 
         const current = this.middlewares[currentIndex++];
 
+        if (!current) {
+          this.logger.error("No middleware found at index", undefined, {
+            index: currentIndex - 1,
+          });
+          return;
+        }
+
         try {
           this.logger.debug("Executing middleware", {
             name: current.name,
@@ -75,10 +80,6 @@ export class MiddlewareChain {
             middleware: current.name,
             index: currentIndex - 1,
           });
-
-          if (this.errorHandler) {
-            return this.errorHandler(error as Error, context);
-          }
 
           throw error;
         }
@@ -182,7 +183,6 @@ export class MiddlewareChain {
         })),
         { name, middleware, priority, enabled: true },
       ],
-      errorHandler: this.errorHandler,
     };
 
     return new MiddlewareChain(newConfig, this.logger);

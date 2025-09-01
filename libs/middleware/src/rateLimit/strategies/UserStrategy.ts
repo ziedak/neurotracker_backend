@@ -1,5 +1,6 @@
-import { MiddlewareContext } from '../../types';
-import { RateLimitStrategy } from '../RateLimitMiddleware';
+import { MiddlewareContext } from "../../types";
+import { RateLimitStrategy } from "../RateLimitMiddleware";
+import { z } from "@libs/utils";
 
 /**
  * User-based rate limiting strategy
@@ -8,44 +9,82 @@ import { RateLimitStrategy } from '../RateLimitMiddleware';
  */
 export class UserStrategy implements RateLimitStrategy {
   generateKey(context: MiddlewareContext): string {
-    // Try to get user ID from context
     const userId = context.user?.id;
-    
     if (userId && !context.user?.anonymous) {
       return `user:${userId}`;
     }
-
     // Fallback to IP-based strategy for anonymous users
-    const ip = this.extractClientIp(context);
+    const headers = this.cacheHeaders(context.request.headers);
+    let ip = this.extractClientIp(headers, context);
+    ip = this.normalizeIp(ip);
+    if (!this.isValidIp(ip)) {
+      ip = "unknown";
+    }
     return `user_fallback:${ip}`;
   }
 
   /**
-   * Extract client IP for fallback
+   * Cache headers for performance (lowercase keys)
    */
-  private extractClientIp(context: MiddlewareContext): string {
-    const headers = context.request.headers;
-    
-    return (
-      headers['x-forwarded-for']?.split(',')[0]?.trim() ||
-      headers['x-real-ip'] ||
-      headers['cf-connecting-ip'] ||
-      context.request.ip ||
-      'unknown'
-    );
+  private cacheHeaders(
+    headers: Record<string, string | undefined>
+  ): Record<string, string | undefined> {
+    const cached: Record<string, string | undefined> = {};
+    for (const key in headers) {
+      cached[key.toLowerCase()] = headers[key];
+    }
+    return cached;
   }
 
   /**
-   * Check if user is authenticated
+   * Extract client IP from headers or context
+   * Checks common headers and falls back to request IP
    */
-  private isAuthenticated(context: MiddlewareContext): boolean {
-    return !!(context.user?.id && !context.user?.anonymous);
+  private extractClientIp(
+    headers: Record<string, string | undefined>,
+    context: MiddlewareContext
+  ): string {
+    const xForwardedFor = headers["x-forwarded-for"];
+    if (xForwardedFor) {
+      const firstIp = xForwardedFor.split(",")[0]?.trim();
+      return firstIp || "unknown";
+    }
+    const xRealIp = headers["x-real-ip"];
+    if (xRealIp) {
+      return xRealIp;
+    }
+    const cfConnectingIp = headers["cf-connecting-ip"];
+    if (cfConnectingIp) {
+      return cfConnectingIp;
+    }
+    return context.request.ip || "unknown";
   }
 
   /**
-   * Get fallback strategy name
+   * Validate IP address format using zod (IPv4 and IPv6)
    */
-  private getFallbackStrategy(context: MiddlewareContext): 'user' | 'ip' {
-    return this.isAuthenticated(context) ? 'user' : 'ip';
+  private isValidIp(ip: string): boolean {
+    const ipSchema = z.union([
+      z.string().ip({ version: "v4" }),
+      z.string().ip({ version: "v6" }),
+    ]);
+    return ipSchema.safeParse(ip).success;
+  }
+
+  /**
+   * Normalize IP address (removes port if present)
+   */
+  private normalizeIp(ip: string): string {
+    if (ip.includes(":")) {
+      if (ip.indexOf(".") > 0) {
+        const colonIndex = ip.lastIndexOf(":");
+        return ip.substring(0, colonIndex);
+      }
+      const match = ip.match(/^\[([0-9a-fA-F:]+)\](?::\d+)?$/);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+    return ip;
   }
 }

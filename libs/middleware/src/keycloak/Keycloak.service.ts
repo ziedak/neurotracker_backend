@@ -26,12 +26,13 @@ import {
   KeycloakError,
   KeycloakErrorType,
 } from "./types";
+import { IKeycloakService } from "./interfaces";
 
 /**
  * Keycloak Authentication Service
  */
 @injectable()
-export class KeycloakService {
+export class KeycloakService implements IKeycloakService {
   private readonly config: KeycloakConfig;
   private readonly rateLimiter: RateLimiter;
   private publicKey?: string | undefined;
@@ -939,6 +940,21 @@ export class KeycloakService {
       if (entry.expiresAt < now) {
         this.jwksCache.delete(kid);
         this.logger.debug("Removed expired JWKS cache entry", { kid });
+      }
+    }
+  }
+
+  /**
+   * Clean up expired cache entries (implementing IKeycloakCacheService)
+   */
+  public cleanupExpiredEntries(): void {
+    this.cleanupJwksCache();
+
+    // Clean up in-memory cache
+    const now = Date.now();
+    for (const [key, entry] of this.inMemoryCache.entries()) {
+      if (entry.expiresAt < now) {
+        this.inMemoryCache.delete(key);
       }
     }
   }

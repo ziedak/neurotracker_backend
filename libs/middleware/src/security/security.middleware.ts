@@ -1,4 +1,9 @@
-export interface SecurityConfig {
+import { BaseMiddleware } from "../base";
+import { MiddlewareContext, MiddlewareOptions } from "../types";
+import { type ILogger, type IMetricsCollector } from "@libs/monitoring";
+import { inject } from "@libs/utils";
+
+export interface SecurityConfig extends MiddlewareOptions {
   // Content Security Policy
   contentSecurityPolicy?: {
     enabled?: boolean;
@@ -30,8 +35,11 @@ export interface SecurityConfig {
  * Implements various HTTP security headers following OWASP recommendations
  * Framework-agnostic implementation for comprehensive web security
  */
-export class SecurityMiddleware {
-  private readonly defaultConfig: SecurityConfig = {
+export class SecurityMiddleware extends BaseMiddleware<SecurityConfig> {
+  private readonly defaultConfig: Omit<
+    SecurityConfig,
+    keyof MiddlewareOptions
+  > = {
     contentSecurityPolicy: {
       enabled: true,
       directives: {
@@ -64,33 +72,67 @@ export class SecurityMiddleware {
     },
   };
 
-  constructor(private config: SecurityConfig = {}) {}
+  constructor(
+    @inject("ILogger") logger: ILogger,
+    @inject("IMetricsCollector") metrics: IMetricsCollector,
+    config: SecurityConfig
+  ) {
+    super(logger, metrics, config, "security");
+  }
 
   /**
-   * Create Elysia middleware for security headers
+   * Execute security middleware - adds security headers to response
    */
-  elysia(config?: Partial<SecurityConfig>) {
-    const finalConfig = this.mergeConfig(
-      this.defaultConfig,
-      this.config,
-      config || {}
-    );
+  protected override async execute(
+    context: MiddlewareContext,
+    next: () => Promise<void>
+  ): Promise<void> {
+    const startTime = performance.now();
 
-    return (app: any) => {
-      return app.onBeforeHandle(async (context: any) => {
-        const { set } = context;
+    try {
+      // Set security headers before processing request
+      await this.setSecurityHeaders(context);
 
-        this.setSecurityHeaders(set, finalConfig);
+      // Record metrics
+      await this.recordMetric("security_headers_applied");
 
-        return context;
+      // Continue with next middleware/handler
+      await next();
+    } catch (error) {
+      const duration = performance.now() - startTime;
+      await this.recordTimer("security_middleware_error_duration", duration);
+
+      this.logger.error("Security middleware error", error as Error, {
+        path: context.request.url,
+        method: context.request.method,
+        requestId: context.requestId,
       });
-    };
+
+      throw error;
+    } finally {
+      await this.recordTimer(
+        "security_middleware_duration",
+        performance.now() - startTime
+      );
+    }
+  }
+
+  /**
+   * Create new instance of this middleware with different config
+   */
+  protected override createInstance(
+    config: SecurityConfig
+  ): SecurityMiddleware {
+    return new SecurityMiddleware(this.logger, this.metrics, config);
   }
 
   /**
    * Set security headers based on configuration
    */
-  private setSecurityHeaders(set: any, config: SecurityConfig): void {
+  private async setSecurityHeaders(context: MiddlewareContext): Promise<void> {
+    const config = this.mergeConfig(this.defaultConfig, this.config);
+    const { set } = context;
+
     set.headers = set.headers || {};
 
     // Content Security Policy
@@ -168,6 +210,12 @@ export class SecurityMiddleware {
     // Additional security headers
     set.headers["X-Powered-By"] = ""; // Remove server signature
     set.headers["Server"] = ""; // Remove server signature
+
+    this.logger.debug("Security headers applied", {
+      path: context.request.url,
+      headersCount: Object.keys(set.headers).length,
+      requestId: context.requestId,
+    });
   }
 
   /**
@@ -193,43 +241,43 @@ export class SecurityMiddleware {
   /**
    * Deep merge configurations
    */
-  private mergeConfig(...configs: Partial<SecurityConfig>[]): SecurityConfig {
-    const result: SecurityConfig = {};
+  private mergeConfig(
+    defaultConfig: Partial<SecurityConfig>,
+    userConfig: SecurityConfig
+  ): SecurityConfig {
+    const result: SecurityConfig = { ...userConfig };
 
-    for (const config of configs) {
-      if (config) {
-        Object.assign(result, config);
+    // Merge default config
+    Object.assign(result, defaultConfig, userConfig);
 
-        // Deep merge nested objects
-        if (config.contentSecurityPolicy && result.contentSecurityPolicy) {
-          result.contentSecurityPolicy = {
-            ...result.contentSecurityPolicy,
-            ...config.contentSecurityPolicy,
-            directives: {
-              ...result.contentSecurityPolicy.directives,
-              ...config.contentSecurityPolicy.directives,
-            },
-          };
-        }
+    // Deep merge nested objects
+    if (defaultConfig.contentSecurityPolicy && result.contentSecurityPolicy) {
+      result.contentSecurityPolicy = {
+        ...defaultConfig.contentSecurityPolicy,
+        ...result.contentSecurityPolicy,
+        directives: {
+          ...defaultConfig.contentSecurityPolicy.directives,
+          ...result.contentSecurityPolicy.directives,
+        },
+      };
+    }
 
-        if (config.hsts && result.hsts) {
-          result.hsts = { ...result.hsts, ...config.hsts };
-        }
+    if (defaultConfig.hsts && result.hsts) {
+      result.hsts = { ...defaultConfig.hsts, ...result.hsts };
+    }
 
-        if (config.permissionsPolicy && result.permissionsPolicy) {
-          result.permissionsPolicy = {
-            ...result.permissionsPolicy,
-            ...config.permissionsPolicy,
-          };
-        }
+    if (defaultConfig.permissionsPolicy && result.permissionsPolicy) {
+      result.permissionsPolicy = {
+        ...defaultConfig.permissionsPolicy,
+        ...result.permissionsPolicy,
+      };
+    }
 
-        if (config.customHeaders && result.customHeaders) {
-          result.customHeaders = {
-            ...result.customHeaders,
-            ...config.customHeaders,
-          };
-        }
-      }
+    if (defaultConfig.customHeaders && result.customHeaders) {
+      result.customHeaders = {
+        ...defaultConfig.customHeaders,
+        ...result.customHeaders,
+      };
     }
 
     return result;
@@ -350,12 +398,93 @@ export class SecurityMiddleware {
       },
     };
   }
+  /**
+   * Factory method for creating SecurityMiddleware with development config
+   */
+  static createDevelopment(
+    logger: ILogger,
+    metrics: IMetricsCollector,
+    additionalConfig?: Partial<SecurityConfig>
+  ): SecurityMiddleware {
+    const devConfig = SecurityMiddleware.createDevelopmentConfig();
+    const config: SecurityConfig = {
+      ...devConfig,
+      ...additionalConfig,
+      enabled: true,
+      name: "security-dev",
+    };
+    return new SecurityMiddleware(logger, metrics, config);
+  }
+
+  /**
+   * Factory method for creating SecurityMiddleware with production config
+   */
+  static createProduction(
+    logger: ILogger,
+    metrics: IMetricsCollector,
+    additionalConfig?: Partial<SecurityConfig>
+  ): SecurityMiddleware {
+    const prodConfig = SecurityMiddleware.createProductionConfig();
+    const config: SecurityConfig = {
+      ...prodConfig,
+      ...additionalConfig,
+      enabled: true,
+      name: "security-prod",
+    };
+    return new SecurityMiddleware(logger, metrics, config);
+  }
+
+  /**
+   * Factory method for creating SecurityMiddleware with API config
+   */
+  static createApi(
+    logger: ILogger,
+    metrics: IMetricsCollector,
+    additionalConfig?: Partial<SecurityConfig>
+  ): SecurityMiddleware {
+    const apiConfig = SecurityMiddleware.createApiConfig();
+    const config: SecurityConfig = {
+      ...apiConfig,
+      ...additionalConfig,
+      enabled: true,
+      name: "security-api",
+    };
+    return new SecurityMiddleware(logger, metrics, config);
+  }
+
+  /**
+   * Factory method for creating SecurityMiddleware with strict config
+   */
+  static createStrict(
+    logger: ILogger,
+    metrics: IMetricsCollector,
+    additionalConfig?: Partial<SecurityConfig>
+  ): SecurityMiddleware {
+    const strictConfig = SecurityMiddleware.createStrictConfig();
+    const config: SecurityConfig = {
+      ...strictConfig,
+      ...additionalConfig,
+      enabled: true,
+      name: "security-strict",
+    };
+    return new SecurityMiddleware(logger, metrics, config);
+  }
 }
 
 /**
  * Factory function for easy middleware creation
+ * @deprecated Use SecurityMiddleware.createDevelopment, createProduction, createApi, or createStrict instead
  */
-export function createSecurityMiddleware(config?: SecurityConfig) {
-  const middleware = new SecurityMiddleware(config);
+export function createSecurityMiddleware(
+  logger: ILogger,
+  metrics: IMetricsCollector,
+  config?: SecurityConfig
+) {
+  const finalConfig: SecurityConfig = {
+    enabled: true,
+    name: "security",
+    ...config,
+  };
+  const middleware = new SecurityMiddleware(logger, metrics, finalConfig);
   return middleware.elysia();
 }

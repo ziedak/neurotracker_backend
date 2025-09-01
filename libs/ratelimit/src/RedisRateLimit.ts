@@ -1,44 +1,40 @@
-import { Logger, MetricsCollector } from "@libs/monitoring";
+import { type ILogger } from "@libs/monitoring";
 import { RedisClient } from "@libs/database";
-import { RateLimitConfig } from "../types";
-import { RateLimitResult } from "./RateLimitMiddleware";
+export interface RateLimitConfig {
+  windowMs: number;
+  maxRequests: number;
+  keyStrategy: "ip" | "user" | "apiKey" | "custom";
+  customKeyGenerator?: (context: any) => string;
+  redis?: {
+    enabled: boolean;
+    keyPrefix?: string;
+  };
+  standardHeaders?: boolean;
+  message?: string;
+  skipSuccessfulRequests?: boolean;
+  skipFailedRequests?: boolean;
+}
 
 /**
  * Redis-based rate limiting implementation
  * Uses sliding window approach with atomic operations
  */
-export class RedisRateLimit {
-  private readonly config: RateLimitConfig;
-  private readonly logger: ILogger;
-  private readonly metrics?: MetricsCollector;
-  private redis?: any; // RedisClient instance
+export interface RateLimitResult {
+  allowed: boolean;
+  totalHits: number;
+  remaining: number;
+  resetTime: Date;
+  retryAfter?: number;
+}
 
+export class RedisRateLimit {
   constructor(
-    config: RateLimitConfig,
-    logger: ILogger,
-    metrics?: MetricsCollector
+    private config: RateLimitConfig,
+    private redisClient: RedisClient,
+    private readonly logger: ILogger
   ) {
-    this.config = config;
     // Ensure logger.child() is type-safe and compatible with the new Logger signature
-    if (typeof logger.child === "function") {
-      this.logger = logger.child({ component: "RedisRateLimit" });
-    } else {
-      this.logger = logger;
-    }
-    this.metrics = metrics;
-    // Initialize Redis connection if enabled
-    if (config.redis?.enabled !== false) {
-      try {
-        this.redis = RedisClient.getInstance();
-      } catch (error) {
-        this.logger.warn(
-          "Redis not available, rate limiting will be disabled",
-          {
-            error: (error as Error).message,
-          }
-        );
-      }
-    }
+    this.logger = logger.child({ component: "RedisRateLimit" });
   }
 
   /**
@@ -49,7 +45,7 @@ export class RedisRateLimit {
     maxRequests: number,
     windowMs: number
   ): Promise<RateLimitResult> {
-    if (!this.redis) {
+    if (!this.redisClient) {
       // If Redis is not available, allow all requests
       return {
         allowed: true,
@@ -65,7 +61,7 @@ export class RedisRateLimit {
       const windowKey = `${key}:${window}`;
 
       // Get current count
-      const current = await this.redis.get(windowKey);
+      const current = await this.redisClient.safeGet(windowKey);
       const count = current ? parseInt(current, 10) : 0;
 
       // Calculate reset time
@@ -74,7 +70,7 @@ export class RedisRateLimit {
       const allowed = count < maxRequests;
 
       // Calculate retry after if limit exceeded
-      let retryAfter: number | undefined;
+      let retryAfter: number = 0;
       if (!allowed) {
         retryAfter = Math.ceil((resetTime.getTime() - now) / 1000);
       }
@@ -103,7 +99,7 @@ export class RedisRateLimit {
    * Increment rate limit counter
    */
   async increment(key: string, windowMs: number): Promise<number> {
-    if (!this.redis) {
+    if (!this.redisClient) {
       return 0;
     }
 
@@ -113,14 +109,14 @@ export class RedisRateLimit {
       const windowKey = `${key}:${window}`;
 
       // Use Redis pipeline for atomic operations
-      const pipeline = this.redis.pipeline();
+      const pipeline = await this.redisClient.safePipeline();
       pipeline.incr(windowKey);
       pipeline.expire(windowKey, Math.ceil(windowMs / 1000) + 10); // Add buffer to expiration
 
       const results = await pipeline.exec();
 
       if (results && results[0] && !results[0][0]) {
-        return results[0][1]; // Return new count
+        return parseInt(results[0][1] as string, 10); // Return new count
       }
 
       return 0;
@@ -145,17 +141,17 @@ export class RedisRateLimit {
    * Reset rate limit for a key
    */
   async reset(key: string): Promise<void> {
-    if (!this.redis) {
+    if (!this.redisClient) {
       return;
     }
 
     try {
       // Delete all windows for this key
       const pattern = `${key}:*`;
-      const keys = await this.redis.keys(pattern);
+      const keys = await this.redisClient.safeKeys(pattern);
 
       if (keys.length > 0) {
-        await this.redis.del(...keys);
+        await this.redisClient.safeDel(...keys);
         this.logger.debug("Rate limit reset", {
           key,
           keysDeleted: keys.length,
@@ -171,7 +167,7 @@ export class RedisRateLimit {
    * Get rate limiting statistics
    */
   async getStats(): Promise<any> {
-    if (!this.redis) {
+    if (!this.redisClient) {
       return {
         available: false,
         totalKeys: 0,
@@ -182,7 +178,7 @@ export class RedisRateLimit {
     try {
       const prefix = this.config.redis?.keyPrefix || "rate_limit";
       const pattern = `${prefix}:*`;
-      const keys = await this.redis.keys(pattern);
+      const keys = await this.redisClient.safeKeys(pattern);
 
       let activeWindows = 0;
       let totalRequests = 0;
@@ -191,7 +187,7 @@ export class RedisRateLimit {
       const sampleSize = Math.min(keys.length, 100);
       if (sampleSize > 0) {
         const sampleKeys = keys.slice(0, sampleSize);
-        const pipeline = this.redis.pipeline();
+        const pipeline = await this.redisClient.safePipeline();
 
         sampleKeys.forEach((key: string) => pipeline.get(key));
         const results = await pipeline.exec();
@@ -231,33 +227,17 @@ export class RedisRateLimit {
   }
 
   /**
-   * Check if Redis is available
-   */
-  async isAvailable(): Promise<boolean> {
-    if (!this.redis) {
-      return false;
-    }
-
-    try {
-      await this.redis.ping();
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
    * Clean up expired keys (maintenance operation)
    */
   async cleanup(): Promise<number> {
-    if (!this.redis) {
+    if (!this.redisClient) {
       return 0;
     }
 
     try {
       const prefix = this.config.redis?.keyPrefix || "rate_limit";
       const pattern = `${prefix}:*`;
-      const keys = await this.redis.keys(pattern);
+      const keys = await this.redisClient.safeKeys(pattern);
 
       let deletedKeys = 0;
       const batchSize = 100;
@@ -265,7 +245,7 @@ export class RedisRateLimit {
       // Process keys in batches
       for (let i = 0; i < keys.length; i += batchSize) {
         const batch = keys.slice(i, i + batchSize);
-        const pipeline = this.redis.pipeline();
+        const pipeline = await this.redisClient.safePipeline();
 
         // Check TTL for each key
         batch.forEach((key: string) => pipeline.ttl(key));
@@ -277,16 +257,17 @@ export class RedisRateLimit {
           (result: [Error | null, unknown], index: number) => {
             if (result && !result[0]) {
               const ttl = result[1] as number;
-              if (ttl === -1 || ttl < 10) {
+              const key = batch[index];
+              if ((ttl === -1 || ttl < 10) && key !== undefined) {
                 // No TTL or less than 10 seconds
-                keysToDelete.push(batch[index]);
+                keysToDelete.push(key);
               }
             }
           }
         );
 
         if (keysToDelete.length > 0) {
-          await this.redis.del(...keysToDelete);
+          await this.redisClient.safeDel(...keysToDelete);
           deletedKeys += keysToDelete.length;
         }
       }
@@ -307,7 +288,7 @@ export class RedisRateLimit {
    * Get health status
    */
   async getHealth(): Promise<any> {
-    const isAvailable = await this.isAvailable();
+    const isAvailable = await this.redisClient.isAvailable();
     const stats = await this.getStats();
 
     return {

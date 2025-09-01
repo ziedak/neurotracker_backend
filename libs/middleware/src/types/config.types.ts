@@ -24,26 +24,12 @@ export interface AuthConfig extends MiddlewareOptions {
 /**
  * Rate limiting configuration
  */
-export interface RateLimitConfig extends MiddlewareOptions {
-  windowMs: number;
-  maxRequests: number;
-  keyStrategy: 'ip' | 'user' | 'apiKey' | 'custom';
-  customKeyGenerator?: (context: any) => string;
-  redis?: {
-    enabled: boolean;
-    keyPrefix?: string;
-  };
-  standardHeaders?: boolean;
-  message?: string;
-  skipSuccessfulRequests?: boolean;
-  skipFailedRequests?: boolean;
-}
 
 /**
  * Validation configuration
  */
 export interface ValidationConfig extends MiddlewareOptions {
-  engine: 'zod' | 'rules';
+  engine: "zod" | "rules";
   schemas?: Record<string, any>;
   maxRequestSize?: number;
   sanitizeInputs?: boolean;
@@ -82,7 +68,7 @@ export interface AuditConfig extends MiddlewareOptions {
  * Request logging configuration
  */
 export interface LoggingConfig extends MiddlewareOptions {
-  logLevel: 'debug' | 'info' | 'warn' | 'error';
+  logLevel: "debug" | "info" | "warn" | "error";
   logRequestBody?: boolean;
   logResponseBody?: boolean;
   logHeaders?: boolean;

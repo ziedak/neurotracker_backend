@@ -1,8 +1,119 @@
-# Keycloak Authentication Middleware
+# Industry-Standard Keycloak Middleware
 
-Enterprise-grade Keycloak authentication middleware for Elysiajs+Bun applications. Provides JWT validation, role-based access control, WebSocket support, and comprehensive caching for production environments.
+A comprehensive refactoring of the Keycloak middleware following industry-standard patterns including dependency injection, interface segregation, and clean architecture principles.
+
+## 🚀 What's New - Industry Standards Implementation
+
+- **Dependency Injection**: Proper service factory pattern with injectable dependencies
+- **Interface Segregation**: Cleanly separated interfaces for different service concerns
+- **Clean Architecture**: Separated layers with clear boundaries and responsibilities
+- **Configuration Validation**: Production-grade validation with development and production presets
+- **Error Handling**: Comprehensive error types and proper error propagation
+- **Metrics & Monitoring**: Built-in metrics collection and health checks
+- **Caching**: Redis-based caching with proper invalidation strategies
+
+### Key Improvements Over Legacy Implementation
+
+| Aspect              | Legacy               | Industry-Standard                    |
+| ------------------- | -------------------- | ------------------------------------ |
+| **Dependencies**    | Direct instantiation | Dependency injection with factory    |
+| **Configuration**   | Mixed validation     | Comprehensive validator with presets |
+| **Error Handling**  | Basic try-catch      | Typed errors with proper propagation |
+| **Testing**         | Tightly coupled      | Fully mockable with interfaces       |
+| **Maintainability** | Monolithic           | Modular with clear separation        |
+| **Performance**     | Basic caching        | Optimized caching with metrics       |
+
+## 🛠 Industry-Standard Usage
+
+### Basic Setup
+
+```typescript
+import { createKeycloakMiddleware } from "@libs/middleware/keycloak";
+
+const middleware = await createKeycloakMiddleware(
+  logger, // ILogger implementation
+  metrics, // IMetricsCollector implementation
+  redis, // RedisClient instance
+  {
+    serverUrl: "https://keycloak.example.com",
+    realm: "my-realm",
+    clientId: "my-client",
+    requireAuth: true,
+    verifyTokenLocally: true,
+  }
+);
+```
+
+### Development Environment
+
+```typescript
+import { createDevKeycloakMiddleware } from "@libs/middleware/keycloak";
+
+const devMiddleware = await createDevKeycloakMiddleware(
+  logger,
+  metrics,
+  redis,
+  {
+    serverUrl: "http://localhost:8080",
+    realm: "development",
+    clientId: "dev-client",
+  }
+);
+```
+
+### Request Context Usage
+
+```typescript
+import { KeycloakAuthenticatedContext } from "@libs/middleware/keycloak";
+
+async function handleRequest(context: KeycloakAuthenticatedContext) {
+  // Execute authentication middleware
+  await middleware.execute(context);
+
+  // Access authenticated user data
+  if (context.keycloak.authenticated) {
+    const { user, roles, scopes } = context.keycloak;
+
+    // Check permissions with helper methods
+    const isAdmin = context.keycloak.hasRole("admin");
+    const canWrite = context.keycloak.hasScope("api:write");
+    const hasMultipleRoles = context.keycloak.hasAnyRole(["admin", "manager"]);
+
+    return {
+      userId: user.sub,
+      username: user.preferredUsername,
+      permissions: { isAdmin, canWrite, hasMultipleRoles },
+    };
+  }
+}
+```
+
+## 📊 Benefits Summary
+
+✅ **Better Testability** - Full interface mocking and dependency injection  
+✅ **Improved Maintainability** - Clean separation of concerns  
+✅ **Enhanced Reliability** - Comprehensive error handling and validation  
+✅ **Better Performance** - Optimized caching and metrics  
+✅ **Production Ready** - Built-in monitoring and health checks  
+✅ **Developer Experience** - Better types, documentation, and examples
+
+---
+
+## 📚 Legacy Documentation (Backward Compatibility)
+
+The following documentation covers the original implementation which is still supported for backward compatibility.
 
 ## Features
+
+- **JWT Token Validation**: Local and remote token verification
+- **Role-Based Access Control**: Fine-grained permission checking
+- **Redis Integration**: High-performance caching and rate limiting
+- **Circuit Breaker Pattern**: Resilient error handling
+- **JWKS Support**: Automatic public key rotation
+- **Rate Limiting**: Protection against brute force attacks
+- **Comprehensive Logging**: Structured logging with contextual information
+- **Metrics Collection**: Performance monitoring and analytics
+- **Multiple Integration Patterns**: Flexible usage options
 
 - 🔐 **JWT Token Validation**: Local and remote token verification with Keycloak
 - 🚀 **High Performance**: Intelligent caching with configurable TTL
@@ -30,20 +141,22 @@ import { Elysia } from "@libs/elysia-server";
 import { createKeycloakPlugin } from "@libs/middleware/keycloak";
 
 const app = new Elysia()
-  .use(createKeycloakPlugin({
-    keycloak: {
-      serverUrl: 'https://your-keycloak.com',
-      realm: 'your-realm',
-      clientId: 'your-client',
-      requireAuth: true,
-      verifyTokenLocally: true
-    }
-  }))
-  .get('/protected', ({ keycloak }) => {
+  .use(
+    createKeycloakPlugin({
+      keycloak: {
+        serverUrl: "https://your-keycloak.com",
+        realm: "your-realm",
+        clientId: "your-client",
+        requireAuth: true,
+        verifyTokenLocally: true,
+      },
+    })
+  )
+  .get("/protected", ({ keycloak }) => {
     return {
       user: keycloak.user,
       roles: keycloak.roles,
-      authenticated: keycloak.authenticated
+      authenticated: keycloak.authenticated,
     };
   });
 ```
@@ -56,11 +169,11 @@ import { keycloakGuards } from "@libs/middleware/keycloak";
 const app = new Elysia()
   .use(createKeycloakPlugin(config))
   .use(keycloakGuards.authenticated)
-  .get('/admin', ({ keycloak }) => {
-    return { message: 'Admin area' };
+  .get("/admin", ({ keycloak }) => {
+    return { message: "Admin area" };
   })
   .guard(keycloakGuards.admin)
-  .post('/admin/users', ({ keycloak, body }) => {
+  .post("/admin/users", ({ keycloak, body }) => {
     // Only admin users can access this
     return createUser(body);
   });
@@ -72,18 +185,18 @@ const app = new Elysia()
 import { createKeycloakWebSocketMiddleware } from "@libs/middleware/keycloak";
 
 const wsAuth = createKeycloakWebSocketMiddleware({
-  serverUrl: 'https://your-keycloak.com',
-  realm: 'your-realm',
-  clientId: 'your-client',
+  serverUrl: "https://your-keycloak.com",
+  realm: "your-realm",
+  clientId: "your-client",
   requireAuth: true,
   messagePermissions: {
-    'chat:send': ['message:chat', 'websocket:send'],
-    'admin:broadcast': ['system:admin', 'websocket:admin']
+    "chat:send": ["message:chat", "websocket:send"],
+    "admin:broadcast": ["system:admin", "websocket:admin"],
   },
   messageRoles: {
-    'admin:command': ['admin', 'administrator'],
-    'user:message': ['admin', 'user', 'customer']
-  }
+    "admin:command": ["admin", "administrator"],
+    "user:message": ["admin", "user", "customer"],
+  },
 });
 
 // Use in your WebSocket middleware chain
@@ -95,15 +208,15 @@ const wsAuth = createKeycloakWebSocketMiddleware({
 
 ```typescript
 interface KeycloakConfig {
-  serverUrl: string;          // Keycloak server URL
-  realm: string;              // Keycloak realm name
-  clientId: string;           // Client ID
-  clientSecret?: string;      // Client secret (for confidential clients)
-  publicKey?: string;         // Public key for local validation
-  jwksUri?: string;          // JWKS endpoint (auto-generated if not provided)
-  requireAuth?: boolean;      // Require authentication (default: true)
+  serverUrl: string; // Keycloak server URL
+  realm: string; // Keycloak realm name
+  clientId: string; // Client ID
+  clientSecret?: string; // Client secret (for confidential clients)
+  publicKey?: string; // Public key for local validation
+  jwksUri?: string; // JWKS endpoint (auto-generated if not provided)
+  requireAuth?: boolean; // Require authentication (default: true)
   verifyTokenLocally?: boolean; // Use local validation (default: true)
-  cacheTTL?: number;         // Cache TTL in seconds (default: 300)
+  cacheTTL?: number; // Cache TTL in seconds (default: 300)
 }
 ```
 
@@ -112,28 +225,28 @@ interface KeycloakConfig {
 ```typescript
 const advancedConfig = {
   keycloak: {
-    serverUrl: 'https://your-keycloak.com',
-    realm: 'production',
-    clientId: 'backend-api',
-    clientSecret: 'your-secret',
+    serverUrl: "https://your-keycloak.com",
+    realm: "production",
+    clientId: "backend-api",
+    clientSecret: "your-secret",
     requireAuth: true,
     verifyTokenLocally: true,
     cacheTTL: 600,
-    
+
     // Custom claim mappings
-    rolesClaim: 'realm_access.roles',
-    usernameClaim: 'preferred_username',
-    emailClaim: 'email',
-    groupsClaim: 'groups',
-    
+    rolesClaim: "realm_access.roles",
+    usernameClaim: "preferred_username",
+    emailClaim: "email",
+    groupsClaim: "groups",
+
     // Performance settings
     connectTimeout: 5000,
     readTimeout: 5000,
     enableUserInfoEndpoint: false,
-    
+
     // Paths to skip authentication
-    skipPaths: ['/health', '/metrics', '/docs']
-  }
+    skipPaths: ["/health", "/metrics", "/docs"],
+  },
 };
 ```
 
@@ -141,28 +254,28 @@ const advancedConfig = {
 
 ```typescript
 const wsConfig = {
-  serverUrl: 'https://your-keycloak.com',
-  realm: 'your-realm',
-  clientId: 'websocket-client',
+  serverUrl: "https://your-keycloak.com",
+  realm: "your-realm",
+  clientId: "websocket-client",
   requireAuth: true,
   closeOnAuthFailure: true,
-  
+
   // Skip auth for certain message types
-  skipAuthenticationForTypes: ['ping', 'heartbeat'],
-  
+  skipAuthenticationForTypes: ["ping", "heartbeat"],
+
   // Message-level permissions
   messagePermissions: {
-    'chat:send': ['message:chat', 'websocket:send'],
-    'data:sync': ['message:data', 'websocket:send'],
-    'admin:broadcast': ['system:admin', 'websocket:broadcast']
+    "chat:send": ["message:chat", "websocket:send"],
+    "data:sync": ["message:data", "websocket:send"],
+    "admin:broadcast": ["system:admin", "websocket:broadcast"],
   },
-  
+
   // Role-based message access
   messageRoles: {
-    'admin:command': ['admin', 'administrator'],
-    'manager:report': ['admin', 'manager'],
-    'user:chat': ['admin', 'manager', 'user', 'customer']
-  }
+    "admin:command": ["admin", "administrator"],
+    "manager:report": ["admin", "manager"],
+    "user:chat": ["admin", "manager", "user", "customer"],
+  },
 };
 ```
 
@@ -190,19 +303,23 @@ The middleware includes built-in role-to-permission mapping:
 ```typescript
 const rolePermissions = {
   admin: [
-    'user:read', 'user:write', 'user:delete',
-    'system:admin', 'api:full_access',
-    'websocket:connect', 'websocket:broadcast'
+    "user:read",
+    "user:write",
+    "user:delete",
+    "system:admin",
+    "api:full_access",
+    "websocket:connect",
+    "websocket:broadcast",
   ],
   manager: [
-    'user:read', 'user:write',
-    'reports:read', 'api:write',
-    'websocket:connect', 'message:data'
+    "user:read",
+    "user:write",
+    "reports:read",
+    "api:write",
+    "websocket:connect",
+    "message:data",
   ],
-  user: [
-    'user:read', 'api:read',
-    'websocket:connect', 'message:chat'
-  ]
+  user: ["user:read", "api:read", "websocket:connect", "message:chat"],
 };
 ```
 
@@ -212,20 +329,20 @@ const rolePermissions = {
 class CustomKeycloakMiddleware extends KeycloakMiddleware {
   protected mapRolesToPermissions(roles: string[]): string[] {
     const permissions: string[] = [];
-    
-    roles.forEach(role => {
+
+    roles.forEach((role) => {
       switch (role) {
-        case 'data-scientist':
-          permissions.push('data:read', 'data:analyze', 'models:read');
+        case "data-scientist":
+          permissions.push("data:read", "data:analyze", "models:read");
           break;
-        case 'api-consumer':
-          permissions.push('api:read', 'api:limited-write');
+        case "api-consumer":
+          permissions.push("api:read", "api:limited-write");
           break;
         default:
           permissions.push(`role:${role}`);
       }
     });
-    
+
     return [...new Set(permissions)];
   }
 }
@@ -254,27 +371,27 @@ app.use(keycloakGuards.optional);
 const middleware = new KeycloakMiddleware(config);
 
 // Require specific role
-app.use(middleware.requireRole('data-scientist'));
+app.use(middleware.requireRole("data-scientist"));
 
 // Require multiple roles (any of)
-app.use(middleware.requireRole(['admin', 'manager']));
+app.use(middleware.requireRole(["admin", "manager"]));
 
 // Require specific permission
-app.use(middleware.requirePermission('data:read'));
+app.use(middleware.requirePermission("data:read"));
 
 // Require group membership
-app.use(middleware.requireGroup('analytics-team'));
+app.use(middleware.requireGroup("analytics-team"));
 ```
 
 ### Route-Level Guards
 
 ```typescript
 app
-  .get('/public', () => 'Public endpoint')
-  .guard(middleware.requireRole('user'))
-  .get('/user-data', ({ keycloak }) => getUserData(keycloak.user.sub))
-  .guard(middleware.requireRole('admin'))
-  .delete('/users/:id', ({ params }) => deleteUser(params.id));
+  .get("/public", () => "Public endpoint")
+  .guard(middleware.requireRole("user"))
+  .get("/user-data", ({ keycloak }) => getUserData(keycloak.user.sub))
+  .guard(middleware.requireRole("admin"))
+  .delete("/users/:id", ({ params }) => deleteUser(params.id));
 ```
 
 ## Error Handling
@@ -315,8 +432,8 @@ const middleware = new KeycloakMiddleware(config);
 
 // Get cache statistics
 const stats = middleware.getCacheStats();
-console.log('Token cache size:', stats.tokenCacheSize);
-console.log('User info cache size:', stats.userInfoCacheSize);
+console.log("Token cache size:", stats.tokenCacheSize);
+console.log("User info cache size:", stats.userInfoCacheSize);
 
 // Clear caches
 middleware.clearCache();
@@ -338,22 +455,23 @@ import { Elysia } from "@libs/elysia-server";
 import { createKeycloakPlugin } from "@libs/middleware/keycloak";
 
 const gateway = new Elysia()
-  .use(createKeycloakPlugin({
-    keycloak: {
-      serverUrl: process.env.KEYCLOAK_URL,
-      realm: process.env.KEYCLOAK_REALM,
-      clientId: process.env.KEYCLOAK_CLIENT_ID,
-      clientSecret: process.env.KEYCLOAK_CLIENT_SECRET,
-      requireAuth: false, // Gateway allows public endpoints
-      skipPaths: ['/health', '/metrics', '/docs', '/auth/login']
-    }
-  }))
-  .get('/health', () => ({ status: 'OK' }))
-  .group('/api/v1', (app) => app
-    .use(keycloakGuards.authenticated)
-    .get('/profile', ({ keycloak }) => ({
+  .use(
+    createKeycloakPlugin({
+      keycloak: {
+        serverUrl: process.env.KEYCLOAK_URL,
+        realm: process.env.KEYCLOAK_REALM,
+        clientId: process.env.KEYCLOAK_CLIENT_ID,
+        clientSecret: process.env.KEYCLOAK_CLIENT_SECRET,
+        requireAuth: false, // Gateway allows public endpoints
+        skipPaths: ["/health", "/metrics", "/docs", "/auth/login"],
+      },
+    })
+  )
+  .get("/health", () => ({ status: "OK" }))
+  .group("/api/v1", (app) =>
+    app.use(keycloakGuards.authenticated).get("/profile", ({ keycloak }) => ({
       user: keycloak.user,
-      roles: keycloak.roles
+      roles: keycloak.roles,
     }))
   );
 ```
@@ -363,19 +481,23 @@ const gateway = new Elysia()
 ```typescript
 // Data Intelligence Service
 const dataService = new Elysia()
-  .use(createKeycloakPlugin({
-    keycloak: {
-      serverUrl: process.env.KEYCLOAK_URL,
-      realm: 'data-platform',
-      clientId: 'data-intelligence',
-      requireAuth: true,
-      verifyTokenLocally: true
-    }
-  }))
-  .guard(middleware.requirePermission('data:read'))
-  .get('/datasets', ({ keycloak }) => getDatasets(keycloak.user.sub))
-  .guard(middleware.requireRole(['admin', 'data-scientist']))
-  .post('/datasets', ({ body, keycloak }) => createDataset(body, keycloak.user.sub));
+  .use(
+    createKeycloakPlugin({
+      keycloak: {
+        serverUrl: process.env.KEYCLOAK_URL,
+        realm: "data-platform",
+        clientId: "data-intelligence",
+        requireAuth: true,
+        verifyTokenLocally: true,
+      },
+    })
+  )
+  .guard(middleware.requirePermission("data:read"))
+  .get("/datasets", ({ keycloak }) => getDatasets(keycloak.user.sub))
+  .guard(middleware.requireRole(["admin", "data-scientist"]))
+  .post("/datasets", ({ body, keycloak }) =>
+    createDataset(body, keycloak.user.sub)
+  );
 ```
 
 ### WebSocket Service Integration
@@ -387,14 +509,14 @@ import { createKeycloakWebSocketMiddleware } from "@libs/middleware/keycloak";
 const wsChain = new WebSocketMiddlewareChain([
   createKeycloakWebSocketMiddleware({
     serverUrl: process.env.KEYCLOAK_URL,
-    realm: 'realtime',
-    clientId: 'websocket-service',
+    realm: "realtime",
+    clientId: "websocket-service",
     requireAuth: true,
     messagePermissions: {
-      'chat:send': ['message:chat'],
-      'data:stream': ['data:read', 'websocket:stream']
-    }
-  })
+      "chat:send": ["message:chat"],
+      "data:stream": ["data:read", "websocket:stream"],
+    },
+  }),
 ]);
 ```
 
@@ -405,19 +527,19 @@ const wsChain = new WebSocketMiddlewareChain([
 ```typescript
 import { KeycloakService, KeycloakMiddleware } from "@libs/middleware/keycloak";
 
-describe('KeycloakMiddleware', () => {
+describe("KeycloakMiddleware", () => {
   let middleware: KeycloakMiddleware;
-  
+
   beforeEach(() => {
     middleware = new KeycloakMiddleware(testConfig);
   });
-  
-  it('should authenticate valid token', async () => {
+
+  it("should authenticate valid token", async () => {
     const context = createMockContext();
-    context.request.headers.authorization = 'Bearer valid-token';
-    
+    context.request.headers.authorization = "Bearer valid-token";
+
     await middleware.execute(context, jest.fn());
-    
+
     expect(context.keycloak.authenticated).toBe(true);
   });
 });
@@ -426,21 +548,21 @@ describe('KeycloakMiddleware', () => {
 ### Integration Tests
 
 ```typescript
-describe('Keycloak Integration', () => {
+describe("Keycloak Integration", () => {
   let app: Elysia;
-  
+
   beforeEach(() => {
     app = new Elysia()
       .use(createKeycloakPlugin(integrationConfig))
-      .get('/test', ({ keycloak }) => keycloak);
+      .get("/test", ({ keycloak }) => keycloak);
   });
-  
-  it('should authenticate with real token', async () => {
+
+  it("should authenticate with real token", async () => {
     const token = await getTestToken();
-    const response = await app.fetch('/test', {
-      headers: { Authorization: `Bearer ${token}` }
+    const response = await app.fetch("/test", {
+      headers: { Authorization: `Bearer ${token}` },
     });
-    
+
     expect(response.ok).toBe(true);
   });
 });
@@ -451,11 +573,13 @@ describe('Keycloak Integration', () => {
 ### Common Issues
 
 1. **Token Verification Fails**
+
    - Check Keycloak server URL and realm configuration
    - Verify client ID and secret
    - Ensure public key is correct for local validation
 
 2. **Performance Issues**
+
    - Enable local token validation
    - Adjust cache TTL settings
    - Use appropriate skip paths
@@ -471,25 +595,25 @@ describe('Keycloak Integration', () => {
 const config = {
   keycloak: {
     // ... other config
-    logLevel: 'debug'
-  }
+    logLevel: "debug",
+  },
 };
 ```
 
 ### Health Checks
 
 ```typescript
-app.get('/health/keycloak', ({ keycloak }) => {
+app.get("/health/keycloak", ({ keycloak }) => {
   const service = keycloak.service;
   const stats = service.getCacheStats();
-  
+
   return {
-    status: 'healthy',
+    status: "healthy",
     cache: stats,
     config: {
       realm: service.config.realm,
-      verifyLocally: service.config.verifyTokenLocally
-    }
+      verifyLocally: service.config.verifyTokenLocally,
+    },
   };
 });
 ```

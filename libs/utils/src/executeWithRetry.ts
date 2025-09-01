@@ -30,7 +30,7 @@ export type ExecuteWithRetryOptions = {
  * );
  * ```
  */
-export async function executeWithRetry<T>(
+export async function executeWithRetryv1<T>(
   operation: () => Promise<T>,
   onError: (error: unknown) => void,
   options: ExecuteWithRetryOptions = {
@@ -108,7 +108,6 @@ export const executeWithRetryAndBreaker = async <T>(
     retryDelay: 1000,
     ...options,
   };
-  // Call your database safely!
   try {
     // Create a retry policy that'll try whatever function we execute 3
     // times with a randomized exponential backoff.
@@ -133,4 +132,166 @@ export const executeWithRetryAndBreaker = async <T>(
     onError(error);
     throw error;
   }
+};
+
+/**
+ * Enhanced options for retry operations with circuit breaker and metrics
+ */
+export interface EnhancedRetryOptions extends ExecuteWithRetryOptions {
+  enableCircuitBreaker?: boolean;
+  circuitBreakerThreshold?: number;
+  circuitBreakerTimeout?: number;
+  enableMetrics?: boolean;
+  jitterEnabled?: boolean;
+}
+
+/**
+ * Execute operation with retry logic, circuit breaker, and metrics
+ *
+ * @template T - Return type of the operation
+ * @param operation - Async operation to execute
+ * @param onError - Error callback for logging/monitoring
+ * @param options - Configuration for retry behavior
+ * @returns Promise resolving to operation result
+ *
+ * @example
+ * ```typescript
+ * const result = await executeWithRetry(
+ *   async () => redis.get('key'),
+ *   (error) => logger.error('Redis operation failed', error),
+ *   { operationName: 'redis_get', maxRetries: 3 }
+ * );
+ * ```
+ */
+export const executeWithRetry = async <T>(
+  operation: () => Promise<T>,
+  onError: (error: unknown, attempt?: number) => void,
+  options: Partial<EnhancedRetryOptions> = {}
+): Promise<T> => {
+  const config: EnhancedRetryOptions = {
+    operationName: "Unknown Operation",
+    maxRetries: 3,
+    retryDelay: 1000,
+    enableCircuitBreaker: false,
+    circuitBreakerThreshold: 5,
+    circuitBreakerTimeout: 10000,
+    enableMetrics: false,
+    jitterEnabled: true,
+    ...options,
+  };
+
+  const startTime = performance.now();
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
+    try {
+      const result = await operation();
+
+      // Record success metrics if enabled
+      if (config.enableMetrics) {
+        try {
+          // Use dynamic import to avoid circular dependencies
+          const { MetricsCollector } = await import("@libs/monitoring");
+          const metrics = MetricsCollector.getInstance();
+          metrics.recordTimer(
+            `${config.operationName}_duration`,
+            performance.now() - startTime
+          );
+          metrics.recordCounter(`${config.operationName}_success`);
+        } catch (metricsError) {
+          // Metrics failure should not break the operation
+          console.warn("Failed to record success metrics:", metricsError);
+        }
+      }
+
+      return result;
+    } catch (error) {
+      lastError =
+        error instanceof Error
+          ? error
+          : new Error(`Unknown error in ${config.operationName}`);
+
+      // Call error callback with attempt info
+      onError(lastError, attempt);
+
+      // If this is the last attempt, break and throw
+      if (attempt === config.maxRetries) {
+        break;
+      }
+
+      // Calculate delay with exponential backoff and optional jitter
+      let delay = config.retryDelay * Math.pow(2, attempt - 1);
+
+      if (config.jitterEnabled) {
+        // Add jitter to prevent thundering herd
+        delay = delay * (0.5 + Math.random() * 0.5);
+      }
+
+      // Wait before retry
+      await new Promise((resolve) => setTimeout(resolve, Math.floor(delay)));
+    }
+  }
+
+  // Record failure metrics if enabled
+  if (config.enableMetrics) {
+    try {
+      const { MetricsCollector } = await import("@libs/monitoring");
+      const metrics = MetricsCollector.getInstance();
+      metrics.recordTimer(
+        `${config.operationName}_duration`,
+        performance.now() - startTime
+      );
+      metrics.recordCounter(`${config.operationName}_failed`);
+    } catch (metricsError) {
+      console.warn("Failed to record failure metrics:", metricsError);
+    }
+  }
+
+  // All attempts failed
+  throw new Error(
+    `[executeWithRetry] ${config.operationName} failed after ${config.maxRetries} attempts. Last error: ${lastError?.message}`
+  );
+};
+
+/**
+ * Execute Redis operation with enhanced retry logic and type safety
+ * Specialized version for Redis operations with proper typing
+ *
+ * @template T - Return type of the Redis operation
+ * @template R - Redis client type (defaults to any for flexibility)
+ */
+export const executeRedisWithRetry = async <T, R = any>(
+  redis: R,
+  operation: (redis: R) => Promise<T>,
+  onError: (error: unknown, attempt?: number) => void,
+  options?: Partial<EnhancedRetryOptions>
+): Promise<T> => {
+  const config: EnhancedRetryOptions = {
+    operationName: "redis_operation",
+    maxRetries: 3,
+    retryDelay: 1000,
+    enableCircuitBreaker: true,
+    circuitBreakerThreshold: 5,
+    circuitBreakerTimeout: 10000,
+    enableMetrics: true,
+    jitterEnabled: true,
+    ...options,
+  };
+
+  if (!redis) {
+    throw new Error(
+      `[executeRedisWithRetry] Redis client is required for ${config.operationName}`
+    );
+  }
+
+  // Wrap the Redis operation
+  const wrappedOperation = () => operation(redis);
+
+  // Use enhanced circuit breaker if enabled
+  if (config.enableCircuitBreaker) {
+    return executeWithRetryAndBreaker(wrappedOperation, onError, config);
+  }
+
+  // Use basic retry without circuit breaker
+  return executeWithRetry(wrappedOperation, onError, config);
 };

@@ -3,8 +3,8 @@
  * Handles real-time session synchronization between HTTP and WebSocket protocols
  */
 
-import { Logger, MetricsCollector } from "@libs/monitoring";
-import { RedisClient } from "@libs/database";
+import { ILogger, IMetricsCollector } from "@libs/monitoring";
+import { RedisClient, type Redis } from "@libs/database";
 import {
   type EnterpriseSessionData as SessionData,
   type SessionUpdateData,
@@ -54,9 +54,9 @@ export interface WebSocketConnection {
  */
 export class WebSocketSessionSynchronizer {
   private readonly logger: ILogger;
-  private readonly metrics: MetricsCollector;
-  private readonly redis: any; // ioredis Redis instance
-  private readonly subscriber: any; // Separate subscriber instance
+  private readonly metrics: IMetricsCollector;
+  private readonly redis: Redis; // ioredis Redis instance
+  private readonly subscriber: Redis; // Separate subscriber instance
   private readonly connections: Map<string, WebSocketConnection> = new Map();
   private readonly sessionToConnections: Map<string, Set<string>> = new Map();
 
@@ -65,10 +65,10 @@ export class WebSocketSessionSynchronizer {
   private readonly SESSION_DELETE_CHANNEL = "session:deleted";
   private readonly SESSION_EXPIRE_CHANNEL = "session:expired";
 
-  constructor(logger: ILogger, metrics: MetricsCollector, redis?: any) {
+  constructor(logger: ILogger, metrics: IMetricsCollector, redis?: any) {
     this.logger = logger.child({ component: "WebSocketSessionSynchronizer" });
     this.metrics = metrics;
-    this.redis = redis || RedisClient.getInstance();
+    this.redis = redis;
 
     // Create separate subscriber connection (ioredis best practice)
     this.subscriber = this.redis.duplicate();

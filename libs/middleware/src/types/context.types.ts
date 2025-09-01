@@ -3,6 +3,7 @@
  * Abstracts framework-specific context (Elysia, Express, etc.)
  */
 export interface MiddlewareContext {
+  requestId?: string;
   request: {
     method: string;
     url: string;

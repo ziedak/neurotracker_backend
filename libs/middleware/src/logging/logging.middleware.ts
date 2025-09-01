@@ -1,6 +1,10 @@
-import { Logger } from "@libs/monitoring";
+import { type ILogger } from "@libs/monitoring";
+import { BaseMiddleware } from "../base";
+import type { MiddlewareContext, MiddlewareOptions } from "../types";
+import { generateUUId, inject } from "@libs/utils";
+import type { Elysia } from "@libs/elysia-server";
 
-export interface LoggingConfig {
+export interface LoggingConfig extends MiddlewareOptions {
   logLevel: "debug" | "info" | "warn" | "error";
   logRequestBody?: boolean;
   logResponseBody?: boolean;
@@ -26,12 +30,12 @@ export interface RequestLogData {
 
 export interface ResponseLogData {
   requestId: string;
-  statusCode?: number;
+  statusCode?: number | undefined;
   responseTime: number;
-  contentLength?: number;
-  headers?: Record<string, any>;
+  contentLength?: number | undefined;
+  headers?: Record<string, any> | undefined;
   body?: any;
-  error?: string;
+  error?: string | undefined;
 }
 
 /**
@@ -39,8 +43,7 @@ export interface ResponseLogData {
  * Provides comprehensive request/response logging with configurable options
  * Framework-agnostic implementation for consistent logging across all services
  */
-export class LoggingMiddleware {
-  private readonly logger: ILogger;
+export class LoggingMiddleware extends BaseMiddleware<LoggingConfig> {
   private readonly defaultConfig: LoggingConfig = {
     logLevel: "info",
     logRequestBody: false,
@@ -52,17 +55,28 @@ export class LoggingMiddleware {
     sensitiveFields: ["password", "token", "secret", "key", "auth"],
   };
 
-  constructor(logger: ILogger) {
-    this.logger = logger;
+  constructor(
+    @inject("Logger") private override readonly logger: ILogger,
+    @inject("IMetricsCollector") private override readonly metrics: any,
+    config: LoggingConfig
+  ) {
+    super(logger, metrics, config, "LoggingMiddleware");
+  }
+
+  override execute(
+    context: MiddlewareContext,
+    next: () => Promise<void>
+  ): Promise<void | any> {
+    throw new Error("Method not implemented.");
   }
 
   /**
    * Create Elysia middleware for logging
    */
-  elysia(config?: Partial<LoggingConfig>) {
+  elysia(config?: Partial<LoggingConfig>): (app: Elysia) => Elysia {
     const finalConfig = { ...this.defaultConfig, ...config };
 
-    return (app: any) => {
+    return (app: Elysia): Elysia => {
       return app
         .onBeforeHandle(async (context: any) => {
           await this.logRequest(context.request, finalConfig);
@@ -230,7 +244,7 @@ export class LoggingMiddleware {
    * Generate unique request ID
    */
   private generateRequestId(): string {
-    return `req_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+    return generateUUId("req");
   }
 
   /**
@@ -478,13 +492,4 @@ export class LoggingMiddleware {
       maxBodySize: 1024, // 1KB
     };
   }
-}
-
-/**
- * Factory function for easy middleware creation
- */
-export function createLoggingMiddleware(config?: Partial<LoggingConfig>) {
-  const logger = Logger.getInstance("Shared Logging Middleware");
-  const middleware = new LoggingMiddleware(logger);
-  return middleware.elysia(config);
 }

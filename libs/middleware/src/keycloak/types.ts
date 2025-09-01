@@ -1,6 +1,6 @@
 /**
  * Keycloak Authentication Types and Interfaces
- * 
+ *
  * Defines types for Keycloak integration in the middleware system
  */
 
@@ -8,31 +8,31 @@
  * Keycloak configuration interface with enhanced options
  */
 export interface KeycloakConfig {
-  readonly serverUrl: string;
-  readonly realm: string;
-  readonly clientId: string;
-  readonly clientSecret?: string;
-  readonly publicKey?: string;
-  readonly jwksUri?: string;
-  readonly rolesClaim?: string;
-  readonly usernameClaim?: string;
-  readonly emailClaim?: string;
-  readonly groupsClaim?: string;
-  readonly skipPaths?: string[];
-  readonly requireAuth?: boolean;
-  readonly cacheTTL?: number;
-  readonly enableUserInfoEndpoint?: boolean;
-  readonly verifyTokenLocally?: boolean;
-  readonly connectTimeout?: number;
-  readonly readTimeout?: number;
-  readonly maxRetries?: number;
-  readonly retryDelay?: number;
-  readonly circuitBreakerThreshold?: number;
-  readonly circuitBreakerResetTimeout?: number;
-  readonly enableMetrics?: boolean;
-  readonly logLevel?: 'debug' | 'info' | 'warn' | 'error';
-  readonly trustedProxies?: string[];
-  readonly corsOrigins?: string[];
+  serverUrl: string;
+  realm: string;
+  clientId: string;
+  clientSecret?: string;
+  publicKey?: string;
+  jwksUri?: string;
+  rolesClaim?: string;
+  usernameClaim?: string;
+  emailClaim?: string;
+  groupsClaim?: string;
+  skipPaths?: string[];
+  requireAuth?: boolean;
+  cacheTTL?: number;
+  enableUserInfoEndpoint?: boolean;
+  verifyTokenLocally?: boolean;
+  connectTimeout?: number;
+  readTimeout?: number;
+  maxRetries?: number;
+  retryDelay?: number;
+  circuitBreakerThreshold?: number;
+  circuitBreakerResetTimeout?: number;
+  enableMetrics?: boolean;
+  logLevel?: "debug" | "info" | "warn" | "error";
+  trustedProxies?: string[];
+  corsOrigins?: string[];
 }
 
 /**
@@ -96,7 +96,7 @@ export interface KeycloakTokenVerification {
   readonly payload?: KeycloakJWTPayload;
   readonly userInfo?: KeycloakUserInfo;
   readonly error?: string;
-  readonly source: 'local' | 'remote';
+  readonly source: "local" | "remote";
 }
 
 /**
@@ -121,7 +121,7 @@ export interface KeycloakMiddlewareConfig extends KeycloakConfig {
   readonly name?: string;
   readonly enabled?: boolean;
   readonly priority?: number;
-  readonly logLevel?: 'debug' | 'info' | 'warn' | 'error';
+  readonly logLevel?: "debug" | "info" | "warn" | "error";
   readonly errorHandler?: (error: Error, context: any) => void;
   readonly tokenValidator?: (token: string) => Promise<boolean>;
   readonly userTransform?: (userInfo: KeycloakUserInfo) => any;
@@ -130,11 +130,20 @@ export interface KeycloakMiddlewareConfig extends KeycloakConfig {
 /**
  * Keycloak WebSocket configuration
  */
-export interface KeycloakWebSocketConfig extends KeycloakMiddlewareConfig {
+export interface KeycloakWebSocketConfig extends KeycloakConfig {
+  readonly name: string; // Required for WebSocket middleware
+  readonly enabled?: boolean;
+  readonly priority?: number;
+  readonly logLevel?: "debug" | "info" | "warn" | "error";
+  readonly skipMessageTypes?: string[];
+  readonly requireAuth?: boolean;
   readonly closeOnAuthFailure?: boolean;
   readonly skipAuthenticationForTypes?: string[];
   readonly messagePermissions?: Record<string, string[]>;
   readonly messageRoles?: Record<string, string[]>;
+  readonly errorHandler?: (error: Error, context: any) => void;
+  readonly tokenValidator?: (token: string) => Promise<boolean>;
+  readonly userTransform?: (userInfo: KeycloakUserInfo) => any;
 }
 
 /**
@@ -198,7 +207,7 @@ export interface JWK {
   readonly x5u?: string;
   readonly x5c?: string[];
   readonly x5t?: string;
-  readonly 'x5t#S256'?: string;
+  readonly "x5t#S256"?: string;
   readonly n?: string;
   readonly e?: string;
   readonly d?: string;
@@ -227,7 +236,7 @@ export interface CacheEntry<T> {
   readonly createdAt: number;
   readonly hitCount?: number;
   readonly lastAccessedAt?: number;
-  readonly source?: 'local' | 'remote';
+  readonly source?: "local" | "remote";
   readonly version?: string;
 }
 
@@ -245,7 +254,7 @@ export interface RateLimitResult {
  * Circuit breaker status interface
  */
 export interface CircuitBreakerStatus {
-  readonly state: 'closed' | 'open' | 'half-open';
+  readonly state: "closed" | "open" | "half-open";
   readonly failureCount: number;
   readonly lastFailureTime?: number;
   readonly nextAttemptTime?: number;
@@ -255,10 +264,10 @@ export interface CircuitBreakerStatus {
  * Health check result interface
  */
 export interface HealthCheckResult {
-  readonly status: 'healthy' | 'unhealthy' | 'degraded';
+  readonly status: "healthy" | "unhealthy" | "degraded";
   readonly details: {
-    readonly redis?: 'connected' | 'disconnected' | 'error';
-    readonly keycloak?: 'accessible' | 'unreachable' | 'error';
+    readonly redis?: "connected" | "disconnected" | "error";
+    readonly keycloak?: "accessible" | "unreachable" | "error";
     readonly circuitBreaker?: CircuitBreakerStatus;
     readonly cacheStats?: Record<string, number>;
     readonly uptime?: number;
@@ -284,20 +293,20 @@ export interface KeycloakMetrics {
  * Keycloak error types with additional security errors
  */
 export enum KeycloakErrorType {
-  INVALID_TOKEN = 'INVALID_TOKEN',
-  TOKEN_EXPIRED = 'TOKEN_EXPIRED',
-  INVALID_SIGNATURE = 'INVALID_SIGNATURE',
-  INVALID_ISSUER = 'INVALID_ISSUER',
-  INVALID_AUDIENCE = 'INVALID_AUDIENCE',
-  CONNECTION_ERROR = 'CONNECTION_ERROR',
-  CONFIGURATION_ERROR = 'CONFIGURATION_ERROR',
-  PERMISSION_DENIED = 'PERMISSION_DENIED',
-  USER_NOT_FOUND = 'USER_NOT_FOUND',
-  RATE_LIMITED = 'RATE_LIMITED',
-  CIRCUIT_BREAKER_OPEN = 'CIRCUIT_BREAKER_OPEN',
-  JWKS_ERROR = 'JWKS_ERROR',
-  CACHE_ERROR = 'CACHE_ERROR',
-  VALIDATION_ERROR = 'VALIDATION_ERROR'
+  INVALID_TOKEN = "INVALID_TOKEN",
+  TOKEN_EXPIRED = "TOKEN_EXPIRED",
+  INVALID_SIGNATURE = "INVALID_SIGNATURE",
+  INVALID_ISSUER = "INVALID_ISSUER",
+  INVALID_AUDIENCE = "INVALID_AUDIENCE",
+  CONNECTION_ERROR = "CONNECTION_ERROR",
+  CONFIGURATION_ERROR = "CONFIGURATION_ERROR",
+  PERMISSION_DENIED = "PERMISSION_DENIED",
+  USER_NOT_FOUND = "USER_NOT_FOUND",
+  RATE_LIMITED = "RATE_LIMITED",
+  CIRCUIT_BREAKER_OPEN = "CIRCUIT_BREAKER_OPEN",
+  JWKS_ERROR = "JWKS_ERROR",
+  CACHE_ERROR = "CACHE_ERROR",
+  VALIDATION_ERROR = "VALIDATION_ERROR",
 }
 
 /**
@@ -319,25 +328,27 @@ export class KeycloakError extends Error {
     requestId?: string
   ) {
     super(message);
-    this.name = 'KeycloakError';
+    this.name = "KeycloakError";
     this.type = type;
     this.timestamp = Date.now();
-    this.requestId = requestId;
-    
+    if (requestId !== undefined) {
+      this.requestId = requestId;
+    }
+
     if (statusCode !== undefined) {
       this.statusCode = statusCode;
     }
     if (details !== undefined) {
       this.details = details;
     }
-    
+
     // Determine if error is retryable
     this.retryable = this.isRetryableError(type);
-    
+
     // Capture stack trace
     Error.captureStackTrace?.(this, KeycloakError);
   }
-  
+
   /**
    * Determine if an error type is retryable
    */
@@ -351,7 +362,7 @@ export class KeycloakError extends Error {
         return false;
     }
   }
-  
+
   /**
    * Convert error to JSON for structured logging
    */
@@ -364,7 +375,7 @@ export class KeycloakError extends Error {
       timestamp: this.timestamp,
       requestId: this.requestId,
       retryable: this.retryable,
-      details: this.details
+      details: this.details,
     };
   }
 }

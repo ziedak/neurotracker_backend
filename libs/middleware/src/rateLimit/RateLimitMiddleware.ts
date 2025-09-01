@@ -1,19 +1,20 @@
 import { BaseMiddleware } from "../base";
-import { MiddlewareContext, RateLimitConfig } from "../types";
-import { Logger, MetricsCollector } from "@libs/monitoring";
-import { RedisRateLimit } from "./RedisRateLimit";
-import { IpStrategy, UserStrategy, ApiKeyStrategy } from "./strategies";
+import { MiddlewareContext } from "../types";
+import { type ILogger, type IMetricsCollector } from "@libs/monitoring";
+import {
+  RedisRateLimit,
+  IpStrategy,
+  UserStrategy,
+  ApiKeyStrategy,
+  RateLimitConfig,
+  RateLimitResult,
+} from "@libs/ratelimit";
+import { inject } from "@libs/utils";
+import type { RedisClient } from "@libs/database";
 
 /**
  * Rate limit result interface
  */
-export interface RateLimitResult {
-  allowed: boolean;
-  totalHits: number;
-  remaining: number;
-  resetTime: Date;
-  retryAfter?: number;
-}
 
 /**
  * Rate limiting strategy interface
@@ -29,15 +30,18 @@ export interface RateLimitStrategy {
 export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
   private readonly redisRateLimit: RedisRateLimit;
   private readonly strategies: Map<string, RateLimitStrategy>;
+  private readonly redisClient: RedisClient;
 
   constructor(
-    config: RateLimitConfig,
-    logger: ILogger,
-    metrics?: MetricsCollector
+    @inject("ILogger") logger: ILogger,
+    @inject("IMetricsCollector") metrics: IMetricsCollector,
+    @inject("RedisClient") redisClient: RedisClient,
+    config: RateLimitConfig
   ) {
-    super("rateLimit", config, logger, metrics);
+    super(logger, metrics, config, "rateLimit");
 
-    this.redisRateLimit = new RedisRateLimit(config, logger, metrics);
+    this.redisClient = redisClient;
+    this.redisRateLimit = new RedisRateLimit(config, redisClient, logger);
     this.strategies = new Map<string, RateLimitStrategy>();
     this.strategies.set("ip", new IpStrategy());
     this.strategies.set("user", new UserStrategy());
@@ -51,10 +55,10 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
     }
   }
 
-  async execute(
+  protected override async execute(
     context: MiddlewareContext,
     next: () => Promise<void>
-  ): Promise<void | any> {
+  ): Promise<void> {
     const startTime = performance.now();
     const requestId = this.getRequestId(context);
 
@@ -87,7 +91,9 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
           requestId,
         });
 
-        return {
+        // Set error response in context - the framework will handle the response
+        context.set.status = 429;
+        (context as any).error = {
           error: "Rate limit exceeded",
           message:
             this.config.message || "Too many requests, please try again later.",
@@ -97,6 +103,7 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
           remaining: result.remaining,
           requestId,
         };
+        return;
       }
 
       // Execute request
@@ -139,6 +146,20 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
         performance.now() - startTime
       );
     }
+  }
+
+  /**
+   * Create new instance of this middleware with different config
+   */
+  protected override createInstance(
+    config: RateLimitConfig
+  ): RateLimitMiddleware {
+    return new RateLimitMiddleware(
+      this.logger,
+      this.metrics,
+      this.redisClient,
+      config
+    );
   }
 
   /**
@@ -263,23 +284,8 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
   }
 
   /**
-   * Create Elysia plugin for this middleware
-   */
-  public elysia(config?: Partial<RateLimitConfig>) {
-    const finalConfig = config ? { ...this.config, ...config } : this.config;
-    const middleware = new RateLimitMiddleware(
-      finalConfig,
-      this.logger,
-      this.metrics
-    );
-
-    return (app: any) => {
-      return app.onBeforeHandle(middleware.middleware());
-    };
-  }
-
-  /**
    * Factory method for common rate limit configurations
+   * NOTE: DI-friendly version. Use DI container to inject dependencies.
    */
   public static create(
     type:
@@ -289,7 +295,10 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
       | "burst"
       | "ai-prediction"
       | "data-export",
-    overrides?: Partial<RateLimitConfig>
+    logger: ILogger,
+    metrics: IMetricsCollector,
+    redisClient: RedisClient,
+    rateLimitConfig?: Partial<RateLimitConfig>
   ): RateLimitMiddleware {
     const configs = {
       general: {
@@ -332,10 +341,12 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
       },
     };
 
-    const config = { ...configs[type], standardHeaders: true, ...overrides };
-    const logger = Logger.getInstance("RateLimitMiddleware");
-    const metrics = MetricsCollector.getInstance();
+    const config = {
+      ...configs[type],
+      standardHeaders: true,
+      ...rateLimitConfig,
+    };
 
-    return new RateLimitMiddleware(config, logger, metrics);
+    return new RateLimitMiddleware(logger, metrics, redisClient, config);
   }
 }

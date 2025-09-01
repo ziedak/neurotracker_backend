@@ -8,7 +8,8 @@
 import { BaseWebSocketMiddleware } from "../websocket/BaseWebSocketMiddleware";
 import { WebSocketContext, WebSocketMiddlewareFunction } from "../types";
 import { ILogger, MetricsCollector } from "@libs/monitoring";
-import { KeycloakService } from "./service";
+import { RedisClient } from "@libs/database";
+import { KeycloakService } from "./Keycloak.service";
 import {
   KeycloakWebSocketConfig,
   KeycloakAuthContext,
@@ -37,12 +38,38 @@ export class KeycloakWebSocketMiddleware extends BaseWebSocketMiddleware<Keycloa
 
   constructor(
     config: KeycloakWebSocketConfig,
-    logger?: ILogger,
-    metrics?: MetricsCollector
+    logger: ILogger,
+    metrics: MetricsCollector,
+    redis?: RedisClient
   ) {
-    super("keycloak-websocket-auth", config, logger, metrics);
+    super(
+      "keycloak-websocket-auth",
+      { ...config, name: "keycloak-websocket-auth" },
+      logger,
+      metrics
+    );
 
-    this.keycloakService = new KeycloakService(config, this.logger);
+    // KeycloakService requires redis, logger, metrics, and config
+    if (!redis) {
+      throw new Error(
+        "KeycloakWebSocketMiddleware requires RedisClient instance"
+      );
+    }
+    if (!logger) {
+      throw new Error("KeycloakWebSocketMiddleware requires ILogger instance");
+    }
+    if (!metrics) {
+      throw new Error(
+        "KeycloakWebSocketMiddleware requires MetricsCollector instance"
+      );
+    }
+
+    this.keycloakService = new KeycloakService(
+      redis,
+      logger,
+      metrics as MetricsCollector,
+      config // config already extends KeycloakConfig
+    );
     this.requireAuth = config.requireAuth ?? true;
 
     this.logger.info("Keycloak WebSocket middleware initialized", {
@@ -99,7 +126,11 @@ export class KeycloakWebSocketMiddleware extends BaseWebSocketMiddleware<Keycloa
           return;
         } else {
           // Allow unauthenticated connections
-          await this.recordMetric("ws_keycloak_unauthenticated_allowed");
+          await this.recordMetric("ws_keycloak_unauthenticated_allowed", 1, {
+            source: "local",
+            messageType: context.message.type,
+            realm: this.config.realm || "default",
+          });
           await next();
           return;
         }
@@ -318,9 +349,9 @@ export class KeycloakWebSocketMiddleware extends BaseWebSocketMiddleware<Keycloa
       });
 
       await this.recordMetric("ws_keycloak_message_authorized", 1, {
-        messageType,
-        realm: this.config.realm,
         source: "local",
+        messageType,
+        realm: this.config.realm || "default",
       });
     } catch (error) {
       this.logger.warn("WebSocket message authorization denied", {
@@ -333,9 +364,9 @@ export class KeycloakWebSocketMiddleware extends BaseWebSocketMiddleware<Keycloa
       });
 
       await this.recordMetric("ws_keycloak_message_denied", 1, {
+        source: "local",
         messageType,
-        error_type: error instanceof KeycloakError ? error.type : "unknown",
-        realm: this.config.realm,
+        realm: this.config.realm || "default",
       });
 
       throw error;
@@ -367,9 +398,9 @@ export class KeycloakWebSocketMiddleware extends BaseWebSocketMiddleware<Keycloa
     });
 
     await this.recordMetric("ws_keycloak_auth_failed", 1, {
-      error_type: error.type,
+      source: "local",
       messageType: context.message.type,
-      realm: this.config.realm,
+      realm: this.config.realm || "default",
     });
 
     // Send structured error response
@@ -450,15 +481,15 @@ export class KeycloakWebSocketMiddleware extends BaseWebSocketMiddleware<Keycloa
   /**
    * Get cache statistics
    */
-  public getCacheStats(): Record<string, number> {
-    return this.keycloakService.getCacheStats();
+  public async getCacheStats(): Promise<Record<string, number>> {
+    return await this.keycloakService.getCacheStats();
   }
 
   /**
    * Clear authentication caches
    */
-  public clearCache(): void {
-    this.keycloakService.clearCache();
+  public async clearCache(): Promise<void> {
+    await this.keycloakService.clearCache();
   }
 
   /**
@@ -466,18 +497,27 @@ export class KeycloakWebSocketMiddleware extends BaseWebSocketMiddleware<Keycloa
    */
   static create(
     config: KeycloakWebSocketConfig,
-    logger?: ILogger,
-    metrics?: MetricsCollector
+    logger: ILogger,
+    metrics: MetricsCollector,
+    redis?: RedisClient
   ): WebSocketMiddlewareFunction {
-    const middleware = new KeycloakWebSocketMiddleware(config, logger, metrics);
+    const middleware = new KeycloakWebSocketMiddleware(
+      config,
+      logger,
+      metrics,
+      redis
+    );
     return middleware.middleware();
   }
 
   /**
    * Cleanup resources
    */
-  public destroy(): void {
-    this.keycloakService.destroy();
+  public async destroy(): Promise<void> {
+    // KeycloakService doesn't have a destroy method yet, but we can prepare for it
+    if (typeof this.keycloakService.destroy === "function") {
+      await this.keycloakService.destroy();
+    }
   }
 }
 
@@ -486,8 +526,9 @@ export class KeycloakWebSocketMiddleware extends BaseWebSocketMiddleware<Keycloa
  */
 export function createKeycloakWebSocketMiddleware(
   config: KeycloakWebSocketConfig,
-  logger?: ILogger,
-  metrics?: MetricsCollector
+  logger: ILogger,
+  metrics: MetricsCollector,
+  redis?: RedisClient
 ): WebSocketMiddlewareFunction {
-  return KeycloakWebSocketMiddleware.create(config, logger, metrics);
+  return KeycloakWebSocketMiddleware.create(config, logger, metrics, redis);
 }

@@ -2,11 +2,11 @@ import Redis, {
   RedisOptions,
   type Callback,
   type ChainableCommander,
+  type RedisKey,
 } from "ioredis";
-import { injectable, inject } from "@libs/utils";
+import { injectable, inject, executeRedisWithRetry } from "@libs/utils";
 import { MetricsCollector, type ILogger } from "@libs/monitoring";
 import { getEnv, getNumberEnv, getBooleanEnv } from "@libs/config";
-import { keys } from "lodash";
 
 @injectable()
 export class RedisClient {
@@ -145,43 +145,61 @@ export class RedisClient {
     }
   }
 
-  /**
-   * Execute Redis operation with retry logic and metrics
-   */
-  async executeWithRetry<T>(
-    operation: (redis: Redis) => Promise<T>,
-    operationName = "redis_operation",
-    maxRetries = 3
-  ): Promise<T> {
-    const startTime = Date.now();
-    let lastError: Error | null = null;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        const result = await operation(this.redis);
-        this.metrics.recordTimer(
-          `${operationName}_duration`,
-          Date.now() - startTime
-        );
-        this.metrics.recordCounter(`${operationName}_success`);
-        return result;
-      } catch (error) {
-        lastError = error as Error;
-        this.logger.warn(
-          `Redis operation ${operationName} failed (attempt ${attempt + 1})`,
-          error
-        );
-        if (attempt < maxRetries) {
-          const delay = Math.pow(2, attempt) * 100;
-          await new Promise((resolve) => setTimeout(resolve, delay));
+  async safeSetEx(key: string, ttl: number, value: string): Promise<boolean> {
+    try {
+      await executeRedisWithRetry(
+        this.redis,
+        (redis: Redis) => redis.setex(key, ttl, value),
+        (error) => this.logger.warn(`Safe setex failed for key ${key}`, error),
+        {
+          operationName: "redis_setex",
+          maxRetries: 3,
+          enableCircuitBreaker: true, // Enable for command-level protection
+          enableMetrics: true,
         }
-      }
+      );
+      return true;
+    } catch (error) {
+      this.logger.warn(`Safe setex failed for key ${key}`, error);
+      return false;
     }
-    this.metrics.recordTimer(
-      `${operationName}_duration`,
-      Date.now() - startTime
+  }
+
+  async safeKeys(pattern: string): Promise<string[]> {
+    try {
+      return await executeRedisWithRetry(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.keys(pattern)),
+        (error) =>
+          this.logger.warn(`Safe keys failed for pattern ${pattern}`, error),
+        {
+          operationName: "redis_keys",
+          enableCircuitBreaker: true, // Enable for command-level protection
+          enableMetrics: true,
+        }
+      );
+    } catch (error) {
+      this.logger.warn(`Safe keys failed for pattern ${pattern}`, error);
+      return [];
+    }
+  }
+
+  async safeDel(...args: RedisKey[]): Promise<number> {
+    return executeRedisWithRetry(
+      this.redis,
+      (redis: Redis) => Promise.resolve(redis.del(...args)),
+      (error) =>
+        this.logger.warn(`Safe del failed for keys ${args.join(", ")}`, error),
+      {
+        operationName: "redis_del",
+        enableCircuitBreaker: true, // Enable for command-level protection
+        enableMetrics: true,
+      }
     );
-    this.metrics.recordCounter(`${operationName}_failed`);
-    throw lastError;
+  }
+
+  getRedis(): Redis {
+    return this.redis;
   }
 
   /**
@@ -191,16 +209,22 @@ export class RedisClient {
     key: string,
     defaultValue: string | null = null
   ): Promise<string | null> {
+    if (!key) return defaultValue;
+
     try {
-      return await this.executeWithRetry(
-        (redis) => redis.get(key),
-        "redis_get"
+      const result = await executeRedisWithRetry(
+        this.redis,
+        (redis: Redis) => redis.get(key),
+        (error) => this.logger.warn(`Safe get failed for key ${key}`, error),
+        {
+          operationName: "redis_get",
+          enableCircuitBreaker: true, // Enable for command-level protection
+          enableMetrics: true,
+        }
       );
+      return result ?? defaultValue;
     } catch (error) {
-      this.logger.warn(
-        `Safe get failed for key ${key}, returning default`,
-        error
-      );
+      this.logger.warn(`Safe get failed for key ${key}`, error);
       return defaultValue;
     }
   }
@@ -214,13 +238,22 @@ export class RedisClient {
     ttlSeconds?: number
   ): Promise<boolean> {
     try {
-      await this.executeWithRetry(async (redis) => {
-        if (ttlSeconds) {
-          return await redis.set(key, value, "EX", ttlSeconds);
-        } else {
-          return await redis.set(key, value);
+      await executeRedisWithRetry(
+        this.redis,
+        async (redis: Redis) => {
+          if (ttlSeconds) {
+            return await redis.set(key, value, "EX", ttlSeconds);
+          } else {
+            return await redis.set(key, value);
+          }
+        },
+        (error) => this.logger.warn(`Safe set failed for key ${key}`, error),
+        {
+          operationName: "redis_set",
+          enableCircuitBreaker: true, // Enable for command-level protection
+          enableMetrics: true,
         }
-      }, "redis_set");
+      );
       return true;
     } catch (error) {
       this.logger.warn(`Safe set failed for key ${key}`, error);
@@ -229,9 +262,15 @@ export class RedisClient {
   }
   async safePipeline(): Promise<ChainableCommander> {
     try {
-      return await this.executeWithRetry<ChainableCommander>(
-        (redis) => Promise.resolve(redis.pipeline()),
-        "redis_pipeline"
+      return await executeRedisWithRetry<ChainableCommander>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.pipeline()),
+        (error) => this.logger.warn("Safe pipeline failed", error),
+        {
+          operationName: "redis_pipeline",
+          enableCircuitBreaker: true, // Enable for command-level protection
+          enableMetrics: true,
+        }
       );
     } catch (error) {
       this.logger.warn("Safe pipeline failed, returning default", error);
@@ -246,12 +285,12 @@ export class RedisClient {
     pattern: string,
     countToken: "COUNT",
     count: string | number,
-
     callback?: Callback<[cursor: string, elements: string[]]>
   ): Promise<[cursor: string, elements: string[]]> {
     try {
-      return await this.executeWithRetry(
-        (redis) =>
+      return await executeRedisWithRetry(
+        this.redis,
+        (redis: Redis) =>
           Promise.resolve(
             redis.scan(
               cursor,
@@ -259,11 +298,15 @@ export class RedisClient {
               pattern,
               countToken,
               count,
-
               callback
             )
           ),
-        "redis_scan"
+        (error) => this.logger.warn("Safe scan failed", error),
+        {
+          operationName: "redis_scan",
+          enableCircuitBreaker: true, // Enable for command-level protection
+          enableMetrics: true,
+        }
       );
     } catch (error) {
       this.logger.warn("Safe scan failed, returning default", error);
@@ -295,6 +338,22 @@ export class RedisClient {
         connectionState: this.redis?.status || "unknown",
         retryCount: this.retryCount,
       };
+    }
+  }
+
+  async isAvailable(): Promise<boolean> {
+    if (!this.redis) {
+      return false;
+    }
+    if (!this.isConnected) {
+      return false;
+    }
+
+    try {
+      await this.redis.ping();
+      return true;
+    } catch {
+      return false;
     }
   }
 

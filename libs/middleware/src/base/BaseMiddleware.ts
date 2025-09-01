@@ -1,27 +1,58 @@
-import { Logger, MetricsCollector } from "@libs/monitoring";
+import { inject } from "@libs/utils";
+import { type ILogger, type IMetricsCollector } from "@libs/monitoring";
+import { Elysia } from "@libs/elysia-server";
 import {
   MiddlewareContext,
   MiddlewareFunction,
   MiddlewareOptions,
 } from "../types";
+import { generateUUId } from "@libs/utils";
 
 /**
  * Base class for all middleware implementations
- * Provides common functionality and standardized patterns
+ * Provides common functionality and standardized patterns for Elysia middleware
+ *
+ * @template TConfig - Configuration type extending MiddlewareOptions
+ *
+ * Features:
+ * - Framework-agnostic middleware function creation
+ * - Elysia plugin integration with multiple patterns
+ * - Built-in error handling and metrics recording
+ * - Request context abstraction and IP extraction
+ * - Configurable path skipping and security utilities
+ * - Production-ready logging and monitoring integration
+ *
+ * Usage Patterns:
+ * 1. Simple plugin: `app.use(middleware.elysia())`
+ * 2. Advanced plugin: `app.use(middleware.plugin())`
+ * 3. Framework-agnostic: `middleware.middleware()`
+ *
+ * @example
+ * ```typescript
+ * class MyMiddleware extends BaseMiddleware<MyConfig> {
+ *   protected async execute(context: MiddlewareContext, next: () => Promise<void>) {
+ *     // Your middleware logic here
+ *     await next();
+ *   }
+ *
+ *   protected createInstance(config: MyConfig): MyMiddleware {
+ *     return new MyMiddleware(this.logger, this.metrics, config, this.name);
+ *   }
+ * }
+ *
+ * // Usage in Elysia
+ * const middleware = new MyMiddleware(logger, metrics, config, "my-middleware");
+ * app.use(middleware.elysia());
+ * ```
  */
 export abstract class BaseMiddleware<
   TConfig extends MiddlewareOptions = MiddlewareOptions
 > {
-  protected readonly logger: ILogger;
-  protected readonly metrics?: MetricsCollector;
-  protected readonly config: TConfig;
-  protected readonly name: string;
-
   constructor(
-    name: string,
-    config: TConfig,
-    logger: ILogger,
-    metrics?: MetricsCollector
+    @inject("ILogger") protected readonly logger: ILogger,
+    @inject("IMetricsCollector") protected readonly metrics: IMetricsCollector,
+    protected readonly config: TConfig,
+    protected readonly name: string
   ) {
     this.name = name;
     this.logger = logger.child({ middleware: name });
@@ -42,12 +73,167 @@ export abstract class BaseMiddleware<
   }
 
   /**
-   * Main execution method - must be implemented by subclasses
+   * Abstract method for middleware execution logic
+   * Subclasses must implement this method
    */
-  abstract execute(
+  protected abstract execute(
     context: MiddlewareContext,
     next: () => Promise<void>
-  ): Promise<void | any>;
+  ): Promise<void>;
+
+  /**
+   * Create Elysia plugin for this middleware
+   * Returns a proper Elysia plugin function
+   */
+  public elysia(config?: Partial<TConfig>): (app: Elysia) => Elysia {
+    // Merge configuration if provided
+    const finalConfig = config ? { ...this.config, ...config } : this.config;
+
+    // Create new instance with merged config if config was provided
+    const middlewareInstance = config ? this.createInstance(finalConfig) : this;
+
+    // Return Elysia plugin function
+    return (app: Elysia) => {
+      return app.onBeforeHandle(async (elysiaContext) => {
+        // Check if middleware is enabled
+        if (!finalConfig.enabled) {
+          this.logger.debug("Middleware disabled, skipping");
+          return;
+        }
+
+        // Create middleware context from Elysia context
+        const middlewareContext =
+          middlewareInstance.createMiddlewareContext(elysiaContext);
+
+        // Check if path should be skipped
+        if (middlewareInstance.shouldSkip(middlewareContext)) {
+          this.logger.debug("Path matched skip pattern, skipping", {
+            path: middlewareContext.request.url,
+          });
+          return;
+        }
+
+        // Execute middleware with error handling
+        try {
+          await middlewareInstance.execute(middlewareContext, async () => {
+            // No-op next function for before handle
+          });
+        } catch (error) {
+          await middlewareInstance.handleError(
+            error as Error,
+            middlewareContext
+          );
+          throw error;
+        }
+      });
+    };
+  }
+
+  /**
+   * Create advanced Elysia plugin with decorators and derived context
+   * Subclasses can override this for complex plugin behavior
+   */
+  public plugin(config?: Partial<TConfig>): Elysia {
+    // Merge configuration if provided
+    const finalConfig = config ? { ...this.config, ...config } : this.config;
+
+    // Create new instance with merged config if config was provided
+    const middlewareInstance = config ? this.createInstance(finalConfig) : this;
+
+    return new Elysia({ name: this.name })
+      .decorate(this.name, {
+        config: finalConfig,
+        isEnabled: middlewareInstance.isEnabled.bind(middlewareInstance),
+        getName: middlewareInstance.getName.bind(middlewareInstance),
+      })
+      .derive(async (elysiaContext) => {
+        // Create middleware context from Elysia context
+        const middlewareContext =
+          middlewareInstance.createMiddlewareContext(elysiaContext);
+
+        // Skip if middleware is disabled or path should be skipped
+        if (
+          !finalConfig.enabled ||
+          middlewareInstance.shouldSkip(middlewareContext)
+        ) {
+          return {};
+        }
+
+        return {
+          middlewareContext,
+          [`${this.name}Enabled`]: true,
+        };
+      })
+      .onBeforeHandle(async (elysiaContext) => {
+        // Check if middleware is enabled
+        if (!finalConfig.enabled) {
+          return;
+        }
+
+        // Create middleware context
+        const middlewareContext =
+          middlewareInstance.createMiddlewareContext(elysiaContext);
+
+        // Check if path should be skipped
+        if (middlewareInstance.shouldSkip(middlewareContext)) {
+          return;
+        }
+
+        // Execute middleware
+        try {
+          await middlewareInstance.execute(middlewareContext, async () => {
+            // No-op next function for before handle
+          });
+        } catch (error) {
+          await middlewareInstance.handleError(
+            error as Error,
+            middlewareContext
+          );
+          throw error;
+        }
+      });
+  }
+
+  /**
+   * Create middleware context from Elysia context
+   * Abstracts Elysia-specific context into our middleware context
+   */
+  protected createMiddlewareContext(elysiaContext: any): MiddlewareContext {
+    const { request, set, headers, path, query, params } = elysiaContext;
+
+    return {
+      requestId: this.getRequestId(elysiaContext),
+      request: {
+        method: request?.method || "GET",
+        url: request?.url || path || "/",
+        headers: headers || {},
+        body: elysiaContext.body,
+        query: query || {},
+        params: params || {},
+        ip: this.getClientIp(elysiaContext),
+      },
+      set: {
+        status: set?.status,
+        headers: set?.headers || {},
+      },
+      path: path,
+      ...elysiaContext, // Allow access to original context
+    };
+  }
+
+  /**
+   * Create new instance of this middleware with different config
+   * Subclasses should override this method to return proper instance
+   */
+  protected createInstance(_config: TConfig): BaseMiddleware<TConfig> {
+    // This is a fallback - subclasses should override this
+    // to return a properly constructed instance of their specific type
+    this.logger.warn(
+      "createInstance not overridden - using same instance with merged config. " +
+        "Consider overriding createInstance in subclass for proper config isolation."
+    );
+    return this;
+  }
 
   /**
    * Create middleware function for use in framework
@@ -82,7 +268,7 @@ export abstract class BaseMiddleware<
    * Check if the current request should skip this middleware
    */
   protected shouldSkip(context: MiddlewareContext): boolean {
-    const path = context.request.url.split("?")[0];
+    const path = context.request.url.split("?")[0] || "";
 
     return (
       this.config.skipPaths?.some((skipPath) => {
@@ -192,9 +378,7 @@ export abstract class BaseMiddleware<
       return context.requestId;
     }
 
-    const requestId = `${this.name}_${Date.now()}_${Math.random()
-      .toString(36)
-      .substr(2, 9)}`;
+    const requestId = generateUUId(this.name);
     context.requestId = requestId;
     return requestId;
   }

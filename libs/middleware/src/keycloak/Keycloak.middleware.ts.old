@@ -5,11 +5,15 @@
  * for Elysia applications with comprehensive security features.
  */
 
-// Note: Replace @libs/elysia-server with the actual Elysia import based on your setup\nimport { Elysia } from "elysia";
+import { Elysia } from "@libs/elysia-server";
 import { BaseMiddleware } from "../base/BaseMiddleware";
 import { MiddlewareContext, MiddlewareOptions } from "../types";
-import { Logger, MetricsCollector, type ILogger } from "@libs/monitoring";
-import { KeycloakService } from "./service";
+import {
+  type ILogger,
+  type IMetricsCollector,
+  MetricsCollector,
+} from "@libs/monitoring";
+import { KeycloakService } from "./Keycloak.service";
 import {
   KeycloakMiddlewareConfig,
   KeycloakAuthContext,
@@ -17,6 +21,7 @@ import {
   KeycloakError,
   KeycloakErrorType,
 } from "./types";
+import type { RedisClient } from "@libs/database";
 
 /**
  * Keycloak middleware configuration extending base middleware options
@@ -42,20 +47,24 @@ export interface KeycloakMiddlewareContext extends MiddlewareContext {
 export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions> {
   private readonly keycloakService: KeycloakService;
   private readonly requireAuth: boolean;
+  private readonly redis: RedisClient;
 
   constructor(
+    logger: ILogger,
+    metrics: IMetricsCollector,
     config: KeycloakMiddlewareOptions,
-    logger?: ILogger,
-    metrics?: MetricsCollector
+    redis: RedisClient,
+    name: string = "keycloak-auth"
   ) {
-    super(
-      "keycloak-auth",
-      config,
-      logger || Logger.getInstance("KeycloakMiddleware"),
-      metrics
-    );
+    super(logger, metrics, config, name);
 
-    this.keycloakService = new KeycloakService(config.keycloak, this.logger);
+    this.redis = redis;
+    this.keycloakService = new KeycloakService(
+      redis,
+      logger,
+      metrics as MetricsCollector,
+      config.keycloak
+    );
     this.requireAuth = config.keycloak.requireAuth ?? true;
 
     this.logger.info("Keycloak middleware initialized", {
@@ -68,10 +77,10 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
   }
 
   /**
-   * Execute Keycloak authentication
+   * Execute Keycloak authentication - implements BaseMiddleware abstract method
    */
-  async execute(
-    context: KeycloakMiddlewareContext,
+  protected async execute(
+    context: MiddlewareContext,
     next: () => Promise<void>
   ): Promise<void> {
     const startTime = performance.now();
@@ -79,7 +88,10 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
 
     try {
       // Initialize Keycloak context
-      context.keycloak = {
+      const keycloakContext = context as MiddlewareContext & {
+        keycloak: KeycloakAuthContext;
+      };
+      keycloakContext.keycloak = {
         authenticated: false,
         roles: [],
         groups: [],
@@ -93,7 +105,7 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
       if (!token) {
         if (this.requireAuth) {
           await this.handleAuthenticationError(
-            context,
+            keycloakContext,
             new KeycloakError(
               "No authentication token provided",
               KeycloakErrorType.INVALID_TOKEN
@@ -113,7 +125,7 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
 
       if (!verification.valid) {
         await this.handleAuthenticationError(
-          context,
+          keycloakContext,
           new KeycloakError(
             verification.error || "Token verification failed",
             this.getErrorTypeFromMessage(verification.error)
@@ -124,7 +136,7 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
 
       // Set authenticated context
       await this.setAuthenticatedContext(
-        context,
+        keycloakContext,
         verification.userInfo!,
         token
       );
@@ -155,14 +167,37 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
               KeycloakErrorType.INVALID_TOKEN
             );
 
-      await this.handleAuthenticationError(context, keycloakError);
+      const keycloakContext = context as MiddlewareContext & {
+        keycloak: KeycloakAuthContext;
+      };
+      await this.handleAuthenticationError(keycloakContext, keycloakError);
     } finally {
       const duration = performance.now() - startTime;
+      const keycloakContext = context as MiddlewareContext & {
+        keycloak?: KeycloakAuthContext;
+      };
       await this.recordTimer("keycloak_auth_duration", duration, {
-        authenticated: context.keycloak.authenticated.toString(),
+        authenticated:
+          keycloakContext.keycloak?.authenticated?.toString() ?? "false",
         realm: this.config.keycloak.realm,
       });
     }
+  }
+
+  /**
+   * Create new instance with different configuration
+   * Required for proper config isolation in elysia() method
+   */
+  protected override createInstance(
+    config: KeycloakMiddlewareOptions
+  ): BaseMiddleware<KeycloakMiddlewareOptions> {
+    return new KeycloakMiddleware(
+      this.logger,
+      this.metrics,
+      config,
+      this.redis,
+      this.name
+    );
   }
 
   /**
@@ -256,21 +291,23 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
     error: KeycloakError
   ): Promise<void> {
     const requestId = this.getRequestId(context);
-    const clientIp = context.request.headers['x-forwarded-for'] || 
-                     context.request.headers['x-real-ip'] || 'unknown';
+    const clientIp =
+      context.request.headers["x-forwarded-for"] ||
+      context.request.headers["x-real-ip"] ||
+      "unknown";
 
     // Apply rate limiting for failed auth attempts
     const isRateLimited = await this.checkRateLimit(clientIp);
     if (isRateLimited) {
       this.logger.warn("Authentication rate limit exceeded", {
         requestId,
-        clientIp
+        clientIp,
       });
-      
+
       // Return 429 Too Many Requests
-      const rateLimitError = new Error('Rate limit exceeded') as any;
+      const rateLimitError = new Error("Rate limit exceeded") as any;
       rateLimitError.status = 429;
-      rateLimitError.code = 'RATE_LIMIT_EXCEEDED';
+      rateLimitError.code = "RATE_LIMIT_EXCEEDED";
       rateLimitError.details = {
         error: "rate_limit_exceeded",
         error_description: "Too many authentication attempts",
@@ -291,13 +328,13 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
       clientIp,
       userAgent: context.request.headers["user-agent"],
       method: context.request.method,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
 
     await this.recordMetric("keycloak_auth_failed", 1, {
       error_type: error.type,
       realm: this.config.keycloak.realm,
-      client_ip: this.hashClientIp(clientIp)
+      client_ip: this.hashClientIp(clientIp),
     });
 
     // Determine HTTP status code
@@ -310,7 +347,7 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
       error_type: error.type,
       timestamp: new Date().toISOString(),
       request_id: requestId,
-      retry_after: this.getRetryAfter(error.type)
+      retry_after: this.getRetryAfter(error.type),
     };
 
     // Throw structured error
@@ -366,9 +403,10 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
   }
 
   /**
-   * Create Elysia plugin for easy integration
+   * Create advanced Keycloak plugin for easy integration
+   * This is a specialized plugin that provides Keycloak-specific decorators and guards
    */
-  public plugin() {
+  public keycloakPlugin() {
     return new Elysia({ name: "keycloak-auth" })
       .decorate("keycloak", {
         service: this.keycloakService,
@@ -396,8 +434,8 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
           },
           set: {
             status: undefined,
-            headers: {}
-          }
+            headers: {},
+          },
         };
 
         await this.execute(context, async () => {});
@@ -507,7 +545,10 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
   /**
    * Sanitize error messages to prevent information disclosure
    */
-  private sanitizeErrorMessage(message: string, errorType: KeycloakErrorType): string {
+  private sanitizeErrorMessage(
+    _message: string,
+    errorType: KeycloakErrorType
+  ): string {
     // Don't expose detailed error information that could aid attackers
     switch (errorType) {
       case KeycloakErrorType.INVALID_TOKEN:
@@ -544,8 +585,12 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
    * Hash client IP for privacy-safe logging
    */
   private hashClientIp(ip: string): string {
-    const crypto = require('crypto');
-    return crypto.createHash('sha256').update(ip + this.config.keycloak.clientId).digest('hex').substring(0, 16);
+    const crypto = require("crypto");
+    return crypto
+      .createHash("sha256")
+      .update(ip + this.config.keycloak.clientId)
+      .digest("hex")
+      .substring(0, 16);
   }
 
   /**
@@ -554,14 +599,23 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
   private async checkRateLimit(clientIp: string): Promise<boolean> {
     try {
       const key = `rate-limit:keycloak-auth:${this.hashClientIp(clientIp)}`;
-      // Simple Redis-based rate limiting check
-      const current = await this.keycloakService['redis'].incr(key);
+
+      // Use Redis client's executeWithRetry method
+      const current = await this.redis.executeWithRetry(
+        (redis) => redis.incr(key),
+        "rate_limit_incr"
+      );
+
       if (current === 1) {
-        await this.keycloakService['redis'].expire(key, 60); // 1 minute window
+        await this.redis.executeWithRetry(
+          (redis) => redis.expire(key, 60),
+          "rate_limit_expire"
+        );
       }
+
       return current > 10; // More than 10 attempts in window
     } catch (error) {
-      this.logger.warn('Rate limiting check failed', error as Error);
+      this.logger.warn("Rate limiting check failed", error as Error);
       return false; // Don't block on rate limiter errors
     }
   }
@@ -573,23 +627,23 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
     try {
       const serviceHealth = await this.keycloakService.getHealthStatus();
       const cacheStats = await this.keycloakService.getCacheStats();
-      
+
       return {
         status: serviceHealth.status,
         details: {
           ...serviceHealth.details,
           cacheStats,
-          rateLimiter: 'active',
-          middleware: 'healthy'
-        }
+          rateLimiter: "active",
+          middleware: "healthy",
+        },
       };
     } catch (_error) {
       return {
-        status: 'unhealthy',
+        status: "unhealthy",
         details: {
-          error: 'Health check failed',
-          middleware: 'error'
-        }
+          error: "Health check failed",
+          middleware: "error",
+        },
       };
     }
   }
@@ -606,9 +660,31 @@ export class KeycloakMiddleware extends BaseMiddleware<KeycloakMiddlewareOptions
 /**
  * Create Keycloak middleware plugin for Elysia
  */
-export function createKeycloakPlugin(config: KeycloakMiddlewareOptions) {
-  const middleware = new KeycloakMiddleware(config);
-  return middleware.plugin();
+export function createKeycloakPlugin(
+  config: KeycloakMiddlewareOptions,
+  redis: RedisClient
+) {
+  const { Logger, MetricsCollector } = require("@libs/monitoring");
+  const logger = Logger.getInstance("KeycloakMiddleware");
+  const metrics = MetricsCollector.getInstance();
+
+  const middleware = new KeycloakMiddleware(logger, metrics, config, redis);
+  return middleware.elysia();
+}
+
+/**
+ * Create Keycloak middleware instance
+ * Returns the middleware instance for advanced usage
+ */
+export function createKeycloakMiddlewareInstance(
+  config: KeycloakMiddlewareOptions,
+  redis: RedisClient
+) {
+  const { Logger, MetricsCollector } = require("@libs/monitoring");
+  const logger = Logger.getInstance("KeycloakMiddleware");
+  const metrics = MetricsCollector.getInstance();
+
+  return new KeycloakMiddleware(logger, metrics, config, redis);
 }
 
 /**

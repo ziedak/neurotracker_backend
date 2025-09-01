@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "../../dist/libs/ratelimit",
+    "tsBuildInfoFile": "../../dist/libs/ratelimit/tsconfig.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../../libs/utils" },
+    { "path": "../../libs/config" },
+    { "path": "../../libs/database" }
+  ],
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", "node_modules", "**/*.test.ts", "**/*.spec.ts"]
+}
