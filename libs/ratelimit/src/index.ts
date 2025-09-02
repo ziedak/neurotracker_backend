@@ -1,1 +1,1 @@
-export * from "./RedisRateLimit";
+export * from "./OptimizedRedisRateLimit";
