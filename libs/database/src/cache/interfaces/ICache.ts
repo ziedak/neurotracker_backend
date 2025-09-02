@@ -46,7 +46,7 @@ export interface AccessPattern {
 }
 export interface CacheOperationResult<T> {
   data: T | null;
-  source: "l1" | "l2" | "miss";
+  source: string | "miss";
   latency: number;
   compressed: boolean;
 }
@@ -57,6 +57,7 @@ export interface CacheEntry<T> {
   ttl: number;
   hits: number;
   compressed: boolean;
+  compressionAlgorithm?: string; // Algorithm used for compression
 }
 
 export interface CacheStats {

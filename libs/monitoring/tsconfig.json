@@ -8,7 +8,7 @@
   },
   "references": [
     { "path": "../../libs/config" },
-    { "path": "../../libs/database" }
+    { "path": "../../libs/utils" }
   ],
   "include": ["src"],
   "exclude": ["node_modules"]

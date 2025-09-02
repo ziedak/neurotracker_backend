@@ -1,10 +1,10 @@
 /**
- * Phase 2: Connection Pool Management Service
+ *import { type ILogger } from "@libs/monitoring";Phase 2: Connection Pool Management Service
  * Advanced connection lifecycle and pool optimization
  */
 
 import { PostgreSQLClient } from "./PostgreSQLClient";
-import { Logger, type ILogger } from "@libs/monitoring";
+import { type ILogger } from "@libs/monitoring";
 import {
   AppError,
   executeWithRetry,

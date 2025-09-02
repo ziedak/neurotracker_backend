@@ -1,7 +1,6 @@
 //export * as "circuit-breakerV1" from "./circuit-breaker";
 export * from "./utils";
 export * from "./ServiceRegistry";
-export * from "./lru-cacheV1";
 export * from "./object-pool";
 export * from "./executeWithRetry";
 export * from "./AppError";

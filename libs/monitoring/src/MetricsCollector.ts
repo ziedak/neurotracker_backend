@@ -1,4 +1,6 @@
-import { RedisClient } from "@libs/database";
+// Temporarily removed Redis dependency to resolve circular dependency
+// import { RedisClient } from "@libs/database";
+
 // Metrics types
 export interface Metric {
   name: string;
@@ -113,48 +115,25 @@ export class MetricsCollector implements IMetricsCollector {
 
     await this.storeMetric(metric);
   }
+
   async getMetrics(
-    name: string,
-    from?: number,
-    to?: number
+    _name: string,
+    _from?: number,
+    _to?: number
   ): Promise<Metric[]> {
     try {
-      const key = `metrics:${name}`;
-      const fromScore = from || Date.now() - 60 * 60 * 1000; // Last hour by default
-      const toScore = to || Date.now();
-
-      const redis = RedisClient.getInstance();
-      const results = await redis.zrangebyscore(
-        key,
-        fromScore,
-        toScore,
-        "WITHSCORES"
-      );
-
-      const metrics: Metric[] = [];
-      for (let i = 0; i < results.length; i += 2) {
-        const data = results[i];
-        const timestamp = parseInt(results[i + 1] ?? "0", 10);
-        if (typeof data === "string") {
-          metrics.push({ ...JSON.parse(data), timestamp });
-        }
-      }
-
-      return metrics;
+      // Temporarily disabled Redis metrics retrieval
+      return [];
     } catch (error) {
-      console.error("Failed to retrieve metrics:", error);
+      console.error("Failed to get metrics", { error });
       return [];
     }
   }
+
   private async storeMetric(metric: Metric) {
     try {
-      const key = `metrics:${metric.name}`;
-      const redis = RedisClient.getInstance();
-      await redis.zadd(key, metric.timestamp, JSON.stringify(metric));
-
-      // Keep metrics for 24 hours
-      const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-      await redis.zremrangebyscore(key, 0, oneDayAgo);
+      // Temporarily disabled Redis storage
+      console.log("Storing metric:", metric);
     } catch (error) {
       console.error("Failed to store metric:", error);
     }

@@ -1,0 +1,434 @@
+/**
+ * Core authentication types for the auth library
+ * Defines the fundamental interfaces and types used throughout the system
+ */
+
+import { Ability, Subject } from "@casl/ability";
+
+// ===================================================================
+// AUTHENTICATION TYPES
+// ===================================================================
+
+export interface User {
+  id: string;
+  email: string;
+  name?: string;
+  roles: string[];
+  permissions: string[];
+  metadata?: Record<string, unknown>;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface AuthToken {
+  accessToken: string;
+  refreshToken?: string;
+  expiresIn: number;
+  tokenType: "Bearer";
+  scope?: string;
+}
+
+export interface LoginCredentials {
+  email: string;
+  password: string;
+  deviceInfo?: DeviceInfo;
+}
+
+export interface RegisterData {
+  email: string;
+  password: string;
+  name?: string;
+  roles?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface AuthResult {
+  success: boolean;
+  user?: User;
+  tokens?: AuthToken;
+  error?: string;
+  code?: string;
+}
+
+// ===================================================================
+// AUTHORIZATION TYPES (CASL Integration)
+// ===================================================================
+
+export type Action = "create" | "read" | "update" | "delete" | "manage";
+export type Resource =
+  | "user"
+  | "role"
+  | "permission"
+  | "session"
+  | "api_key"
+  | "all";
+
+export interface Permission {
+  action: Action;
+  resource: Resource;
+  conditions?: Record<string, unknown>;
+}
+
+export interface Role {
+  id: string;
+  name: string;
+  permissions: Permission[];
+  description?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export type AppAbility = Ability<[Action, Subject]>;
+
+// ===================================================================
+// SESSION TYPES
+// ===================================================================
+
+export interface Session {
+  id: string;
+  userId: string;
+  deviceInfo?: DeviceInfo;
+  ipAddress?: string;
+  userAgent?: string;
+  isActive: boolean;
+  expiresAt: Date;
+  createdAt: Date;
+  lastActivity: Date;
+}
+
+export interface DeviceInfo {
+  name?: string;
+  type?: string;
+  os?: string;
+  browser?: string;
+  fingerprint?: string;
+}
+
+// ===================================================================
+// API KEY TYPES
+// ===================================================================
+
+export interface ApiKey {
+  id: string;
+  name: string;
+  key: string;
+  userId: string;
+  permissions: string[];
+  isActive: boolean;
+  expiresAt?: Date;
+  lastUsed?: Date;
+  usageCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ApiKeyCreateData {
+  name: string;
+  permissions: string[];
+  expiresAt?: Date;
+  metadata?: Record<string, unknown>;
+}
+
+// ===================================================================
+// CONFIGURATION TYPES
+// ===================================================================
+
+export interface AuthConfig {
+  jwt: {
+    secret: string;
+    expiresIn: string;
+    refreshExpiresIn: string;
+    issuer: string;
+    audience: string;
+  };
+  keycloak: {
+    serverUrl: string;
+    realm: string;
+    clientId: string;
+    clientSecret: string;
+    publicKey?: string;
+  };
+  redis: {
+    host: string;
+    port: number;
+    password?: string;
+    db: number;
+  };
+  session: {
+    ttl: number;
+    refreshThreshold: number;
+  };
+  apiKey: {
+    prefix: string;
+    length: number;
+  };
+}
+
+export interface ServiceDependencies {
+  database: any; // Will be typed from @libs/database
+  redis: any; // Will be typed from ioredis
+  monitoring: any; // Will be typed from @libs/monitoring
+  config: AuthConfig;
+}
+
+// ===================================================================
+// ERROR TYPES
+// ===================================================================
+
+export class AuthError extends Error {
+  constructor(
+    message: string,
+    public code: string,
+    public statusCode: number = 500
+  ) {
+    super(message);
+    this.name = "AuthError";
+  }
+}
+
+export class UnauthorizedError extends AuthError {
+  constructor(message: string = "Unauthorized") {
+    super(message, "UNAUTHORIZED", 401);
+    this.name = "UnauthorizedError";
+  }
+}
+
+export class ForbiddenError extends AuthError {
+  constructor(message: string = "Forbidden") {
+    super(message, "FORBIDDEN", 403);
+    this.name = "ForbiddenError";
+  }
+}
+
+export class ValidationError extends AuthError {
+  constructor(message: string, public field?: string) {
+    super(message, "VALIDATION_ERROR", 400);
+    this.name = "ValidationError";
+  }
+}
+
+// ===================================================================
+// CONTEXT TYPES
+// ===================================================================
+
+export interface AuthContext {
+  user?: User;
+  session?: Session;
+  permissions: string[];
+  roles: string[];
+  ability: AppAbility;
+  isAuthenticated: boolean;
+}
+
+export interface RequestContext {
+  requestId: string;
+  userAgent?: string;
+  ipAddress: string;
+  timestamp: Date;
+  path: string;
+  method: string;
+}
+
+// ===================================================================
+// MIDDLEWARE TYPES
+// ===================================================================
+
+export interface AuthMiddlewareOptions {
+  requireAuth?: boolean;
+  roles?: string[];
+  permissions?: string[];
+  resource?: Resource;
+  action?: Action;
+}
+
+export interface WebSocketAuthContext extends AuthContext {
+  connectionId: string;
+  subscriptions: string[];
+}
+
+// ===================================================================
+// MONITORING TYPES
+// ===================================================================
+
+export interface AuthMetrics {
+  // Authentication Events
+  loginAttempts: number;
+  loginSuccesses: number;
+  loginFailures: number;
+  registrations: number;
+  tokenRefreshes: number;
+  tokenRevocations: number;
+
+  // Security Events
+  bruteForceAttempts: number;
+  suspiciousActivities: number;
+  accountLockouts: number;
+  ipBlocks: number;
+
+  // Performance Metrics
+  averageResponseTime: number;
+  cacheHitRate: number;
+  errorRate: number;
+
+  // User Activity
+  activeUsers: number;
+  concurrentSessions: number;
+  apiKeyUsages: number;
+
+  // System Health
+  uptime: number;
+  memoryUsage: number;
+  redisConnections: number;
+}
+
+export interface MonitoringEvent {
+  type: string;
+  userId?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  timestamp: Date;
+  metadata?: Record<string, any>;
+  severity: "low" | "medium" | "high" | "critical";
+}
+
+export interface AlertRule {
+  id: string;
+  name: string;
+  condition: (metrics: AuthMetrics) => boolean;
+  severity: "warning" | "error" | "critical";
+  message: string;
+  cooldown: number; // minutes
+  lastTriggered?: Date;
+}
+
+// ===================================================================
+// CONFIGURATION VALIDATION TYPES
+// ===================================================================
+
+export interface ValidationResult {
+  isValid: boolean;
+  errors: ConfigValidationError[];
+  warnings: ValidationWarning[];
+}
+
+export interface ConfigValidationError {
+  field?: string;
+  message: string;
+  severity: "error" | "warning";
+  suggestion?: string;
+}
+
+export interface ValidationWarning {
+  field: string;
+  message: string;
+  suggestion?: string;
+}
+
+export interface ConfigValidationRule {
+  field: string;
+  required: boolean;
+  validator: (value: any, config: AuthConfig) => ConfigValidationError | null;
+  description: string;
+}
+
+// ===================================================================
+// CACHE TYPES
+// ===================================================================
+
+export interface PermissionCacheEntry {
+  permissions: string[];
+  roles: string[];
+  timestamp: number;
+  ttl: number;
+  hitCount: number;
+  lastAccessed: number;
+}
+
+export interface CacheStats {
+  totalEntries: number;
+  totalHits: number;
+  totalMisses: number;
+  hitRate: number;
+  averageAccessTime: number;
+  memoryUsage: number;
+}
+
+export interface CacheConfig {
+  defaultTtl: number;
+  maxEntries: number;
+  cleanupInterval: number;
+  enableStats: boolean;
+}
+
+// ===================================================================
+// THREAT DETECTION TYPES
+// ===================================================================
+
+export interface ThreatEvent {
+  id: string;
+  type:
+    | "brute_force"
+    | "suspicious_activity"
+    | "unusual_location"
+    | "rapid_requests";
+  severity: "low" | "medium" | "high" | "critical";
+  userId?: string;
+  ipAddress: string;
+  userAgent?: string;
+  metadata: Record<string, any>;
+  timestamp: Date;
+  resolved: boolean;
+  actions: ThreatAction[];
+}
+
+export interface ThreatAction {
+  type:
+    | "block_ip"
+    | "lock_account"
+    | "require_mfa"
+    | "log_only"
+    | "notify_admin";
+  timestamp: Date;
+  duration?: number; // in minutes
+  reason: string;
+}
+
+export interface AccountLockout {
+  userId: string;
+  reason: string;
+  lockoutUntil: Date;
+  failedAttempts: number;
+  lastAttempt: Date;
+  ipAddresses: string[];
+}
+
+export interface BruteForceAttempt {
+  ipAddress: string;
+  userId?: string;
+  attempts: number;
+  firstAttempt: Date;
+  lastAttempt: Date;
+  blocked: boolean;
+  blockExpires?: Date;
+}
+
+export interface ThreatDetectionConfig {
+  maxFailedAttempts: number;
+  lockoutDuration: number; // minutes
+  bruteForceWindow: number; // minutes
+  suspiciousActivityThreshold: number;
+  ipBlockDuration: number; // minutes
+  enableAutoLockout: boolean;
+  enableIPBlocking: boolean;
+  notifyOnThreat: boolean;
+}
+
+// ===================================================================
+// UTILITY TYPES
+// ===================================================================
+
+export type Optional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
+export type RequiredFields<T, K extends keyof T> = T & Required<Pick<T, K>>;
+export type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
+};

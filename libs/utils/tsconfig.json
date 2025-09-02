@@ -8,9 +8,8 @@
   },
   "references": [
     { "path": "../../libs/config" },
-    { "path": "../../libs/database" },
     { "path": "../../libs/monitoring" }
   ],
-  "include": ["src/**/*", "../database/src/cache/cache.service.ts"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules"]
 }

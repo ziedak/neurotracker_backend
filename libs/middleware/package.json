@@ -2,8 +2,8 @@
   "name": "@libs/middleware",
   "version": "1.0.0",
   "description": "Unified middleware library for backend services",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "../../dist/libs/middleware/index.js",
+  "types": "../../dist/libs/middleware/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc --watch",

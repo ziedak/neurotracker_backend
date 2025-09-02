@@ -20,10 +20,16 @@ import {
   type CacheStats,
   type ICache,
 } from "../interfaces/ICache";
+import {
+  CacheCompressor,
+  type CompressionConfig,
+  DEFAULT_COMPRESSION_CONFIG,
+} from "../utils/CacheCompressor";
 
 export interface RedisCacheConfig extends CacheConfig {
   readonly compressionThreshold: number; // bytes
   readonly batchInvalidationSize: number;
+  readonly compressionConfig?: Partial<CompressionConfig>; // Compression config
 }
 
 export const DEFAULT_REDIS_CACHE_CONFIG: RedisCacheConfig = {
@@ -31,6 +37,7 @@ export const DEFAULT_REDIS_CACHE_CONFIG: RedisCacheConfig = {
   defaultTTL: 3600, // 1 hour
   compressionThreshold: 1024, // 1KB
   batchInvalidationSize: 100,
+  compressionConfig: DEFAULT_COMPRESSION_CONFIG,
 };
 
 /**
@@ -39,6 +46,7 @@ export const DEFAULT_REDIS_CACHE_CONFIG: RedisCacheConfig = {
 @injectable()
 export class RedisCache implements ICache {
   private readonly config: RedisCacheConfig;
+  private readonly compressor: CacheCompressor;
   private stats: CacheStats = { ...DEFAULT_CACHE_STATS };
 
   constructor(
@@ -48,6 +56,12 @@ export class RedisCache implements ICache {
   ) {
     this.config = { ...DEFAULT_REDIS_CACHE_CONFIG, ...config };
     this.logger = logger.child({ service: "RedisCache" });
+
+    // Initialize compressor
+    this.compressor = new CacheCompressor(
+      this.logger,
+      this.config.compressionConfig
+    );
   }
 
   isEnabled(): boolean {
@@ -203,10 +217,22 @@ export class RedisCache implements ICache {
     try {
       const entry: CacheEntry<T> = JSON.parse(rawData);
 
-      // Check if data was compressed
-      if (entry.compressed && typeof entry.data === "string") {
-        entry.data = JSON.parse(entry.data) as T;
-        entry.compressed = false; // Decompressed for return
+      // Decompress data if it was compressed
+      if (entry.compressed && entry.compressionAlgorithm) {
+        try {
+          entry.data = await this.compressor.decompress(
+            entry.data,
+            entry.compressionAlgorithm as any
+          );
+          entry.compressed = false; // Mark as decompressed
+        } catch (error) {
+          this.logger.warn("Failed to decompress Redis cache entry", {
+            key,
+            algorithm: entry.compressionAlgorithm,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          // Return raw data as fallback
+        }
       }
 
       return entry;
@@ -229,25 +255,43 @@ export class RedisCache implements ICache {
     data: T,
     ttl: number
   ): Promise<void> {
+    // Compress data if enabled and meets threshold
+    let finalData = data;
+    let compressed = false;
+    let compressionAlgorithm: string | undefined;
+
+    if (this.config.compressionConfig?.enableCompression) {
+      try {
+        const compressionResult = await this.compressor.compress(data);
+        if (compressionResult.compressed) {
+          finalData = compressionResult.data;
+          compressed = true;
+          compressionAlgorithm = compressionResult.algorithm;
+          this.stats.compressions++;
+        }
+      } catch (error) {
+        this.logger.warn(
+          "Redis compression failed, storing uncompressed data",
+          {
+            key,
+            error: error instanceof Error ? error.message : String(error),
+          }
+        );
+      }
+    }
+
     const entry: CacheEntry<T> = {
-      data,
+      data: finalData,
       timestamp: Date.now(),
       ttl,
       hits: 0,
-      compressed: false,
+      compressed,
+      ...(compressionAlgorithm && { compressionAlgorithm }),
     };
 
-    let serializedData = JSON.stringify(entry);
-
-    // Compress large entries
-    if (serializedData.length > this.config.compressionThreshold) {
-      entry.data = JSON.stringify(data) as any; // Store as compressed string
-      entry.compressed = true;
-      serializedData = JSON.stringify(entry);
-      this.stats.compressions++;
-    }
-
+    const serializedData = JSON.stringify(entry);
     const redisKey = this.getRedisKey(key);
+
     // RedisClient.safeSetEx already has retry logic built-in
     await this.redis.safeSetEx(redisKey, ttl, serializedData);
   }
@@ -257,5 +301,26 @@ export class RedisCache implements ICache {
    */
   getStats(): CacheStats {
     return { ...this.stats };
+  }
+
+  /**
+   * Get compression statistics
+   */
+  getCompressionStats(): any {
+    return this.compressor.getCompressionStats();
+  }
+
+  /**
+   * Get compression configuration
+   */
+  getCompressionConfig(): CompressionConfig {
+    return this.compressor.getConfig();
+  }
+
+  /**
+   * Update compression configuration
+   */
+  updateCompressionConfig(newConfig: Partial<CompressionConfig>): void {
+    this.compressor.updateConfig(newConfig);
   }
 }

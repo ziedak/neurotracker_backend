@@ -1,0 +1,28 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "../../dist/libs/authv2",
+    "tsBuildInfoFile": "../../dist/libs/authv2/tsconfig.tsbuildinfo",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true
+  },
+  "references": [
+    { "path": "../../libs/utils" },
+    { "path": "../../libs/config" },
+    { "path": "../../libs/database" },
+    { "path": "../../libs/monitoring" }
+  ],
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "tests", "dist", "**/*.test.ts", "**/*.spec.ts"]
+}

@@ -23,10 +23,17 @@ import {
   MemoryTracker,
   type MemoryTrackerConfig,
 } from "../utils/MemoryTracker";
+import {
+  CacheCompressor,
+  type CompressionAlgorithm,
+  type CompressionConfig,
+  DEFAULT_COMPRESSION_CONFIG,
+} from "../utils/CacheCompressor";
 
 export interface MemoryCacheConfig extends CacheConfig {
   readonly maxMemoryCacheSize: number; // entries (for LRU limit)
   readonly memoryConfig?: Partial<MemoryTrackerConfig>; // Memory management config
+  readonly compressionConfig?: Partial<CompressionConfig>; // Compression config
 }
 
 export const DEFAULT_MEMORY_CACHE_CONFIG: MemoryCacheConfig = {
@@ -40,6 +47,7 @@ export const DEFAULT_MEMORY_CACHE_CONFIG: MemoryCacheConfig = {
     enableDetailedTracking: true,
     sizeCalculationInterval: 50,
   },
+  compressionConfig: DEFAULT_COMPRESSION_CONFIG,
 };
 
 /**
@@ -50,6 +58,7 @@ export class MemoryCache implements ICache {
   private readonly config: MemoryCacheConfig;
   private readonly memoryCache: LRUCache<string, CacheEntry<unknown>>;
   private readonly memoryTracker: MemoryTracker;
+  private readonly compressor: CacheCompressor;
   private stats: CacheStats = { ...DEFAULT_CACHE_STATS };
 
   constructor(
@@ -65,6 +74,12 @@ export class MemoryCache implements ICache {
       this.config.memoryConfig
     );
 
+    // Initialize compressor
+    this.compressor = new CacheCompressor(
+      this.logger,
+      this.config.compressionConfig
+    );
+
     // Use LRUCache properly - it handles all LRU logic internally
     this.memoryCache = new LRUCache<string, CacheEntry<unknown>>({
       max: this.config.maxMemoryCacheSize,
@@ -74,6 +89,7 @@ export class MemoryCache implements ICache {
     this.logger.info("MemoryCache initialized", {
       maxEntries: this.config.maxMemoryCacheSize,
       memoryLimitMB: this.config.memoryConfig?.maxMemoryMB || 50,
+      compressionEnabled: this.config.compressionConfig?.enableCompression,
     });
   }
   isEnabled(): boolean {
@@ -90,8 +106,29 @@ export class MemoryCache implements ICache {
       const entry = this.memoryCache.get(key);
       if (entry) {
         this.stats.Hits++;
+
+        // Decompress data if it was compressed
+        let data = entry.data;
+        if (entry.compressed) {
+          try {
+            data = await this.compressor.decompress(
+              entry.data,
+              entry.compressionAlgorithm as CompressionAlgorithm | undefined
+            );
+          } catch (error) {
+            this.logger.warn(
+              "Failed to decompress cache entry, returning raw data",
+              {
+                key,
+                error: error instanceof Error ? error.message : String(error),
+              }
+            );
+            // Return raw data as fallback
+          }
+        }
+
         return {
-          data: entry.data as T,
+          data: data as T,
           source: "l1",
           latency: performance.now() - startTime,
           compressed: entry.compressed,
@@ -117,8 +154,30 @@ export class MemoryCache implements ICache {
     ttl: number = this.config.defaultTTL
   ): Promise<void> {
     if (this.config.enable) {
+      // Compress data if enabled and meets threshold
+      let finalData = data;
+      let compressed = false;
+      let compressionAlgorithm: string | undefined;
+
+      if (this.config.compressionConfig?.enableCompression) {
+        try {
+          const compressionResult = await this.compressor.compress(data);
+          if (compressionResult.compressed) {
+            finalData = compressionResult.data;
+            compressed = true;
+            compressionAlgorithm = compressionResult.algorithm;
+            this.stats.compressions++;
+          }
+        } catch (error) {
+          this.logger.warn("Compression failed, storing uncompressed data", {
+            key,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
       // Check memory limits before adding
-      if (!this.checkMemoryLimits(key, data)) {
+      if (!this.checkMemoryLimits(key, finalData)) {
         this.logger.warn("Memory limit exceeded, skipping cache set", {
           key,
           currentUsage: this.memoryTracker.getMemoryUsagePercent(),
@@ -128,11 +187,12 @@ export class MemoryCache implements ICache {
       }
 
       const entry: CacheEntry<T> = {
-        data,
+        data: finalData,
         timestamp: Date.now(),
         ttl,
         hits: 0,
-        compressed: false,
+        compressed,
+        ...(compressionAlgorithm && { compressionAlgorithm }),
       };
 
       // Track memory usage before setting
@@ -141,14 +201,18 @@ export class MemoryCache implements ICache {
         ttl: entry.ttl,
         hits: entry.hits,
         compressed: entry.compressed,
+        compressionAlgorithm: entry.compressionAlgorithm,
       };
-      this.memoryTracker.trackEntry(key, data, metadata);
+      this.memoryTracker.trackEntry(key, finalData, metadata);
 
       this.memoryCache.set(key, entry);
       this.updateMemoryStats();
+
       this.logger.debug("Memory cache entry set", {
         key,
         ttl,
+        compressed,
+        compressionAlgorithm,
         memoryUsage: this.memoryTracker.getTotalMemoryUsageMB(),
       });
     }
@@ -239,10 +303,24 @@ export class MemoryCache implements ICache {
   }
 
   /**
-   * Update memory tracker configuration
+   * Get compression statistics
    */
-  updateMemoryConfig(newConfig: Partial<MemoryTrackerConfig>): void {
-    this.memoryTracker.updateConfig(newConfig);
+  getCompressionStats(): any {
+    return this.compressor.getCompressionStats();
+  }
+
+  /**
+   * Get compression configuration
+   */
+  getCompressionConfig(): CompressionConfig {
+    return this.compressor.getConfig();
+  }
+
+  /**
+   * Update compression configuration
+   */
+  updateCompressionConfig(newConfig: Partial<CompressionConfig>): void {
+    this.compressor.updateConfig(newConfig);
   }
 
   /**

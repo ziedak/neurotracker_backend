@@ -12,6 +12,9 @@
     "db:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@libs/monitoring": "workspace:*",
+    "@libs/utils": "workspace:*",
+    "@libs/config": "workspace:*",
     "@clickhouse/client": "^1.12.1",
     "@prisma/client": "^6.15.0",
     "@prisma/extension-accelerate": "^2.0.2",

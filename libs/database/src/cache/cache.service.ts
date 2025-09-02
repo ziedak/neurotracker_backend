@@ -4,8 +4,10 @@
  *
  * This service provides:
  * - Multi-level caching (L1: memory, L2: Redis, L3: database)
- * - Cache warming and invalidation strategies
+ * - Cache warming strategies
+ * - Intelligent invalidation strategies
  * - Performance monitoring and hit rate optimization
+ * - Memory management and compression support
  */
 
 import { RedisClient } from "@libs/database";
@@ -69,8 +71,8 @@ export class CacheService implements ICache {
     this.logger = logger.child({ service: "CacheService" });
 
     this.caches = caches || [
-      new MemoryCache(this.config),
-      new RedisCache(this.config),
+      new MemoryCache(this.logger, this.config),
+      new RedisCache(this.logger, this.redis, this.config),
     ];
 
     // Initialize warming components
@@ -221,9 +223,9 @@ export class CacheService implements ICache {
   }
 
   /**
-   * Cache health check
+   * Cache health check - aggregates health from all caches
    */
-  async healthCheck(): Promise<CacheHealth[]> {
+  async healthCheck(): Promise<CacheHealth> {
     const healthChecks: CacheHealth[] = [];
 
     for (let idx = 0; idx < this.caches.length; idx++) {
@@ -234,7 +236,41 @@ export class CacheService implements ICache {
       healthChecks.push(health);
     }
 
-    return healthChecks;
+    // If no caches are available, return critical status
+    if (healthChecks.length === 0) {
+      return {
+        status: "critical",
+        capacity: "error",
+        hitRate: 0,
+        entryCount: 0,
+      };
+    }
+
+    // Aggregate health metrics from all caches
+    const totalEntries = healthChecks.reduce((sum, h) => sum + h.entryCount, 0);
+    const avgHitRate =
+      healthChecks.reduce((sum, h) => sum + h.hitRate, 0) / healthChecks.length;
+
+    // Determine overall status - worst case wins
+    const worstStatus = healthChecks.some((h) => h.status === "critical")
+      ? "critical"
+      : healthChecks.some((h) => h.status === "degraded")
+      ? "degraded"
+      : "healthy";
+
+    // Determine overall capacity - worst case wins
+    const worstCapacity = healthChecks.some((h) => h.capacity === "error")
+      ? "error"
+      : healthChecks.some((h) => h.capacity === "full")
+      ? "full"
+      : "ok";
+
+    return {
+      status: worstStatus,
+      capacity: worstCapacity,
+      hitRate: avgHitRate,
+      entryCount: totalEntries,
+    };
   }
 
   /**
