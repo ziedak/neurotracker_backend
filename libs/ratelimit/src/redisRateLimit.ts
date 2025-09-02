@@ -1,6 +1,12 @@
 import { RedisClient } from "@libs/database";
 import { ILogger } from "@libs/monitoring";
+import { ConsecutiveBreaker } from "@libs/utils";
 import * as crypto from "crypto";
+import {
+  CompleteRateLimitConfig,
+  RateLimitConfigManager,
+  Environment,
+} from "./config/rateLimitConfig";
 
 /**
  * Security-related error classes
@@ -42,11 +48,23 @@ interface RedisConfig {
 }
 
 /**
+ * Circuit breaker configuration
+ */
+interface CircuitBreakerConfig {
+  enabled?: boolean;
+  failureThreshold?: number;
+  recoveryTimeout?: number;
+  monitoringPeriod?: number;
+  name?: string;
+}
+
+/**
  * Rate limit configuration
  */
 export interface RateLimitConfig {
   algorithm?: RateLimitAlgorithm;
   redis?: RedisConfig;
+  circuitBreaker?: CircuitBreakerConfig;
 }
 
 /**
@@ -77,9 +95,10 @@ export interface RateLimitResult {
  * - Strict type checking and error handling
  */
 export class OptimizedRedisRateLimit {
-  private readonly keyPrefix: string;
-  private readonly ttlBuffer: number;
-  private readonly algorithm: RateLimitAlgorithm;
+  protected readonly keyPrefix: string;
+  protected readonly ttlBuffer: number;
+  protected readonly algorithm: RateLimitAlgorithm;
+  protected readonly circuitBreaker?: any; // CircuitBreakerPolicy from cockatiel
 
   // Security: Script management for EVALSHA
   private readonly scriptShas = new Map<string, string>();
@@ -186,18 +205,119 @@ export class OptimizedRedisRateLimit {
 
   constructor(
     config: RateLimitConfig,
-    private redisClient: RedisClient,
-    private readonly logger: ILogger
+    protected redisClient: RedisClient,
+    protected readonly logger: ILogger
   ) {
     this.logger = logger.child({ component: "OptimizedRedisRateLimit" });
     this.keyPrefix = config.redis?.keyPrefix || "rate_limit";
     this.ttlBuffer = config.redis?.ttlBuffer || 10;
     this.algorithm = config.algorithm || "sliding-window";
 
+    // Initialize circuit breaker if enabled
+    if (config.circuitBreaker?.enabled) {
+      this.circuitBreaker = new ConsecutiveBreaker(
+        config.circuitBreaker.failureThreshold || 5
+      );
+
+      this.logger.info("Circuit breaker enabled", {
+        failureThreshold: config.circuitBreaker.failureThreshold,
+        recoveryTimeout: config.circuitBreaker.recoveryTimeout,
+        name: config.circuitBreaker.name || "rate-limiter",
+      });
+    }
+
     // Initialize scripts on construction
     this.initializeScripts().catch((error) => {
       this.logger.error("Failed to initialize Lua scripts", error);
     });
+  }
+
+  /**
+   * Enhanced factory method for production environments
+   * Uses comprehensive configuration management
+   */
+  static createFromEnvironment(
+    environment: Environment | string,
+    redisClient: RedisClient,
+    logger: ILogger,
+    customConfig?: Partial<CompleteRateLimitConfig>
+  ): OptimizedRedisRateLimit {
+    // Validate environment
+    if (!RateLimitConfigManager.isValidEnvironment(environment)) {
+      throw new Error(
+        `Invalid environment: ${environment}. Must be one of: ${RateLimitConfigManager.getAvailableEnvironments().join(
+          ", "
+        )}`
+      );
+    }
+
+    const completeConfig = customConfig
+      ? RateLimitConfigManager.createCustomConfig({
+          environment: environment as Environment,
+          ...customConfig,
+        })
+      : RateLimitConfigManager.getConfig(environment as Environment);
+
+    // Convert to legacy format for backward compatibility
+    const legacyConfig: RateLimitConfig = {};
+
+    // Add algorithm if present
+    if (completeConfig.algorithm !== undefined) {
+      legacyConfig.algorithm = completeConfig.algorithm;
+    }
+
+    // Add redis config if present
+    if (completeConfig.redis) {
+      legacyConfig.redis = {};
+      if (completeConfig.redis.keyPrefix !== undefined) {
+        legacyConfig.redis.keyPrefix = completeConfig.redis.keyPrefix;
+      }
+      if (completeConfig.redis.ttlBuffer !== undefined) {
+        legacyConfig.redis.ttlBuffer = completeConfig.redis.ttlBuffer;
+      }
+    }
+
+    // Add circuit breaker config if present
+    if (completeConfig.circuitBreaker) {
+      legacyConfig.circuitBreaker = {};
+      if (completeConfig.circuitBreaker.enabled !== undefined) {
+        legacyConfig.circuitBreaker.enabled =
+          completeConfig.circuitBreaker.enabled;
+      }
+      if (completeConfig.circuitBreaker.failureThreshold !== undefined) {
+        legacyConfig.circuitBreaker.failureThreshold =
+          completeConfig.circuitBreaker.failureThreshold;
+      }
+      if (completeConfig.circuitBreaker.recoveryTimeout !== undefined) {
+        legacyConfig.circuitBreaker.recoveryTimeout =
+          completeConfig.circuitBreaker.recoveryTimeout;
+      }
+      if (completeConfig.circuitBreaker.monitoringPeriod !== undefined) {
+        legacyConfig.circuitBreaker.monitoringPeriod =
+          completeConfig.circuitBreaker.monitoringPeriod;
+      }
+      if (completeConfig.circuitBreaker.name !== undefined) {
+        legacyConfig.circuitBreaker.name = completeConfig.circuitBreaker.name;
+      }
+    }
+
+    const instance = new OptimizedRedisRateLimit(
+      legacyConfig,
+      redisClient,
+      logger
+    );
+
+    // Store complete config for advanced features
+    (instance as any)._completeConfig = completeConfig;
+
+    return instance;
+  }
+
+  /**
+   * Get complete configuration if available
+   */
+  getCompleteConfig(): CompleteRateLimitConfig | undefined {
+    return (this as any)._completeConfig;
   }
 
   /**
@@ -227,7 +347,7 @@ export class OptimizedRedisRateLimit {
   }
 
   /**
-   * Execute Lua script securely using EVALSHA
+   * Execute Lua script securely using EVALSHA with circuit breaker protection
    */
   private async executeScript(
     scriptName: keyof typeof this.SCRIPTS,
@@ -243,7 +363,8 @@ export class OptimizedRedisRateLimit {
       throw new SecurityError(`Script ${scriptName} not loaded`);
     }
 
-    try {
+    // Wrap Redis operation with circuit breaker if enabled
+    const redisOperation = async () => {
       const redis = this.redisClient.getRedis();
       const result = (await redis.evalsha(
         sha,
@@ -257,6 +378,14 @@ export class OptimizedRedisRateLimit {
       }
 
       return result;
+    };
+
+    try {
+      if (this.circuitBreaker) {
+        return await this.circuitBreaker.execute(redisOperation);
+      } else {
+        return await redisOperation();
+      }
     } catch (error: any) {
       if (error.message?.includes("NOSCRIPT")) {
         // Script not cached in Redis, reinitialize
@@ -267,13 +396,21 @@ export class OptimizedRedisRateLimit {
           throw new SecurityError(`Script ${scriptName} reload failed`);
         }
 
-        const redis = this.redisClient.getRedis();
-        return (await redis.evalsha(
-          newSha,
-          keys.length,
-          ...keys,
-          ...args
-        )) as number[];
+        const redisOperationRetry = async () => {
+          const redis = this.redisClient.getRedis();
+          return (await redis.evalsha(
+            newSha,
+            keys.length,
+            ...keys,
+            ...args
+          )) as number[];
+        };
+
+        if (this.circuitBreaker) {
+          return await this.circuitBreaker.execute(redisOperationRetry);
+        } else {
+          return await redisOperationRetry();
+        }
       }
 
       this.logger.error(`Script execution failed: ${scriptName}`, error);
@@ -477,6 +614,40 @@ export class OptimizedRedisRateLimit {
       default:
         return "SLIDING_WINDOW";
     }
+  }
+
+  /**
+   * Get circuit breaker status
+   */
+  getCircuitBreakerStatus(): { enabled: boolean; state?: string } {
+    if (!this.circuitBreaker) {
+      return { enabled: false };
+    }
+
+    return {
+      enabled: true,
+      state: String(this.circuitBreaker.state),
+    };
+  }
+
+  /**
+   * Get health status including circuit breaker
+   */
+  async getHealth(): Promise<any> {
+    const circuitBreakerStatus = this.getCircuitBreakerStatus();
+
+    return {
+      redis: {
+        available: !!this.redisClient,
+        scriptsInitialized: this.scriptsInitialized,
+      },
+      circuitBreaker: circuitBreakerStatus,
+      algorithm: this.algorithm,
+      config: {
+        keyPrefix: this.keyPrefix,
+        ttlBuffer: this.ttlBuffer,
+      },
+    };
   }
 
   /**

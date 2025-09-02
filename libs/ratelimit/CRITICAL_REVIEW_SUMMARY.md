@@ -5,11 +5,13 @@
 **The `src/index.ts` file is currently exporting the old, insecure `RedisRateLimit` instead of the optimized, secure `OptimizedRedisRateLimit`.**
 
 ### Current (DANGEROUS):
+
 ```typescript
 export * from "./RedisRateLimit"; // ❌ Uses redis.eval() - VULNERABLE
 ```
 
 ### Must Change To (SECURE):
+
 ```typescript
 export * from "./OptimizedRedisRateLimit"; // ✅ Uses redis.evalsha() - SECURE
 ```
@@ -50,8 +52,9 @@ export * from "./OptimizedRedisRateLimit"; // ✅ Uses redis.evalsha() - SECURE
 **Status**: ❌ **ZERO TESTS** - Critical gap for security component
 
 **Required Test Categories**:
+
 - Security validation tests
-- Algorithm accuracy tests  
+- Algorithm accuracy tests
 - Performance regression tests
 - Integration tests with Redis
 - Error handling tests
@@ -65,6 +68,7 @@ export * from "./OptimizedRedisRateLimit"; // ✅ Uses redis.evalsha() - SECURE
 **Missing**: Integration with existing monitoring systems
 
 **Should Integrate With**:
+
 - `@libs/monitoring` for metrics collection
 - Health check endpoints
 - Alert system for rate limit breaches

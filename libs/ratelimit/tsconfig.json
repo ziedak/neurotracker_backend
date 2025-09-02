@@ -11,6 +11,10 @@
     { "path": "../../libs/config" },
     { "path": "../../libs/database" }
   ],
-  "include": ["src/**/*.ts"],
-  "exclude": ["dist", "node_modules", "**/*.test.ts", "**/*.spec.ts"]
+  "include": [
+    "src/**/*.ts",
+    "tests/redisRateLimit.test.ts",
+    "tests/test-setup.ts"
+  ],
+  "exclude": ["dist", "node_modules", "tests", "**/*.test.ts", "**/*.spec.ts"]
 }
