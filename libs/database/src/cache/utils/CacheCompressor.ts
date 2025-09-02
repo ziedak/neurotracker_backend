@@ -1,10 +1,12 @@
 /**
  * Cache Compression Utilities
  * Provides compression and decompression for cache entries
+ * Updated with production-grade compression implementation
  */
 
 import { type ILogger } from "@libs/monitoring";
 import { inject } from "@libs/utils";
+import { CompressionEngine } from "./CompressionEngine";
 
 /**
  * Compression algorithm types
@@ -63,7 +65,7 @@ export interface CompressionResult {
 }
 
 /**
- * Cache compression utility
+ * Cache compression utility with production-grade implementation
  */
 export class CacheCompressor {
   private config: CompressionConfig;
@@ -76,6 +78,7 @@ export class CacheCompressor {
     decompressionErrors: 0,
   };
   private logger: ILogger;
+  private compressionEngine: CompressionEngine;
 
   constructor(
     @inject("ILogger") logger: ILogger,
