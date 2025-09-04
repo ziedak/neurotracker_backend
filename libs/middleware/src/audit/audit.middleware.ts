@@ -1,21 +1,21 @@
 import { RedisClient, ClickHouseClient } from "@libs/database";
-import { Logger, MetricsCollector } from "@libs/monitoring";
+import { Logger, MetricsCollector, type ILogger } from "@libs/monitoring";
 
 export interface AuditEvent {
-  id?: string;
-  userId?: string;
-  sessionId?: string;
+  id?: string | undefined;
+  userId?: string | undefined;
+  sessionId?: string | undefined;
   action: string;
   resource: string;
-  resourceId?: string;
+  resourceId?: string | undefined;
   ip: string;
   userAgent: string;
   timestamp: Date;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, any> | undefined;
   result: "success" | "failure" | "partial";
-  statusCode?: number;
-  duration?: number;
-  error?: string;
+  statusCode?: number | undefined;
+  duration?: number | undefined;
+  error?: string | undefined;
 }
 
 export interface AuditQuery {
@@ -58,7 +58,6 @@ export interface AuditConfig {
  */
 export class AuditMiddleware {
   private readonly redis: RedisClient;
-  private readonly clickhouse: ClickHouseClient;
   private readonly logger: ILogger;
   private readonly metrics: MetricsCollector;
   private readonly defaultConfig: AuditConfig = {
@@ -70,6 +69,7 @@ export class AuditMiddleware {
     redisTtl: 7 * 24 * 3600, // 7 days
     maxBodySize: 1024 * 10, // 10KB
   };
+  clickhouse: ClickHouseClient;
 
   constructor(
     redis: RedisClient,
@@ -139,13 +139,14 @@ export class AuditMiddleware {
       }
 
       // Generate audit event base
+      const resourceId = this.extractResourceId(request);
       const auditEvent: Partial<AuditEvent> = {
         id: this.generateAuditId(),
         userId: context.user?.id,
         sessionId: context.session?.id,
         action: this.extractAction(request),
         resource: this.extractResource(request),
-        resourceId: this.extractResourceId(request),
+        ...(typeof resourceId === "string" ? { resourceId } : {}),
         ip: request.ip || "unknown",
         userAgent: request.headers["user-agent"] || "unknown",
         timestamp: new Date(),
@@ -187,7 +188,7 @@ export class AuditMiddleware {
 
         // Add response data if needed
         if (responseData) {
-          auditEvent.metadata!.response = responseData;
+          auditEvent.metadata!["response"] = responseData;
         }
 
         // Log the audit event
@@ -327,7 +328,7 @@ export class AuditMiddleware {
         finalConfig.storageStrategy === "redis" ||
         finalConfig.storageStrategy === "both"
       ) {
-        const redisClient = RedisClient.getInstance();
+        const redisClient = this.redis.getRedis();
         const redisKey = `audit:${event.id}`;
         await redisClient.setex(
           redisKey,
@@ -394,49 +395,49 @@ export class AuditMiddleware {
 
       if (query.userId) {
         sql += " AND user_id = {userId:String}";
-        queryParams.userId = query.userId;
+        queryParams["userId"] = query.userId;
       }
 
       if (query.action) {
         sql += " AND action = {action:String}";
-        queryParams.action = query.action;
+        queryParams["action"] = query.action;
       }
 
       if (query.resource) {
         sql += " AND resource = {resource:String}";
-        queryParams.resource = query.resource;
+        queryParams["resource"] = query.resource;
       }
 
       if (query.result) {
         sql += " AND result = {result:String}";
-        queryParams.result = query.result;
+        queryParams["result"] = query.result;
       }
 
       if (query.ip) {
         sql += " AND ip = {ip:String}";
-        queryParams.ip = query.ip;
+        queryParams["ip"] = query.ip;
       }
 
       if (query.startDate) {
         sql += " AND timestamp >= {startDate:DateTime}";
-        queryParams.startDate = query.startDate.toISOString();
+        queryParams["startDate"] = query.startDate.toISOString();
       }
 
       if (query.endDate) {
         sql += " AND timestamp <= {endDate:DateTime}";
-        queryParams.endDate = query.endDate.toISOString();
+        queryParams["endDate"] = query.endDate.toISOString();
       }
 
       sql += " ORDER BY timestamp DESC";
 
       if (query.limit) {
         sql += " LIMIT {limit:UInt32}";
-        queryParams.limit = query.limit;
+        queryParams["limit"] = query.limit;
       }
 
       if (query.offset) {
         sql += " OFFSET {offset:UInt32}";
-        queryParams.offset = query.offset;
+        queryParams["offset"] = query.offset;
       }
 
       const rows = await ClickHouseClient.execute(sql, queryParams);
@@ -731,10 +732,12 @@ export class AuditMiddleware {
 /**
  * Factory function for easy middleware creation
  */
-export function createAuditMiddleware(config?: Partial<AuditConfig>) {
-  const redis = RedisClient.getInstance();
+export function createAuditMiddleware(
+  redis: RedisClient,
+  config?: Partial<AuditConfig>
+) {
   const clickhouse = ClickHouseClient.getInstance();
-  const logger = Logger.getInstance("Shared Audit Middleware");
+  const logger = new Logger({ service: "Shared Audit Middleware" });
   const metrics = MetricsCollector.getInstance();
 
   const middleware = new AuditMiddleware(redis, clickhouse, logger, metrics);

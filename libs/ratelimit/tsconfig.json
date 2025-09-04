@@ -9,12 +9,16 @@
   "references": [
     { "path": "../../libs/utils" },
     { "path": "../../libs/config" },
-    { "path": "../../libs/database" }
+    { "path": "../../libs/database" },
+    { "path": "../../libs/cache" }
   ],
-  "include": [
-    "src/**/*.ts",
-    "tests/redisRateLimit.test.ts",
-    "tests/test-setup.ts"
-  ],
-  "exclude": ["dist", "node_modules", "tests", "**/*.test.ts", "**/*.spec.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "dist",
+    "node_modules",
+    "tests",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "src/_archive/**/*"
+  ]
 }

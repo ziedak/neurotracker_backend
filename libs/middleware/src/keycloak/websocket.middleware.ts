@@ -5,7 +5,6 @@
  * for WebSocket connections with real-time token validation and role-based access control.
  */
 
-import { BaseWebSocketMiddleware } from "../websocket/BaseWebSocketMiddleware";
 import { WebSocketContext, WebSocketMiddlewareFunction } from "../types";
 import { ILogger, MetricsCollector } from "@libs/monitoring";
 import { RedisClient } from "@libs/database";
@@ -17,6 +16,7 @@ import {
   KeycloakError,
   KeycloakErrorType,
 } from "./types";
+import { BaseWebSocketMiddleware } from "../base/BaseWebSocketMiddleware";
 
 /**
  * Extended WebSocket context with Keycloak authentication data

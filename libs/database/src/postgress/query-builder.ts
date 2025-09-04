@@ -1,4 +1,4 @@
-import { Prisma, CartStatus } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 /**
  * Secure Query Builder for type-safe database operations
@@ -213,46 +213,41 @@ export class CartQueryBuilder extends QueryBuilder {
   /**
    * Build safe cart query conditions
    */
-  static buildCartWhere(filters: {
-    userId?: string;
-    status?: string[];
-    dateFrom?: string;
-    dateTo?: string;
-    minTotal?: number;
-    maxTotal?: number;
-  }): Prisma.CartWhereInput {
-    const where: Prisma.CartWhereInput = {};
-
-    if (filters.userId) {
-      where.userId = this.sanitizeString(filters.userId);
-    }
-
-    if (filters.status?.length) {
-      // Use CartStatus enum for type safety
-      where.status = {
-        in: this.sanitizeArray(filters.status) as CartStatus[],
-      };
-    }
-
-    if (filters.dateFrom || filters.dateTo) {
-      Object.assign(
-        where,
-        this.buildDateRange("createdAt", filters.dateFrom, filters.dateTo)
-      );
-    }
-
-    if (filters.minTotal !== undefined || filters.maxTotal !== undefined) {
-      where.total = {};
-      if (filters.minTotal !== undefined) {
-        where.total.gte = Number(filters.minTotal);
-      }
-      if (filters.maxTotal !== undefined) {
-        where.total.lte = Number(filters.maxTotal);
-      }
-    }
-
-    return where;
-  }
+  // static buildCartWhere(filters: {
+  //   userId?: string;
+  //   status?: string[];
+  //   dateFrom?: string;
+  //   dateTo?: string;
+  //   minTotal?: number;
+  //   maxTotal?: number;
+  // }): Prisma.CartWhereInput {
+  //   const where: Prisma.CartWhereInput = {};
+  //   if (filters.userId) {
+  //     where.userId = this.sanitizeString(filters.userId);
+  //   }
+  //   if (filters.status?.length) {
+  //     // Use CartStatus enum from Prisma for type safety
+  //     where.status = {
+  //       in: this.sanitizeArray(filters.status) as Prisma.CartStatus[],
+  //     };
+  //   }
+  //   if (filters.dateFrom || filters.dateTo) {
+  //     Object.assign(
+  //       where,
+  //       this.buildDateRange("createdAt", filters.dateFrom, filters.dateTo)
+  //     );
+  //   }
+  //   if (filters.minTotal !== undefined || filters.maxTotal !== undefined) {
+  //     where.total = {};
+  //     if (filters.minTotal !== undefined) {
+  //       where.total.gte = Number(filters.minTotal);
+  //     }
+  //     if (filters.maxTotal !== undefined) {
+  //       where.total.lte = Number(filters.maxTotal);
+  //     }
+  //   }
+  //   return where;
+  // }
 }
 
 /**

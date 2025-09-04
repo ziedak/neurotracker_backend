@@ -1,8 +1,8 @@
 {
   "name": "@libs/ratelimit",
   "version": "1.0.0",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "../../dist/libs/ratelimit/index.js",
+  "types": "../../dist/libs/ratelimit/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc --watch",
@@ -13,6 +13,7 @@
     "lint:fix": "eslint src/**/*.ts --fix"
   },
   "dependencies": {
+    "@libs/cache": "workspace:*",
     "@libs/database": "workspace:*",
     "@libs/monitoring": "workspace:*",
     "@libs/utils": "workspace:*"

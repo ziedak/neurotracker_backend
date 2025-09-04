@@ -8,6 +8,7 @@
   },
   "references": [
     { "path": "../../libs/config" },
+    { "path": "../../libs/cache" },
     { "path": "../../libs/database" },
     { "path": "../../libs/monitoring" },
     { "path": "../../libs/messaging" },
@@ -15,5 +16,11 @@
     { "path": "../../libs/ratelimit" }
   ],
   "include": ["src"],
-  "exclude": ["dist", "node_modules", "**/*.test.ts", "**/*.spec.ts"]
+  "exclude": [
+    "dist",
+    "node_modules",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "src/_archive/**/*"
+  ]
 }

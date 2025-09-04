@@ -190,7 +190,42 @@ export class KeycloakConfigManager {
     config: Partial<KeycloakConfig>
   ): Promise<KeycloakConfig> {
     try {
-      return KeycloakConfigSchema.parse(config);
+      const parsed = KeycloakConfigSchema.parse(config);
+      // Ensure all optional properties are present (even if undefined)
+      const requiredOptionals: (keyof KeycloakConfig)[] = [
+        "clientSecret",
+        "publicKey",
+        "jwksUri",
+        "rolesClaim",
+        "usernameClaim",
+        "emailClaim",
+        "groupsClaim",
+        "skipPaths",
+        "requireAuth",
+        "cacheTTL",
+        "enableUserInfoEndpoint",
+        "verifyTokenLocally",
+        "connectTimeout",
+        "readTimeout",
+        "maxRetries",
+        "retryDelay",
+        "circuitBreakerThreshold",
+        "circuitBreakerResetTimeout",
+        "enableMetrics",
+        "logLevel",
+        "trustedProxies",
+        "corsOrigins",
+      ];
+      for (const key of requiredOptionals) {
+        if (!Object.prototype.hasOwnProperty.call(parsed, key)) {
+          (parsed as any)[key] = undefined;
+        }
+      }
+      // Explicitly ensure clientSecret is present as undefined if missing
+      if (!("clientSecret" in parsed)) {
+        (parsed as any).clientSecret = undefined;
+      }
+      return parsed as KeycloakConfig;
     } catch (error) {
       if (error instanceof z.ZodError) {
         const errorMessages = error.errors

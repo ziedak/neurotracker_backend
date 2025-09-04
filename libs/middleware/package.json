@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@libs/ratelimit": "workspace:*",
+    "@libs/cache": "workspace:*",
     "@libs/database": "workspace:*",
     "@libs/monitoring": "workspace:*",
     "@libs/messaging": "workspace:*",
@@ -29,9 +30,6 @@
     "jest": "^29.7.0",
     "typescript": "^5.9.2"
   },
-  "files": [
-    "dist/**/*"
-  ],
   "keywords": [
     "middleware",
     "authentication",

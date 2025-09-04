@@ -4,7 +4,7 @@
   "main": "../../dist/libs/database/index.js",
   "types": "../../dist/libs/database/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json --noEmitOnError",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",

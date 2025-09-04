@@ -1,4 +1,4 @@
-import { Logger } from "@libs/monitoring";
+import { Logger, type ILogger } from "@libs/monitoring";
 
 export interface ErrorConfig {
   includeStackTrace?: boolean;
@@ -450,7 +450,7 @@ export class ErrorMiddleware {
  * Factory function for easy middleware creation
  */
 export function createErrorMiddleware(config?: Partial<ErrorConfig>) {
-  const logger = Logger.getInstance("Shared Error Middleware");
+  const logger = new Logger({ service: "Shared Error Middleware" });
   const middleware = new ErrorMiddleware(logger);
   return middleware.elysia(config);
 }

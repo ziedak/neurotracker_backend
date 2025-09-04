@@ -1,5 +1,6 @@
 import { ILogger } from "@libs/monitoring";
-import { OptimizedRedisRateLimit } from "./redisRateLimit";
+import { RateLimitingCacheAdapter } from "./adapters/RateLimitingCacheAdapter";
+import { RateLimitResult } from "./types";
 
 /**
  * Rate limit monitoring service
@@ -22,7 +23,7 @@ export class RateLimitMonitoringService {
   >();
 
   constructor(
-    private rateLimiter: OptimizedRedisRateLimit,
+    private rateLimiter: RateLimitingCacheAdapter,
     private logger: ILogger
   ) {
     this.logger = logger.child({ component: "RateLimitMonitoring" });
@@ -32,7 +33,7 @@ export class RateLimitMonitoringService {
   /**
    * Record a rate limit check
    */
-  recordCheck(result: any, responseTime: number): void {
+  recordCheck(result: RateLimitResult, responseTime: number): void {
     this.metrics.totalRequests++;
 
     if (result.allowed) {
@@ -90,13 +91,13 @@ export class RateLimitMonitoringService {
    */
   async getHealthStatus(): Promise<any> {
     const rateLimiterHealth = await this.rateLimiter.getHealth();
-    const circuitBreakerStatus = this.rateLimiter.getCircuitBreakerStatus();
+    const stats = this.rateLimiter.getRateLimitingStats();
 
     const health = {
       status: "healthy",
       metrics: this.getMetrics(),
       rateLimiter: rateLimiterHealth,
-      circuitBreaker: circuitBreakerStatus,
+      stats: stats,
       alerts: this.getActiveAlerts(),
       timestamp: new Date().toISOString(),
     };

@@ -1,3 +1,3 @@
-export * from './IpStrategy';
-export * from './UserStrategy';
-export * from './ApiKeyStrategy';
+export { IpStrategy } from "./IpStrategy";
+export { UserStrategy } from "./UserStrategy";
+export { ApiKeyStrategy, RateLimitStrategy } from "./ApiKeyStrategy";

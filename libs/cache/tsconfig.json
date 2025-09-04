@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "../../dist/libs/cache",
+    "tsBuildInfoFile": "../../dist/libs/cache/tsconfig.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../../libs/utils" },
+    { "path": "../../libs/config" },
+    { "path": "../../libs/database" }
+  ],
+  "include": ["src"],
+  "exclude": [
+    "dist",
+    "node_modules",
+    "tests",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "src/_archive/**/*"
+  ]
+}

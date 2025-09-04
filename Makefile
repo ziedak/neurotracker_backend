@@ -50,6 +50,9 @@ clean:
 	find . -name "node_modules" -type d -exec rm -rf {} + 2>/dev/null || true
 	find . -name "dist" -type d -exec rm -rf {} + 2>/dev/null || true
 	find . -name "*.tsbuildinfo" -delete 2>/dev/null || true
+	find src -name "*.js" -o -name "*.d.ts" -o -name "*.map" | xargs rm -f
+
+
 
 # Docker development environment
 docker-dev:

@@ -1,6 +1,9 @@
 import { MiddlewareContext } from "../../types";
-import { RateLimitStrategy } from "../RateLimitMiddleware";
 import { z } from "@libs/utils";
+
+export interface RateLimitStrategy {
+  generateKey(context: MiddlewareContext): string;
+}
 /**
  * IP-based rate limiting strategy
  * Uses client IP address as the key

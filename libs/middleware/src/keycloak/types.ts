@@ -11,7 +11,7 @@ export interface KeycloakConfig {
   serverUrl: string;
   realm: string;
   clientId: string;
-  clientSecret?: string;
+  clientSecret: string | undefined;
   publicKey?: string;
   jwksUri?: string;
   rolesClaim?: string;

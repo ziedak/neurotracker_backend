@@ -56,16 +56,16 @@ export class LoggingMiddleware extends BaseMiddleware<LoggingConfig> {
   };
 
   constructor(
-    @inject("Logger") private override readonly logger: ILogger,
-    @inject("IMetricsCollector") private override readonly metrics: any,
+    @inject("Logger") protected override readonly logger: ILogger,
+    @inject("IMetricsCollector") protected override readonly metrics: any,
     config: LoggingConfig
   ) {
     super(logger, metrics, config, "LoggingMiddleware");
   }
 
   override execute(
-    context: MiddlewareContext,
-    next: () => Promise<void>
+    _context: MiddlewareContext,
+    _next: () => Promise<void>
   ): Promise<void | any> {
     throw new Error("Method not implemented.");
   }
@@ -73,7 +73,7 @@ export class LoggingMiddleware extends BaseMiddleware<LoggingConfig> {
   /**
    * Create Elysia middleware for logging
    */
-  elysia(config?: Partial<LoggingConfig>): (app: Elysia) => Elysia {
+  override elysia(config?: Partial<LoggingConfig>): (app: Elysia) => Elysia {
     const finalConfig = { ...this.defaultConfig, ...config };
 
     return (app: Elysia): Elysia => {

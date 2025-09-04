@@ -377,6 +377,50 @@ export class RedisClient {
   }
 
   /**
+   * Publish a message to a Redis channel
+   */
+  async safePublish(channel: string, message: string): Promise<number> {
+    try {
+      const result = await executeRedisWithRetry(
+        this.redis,
+        (redis: Redis) => redis.publish(channel, message),
+        (error) =>
+          this.logger.warn(`Safe publish failed for channel ${channel}`, error),
+        {
+          operationName: "redis_publish",
+          maxRetries: 3,
+          enableCircuitBreaker: true,
+          enableMetrics: true,
+        }
+      );
+      return result as number;
+    } catch (error) {
+      this.logger.error(`Failed to publish to channel ${channel}`, error);
+      return 0;
+    }
+  }
+
+  /**
+   * Subscribe to Redis channels
+   * Returns a new Redis client for subscription (pub/sub requires separate connection)
+   */
+  createSubscriber(): Redis {
+    const subscriberOptions: RedisOptions = {
+      host: getEnv("REDIS_HOST", "localhost"),
+      port: getNumberEnv("REDIS_PORT", 6379),
+      password: getEnv("REDIS_PASSWORD"),
+      db: getNumberEnv("REDIS_DB", 0),
+      username: getEnv("REDIS_USERNAME"),
+      maxRetriesPerRequest: getNumberEnv("REDIS_MAX_RETRIES", 3),
+      connectTimeout: getNumberEnv("REDIS_CONNECT_TIMEOUT", 10000),
+      enableReadyCheck: getBooleanEnv("REDIS_READY_CHECK", false),
+      lazyConnect: true,
+    };
+
+    return new Redis(subscriberOptions);
+  }
+
+  /**
    * Force reconnection
    */
   async forceReconnect(): Promise<void> {
