@@ -24,7 +24,7 @@ export class JwtAuth {
 
   constructor(config: AuthConfig, logger: ILogger) {
     this.config = config;
-    this.logger = logger.child({ component: "JwtAuth" });
+    this.logger = createLogger( "JwtAuth" });
   }
 
   /**

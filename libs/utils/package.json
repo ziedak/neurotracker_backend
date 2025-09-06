@@ -4,20 +4,20 @@
   "main": "../../dist/libs/utils/index.js",
   "types": "../../dist/libs/utils/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json --noEmitOnError"
   },
   "dependencies": {
-    "@libs/database": "workspace:*",
-    "@libs/monitoring": "workspace:*",
+    "@libs/config": "workspace:*",
     "cockatiel": "^3.2.1",
+    "lodash": "^4.17.21",
     "lru-cache": "^10.4.3",
-    "tsyringe": "^4.10.0",
+    "pino": "^8.16.0",
+    "pino-pretty": "^10.1.0",
     "uuid": "^9.0.1",
-    "zod": "^3.25.76",
-    "lodash": "^4.17.21"
+    "zod": "^4.1.5"
   },
   "devDependencies": {
-    "@types/uuid": "^9.0.8",
-    "@types/lodash": "^4.17.20"
+    "@types/lodash": "^4.17.20",
+    "@types/uuid": "^9.0.8"
   }
 }

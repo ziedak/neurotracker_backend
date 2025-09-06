@@ -1,16 +1,20 @@
 import { ValidationService } from "./validation.service";
 import { RoutingService } from "../processing/routing.service";
 import { RedisClient, ClickHouseClient } from "@libs/database";
-import { Logger } from "@libs/monitoring";
-import { UserEvent } from "@libs/models";
 
-const logger = Logger.getInstance("event-pipeline-batch");
+import { UserEvent } from "@libs/database";
+import { createLogger } from "@libs/utils";
+import { inject } from "tsyringe";
 
 export class BatchController {
   private validationService = new ValidationService();
   private routingService = new RoutingService();
-  private redis = RedisClient.getInstance();
 
+  private logger = createLogger("BatchedRedisOperations");
+  constructor(
+    @inject("RedisClient") private redis: RedisClient,
+    @inject("ClickHouseClient") private clickhouse: ClickHouseClient
+  ) {}
   async processBatch(events: any[]): Promise<any> {
     if (!Array.isArray(events))
       throw new Error("Batch payload must be an array");
@@ -22,14 +26,14 @@ export class BatchController {
         try {
           const event: UserEvent = this.validationService.validate(raw);
           const eventKey = `event:${event.userId}:${event.eventType}:${event.timestamp}`;
-          const isDuplicate = await this.redis.exists(eventKey);
-          if (isDuplicate) return { status: "duplicate", eventKey };
-          await ClickHouseClient.insert("raw_events", [event]);
-          await this.redis.setex(eventKey, 3600, JSON.stringify(event));
+          const existingValue = await this.redis.safeGet(eventKey);
+          if (existingValue) return { status: "duplicate", eventKey };
+          await this.clickhouse.insert("raw_events", [{ ...event }]);
+          await this.redis.safeSetEx(eventKey, 3600, JSON.stringify(event));
           await this.routingService.route(event);
           return { status: "accepted", eventKey };
         } catch (error: any) {
-          logger.error("Batch event failed", error);
+          this.logger.error("Batch event failed", error);
           return { status: "error", message: error.message };
         }
       })

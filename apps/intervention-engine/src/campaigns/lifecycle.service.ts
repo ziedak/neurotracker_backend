@@ -8,7 +8,6 @@ import { Logger } from "@libs/monitoring";
 
 export class LifecycleService {
   private redis: Redis;
-  private logger: ILogger;
 
   constructor(redis: Redis, logger: ILogger) {
     this.redis = redis;

@@ -91,23 +91,28 @@ export class AIEngineContainer {
   }
 
   /**
-   * Register database clients as singletons using static getInstance() patterns
+   * Register database clients with proper dependency injection
    */
   private registerDatabaseClients(): void {
-    // Redis client - using static getInstance
+    // Redis client - using static getInstance (legacy pattern)
     this._registry.registerSingleton("redisClient", () =>
       RedisClient.getInstance()
     );
 
-    // ClickHouse client - using static getInstance (for analytics and logging)
+    // ClickHouse client - using static getInstance (legacy pattern for analytics and logging)
     this._registry.registerSingleton("clickhouseClient", () =>
       ClickHouseClient.getInstance()
     );
 
-    // PostgreSQL client - using static getInstance (for model metadata)
-    this._registry.registerSingleton("postgresClient", () =>
-      PostgreSQLClient.getInstance()
-    );
+    // PostgreSQL client - using proper TSyringe DI (for model metadata)
+    this._registry.registerSingleton("postgresClient", () => {
+      const logger = this._registry.resolve<Logger>("logger");
+      const metrics =
+        this._registry.resolve<MetricsCollector>("metricsCollector");
+      const cacheService = this._registry.resolve<CacheService>("cacheService");
+
+      return new PostgreSQLClient(logger, metrics, cacheService);
+    });
   }
 
   /**

@@ -1,13 +1,13 @@
-import { Logger } from "@libs/monitoring";
-import { RedisClient } from "@libs/database";
-
-const logger = Logger.getInstance("event-pipeline-deadletter");
-const redis = RedisClient.getInstance();
+import type { RedisClient } from "@libs/database";
+import { createLogger } from "@libs/utils";
+import { inject } from "tsyringe";
 
 export class DeadLetterHandler {
+  private logger = createLogger("event-pipeline-deadletter");
+  constructor(@inject("RedisClient") private redis: RedisClient) {}
   async handle(event: any) {
-    logger.warn("Dead letter event", { event });
+    this.logger.warn("Dead letter event", { event });
     // Store failed event in Redis for later analysis/retry
-    await redis.lpush("deadletter:events", JSON.stringify(event));
+    this.redis.getRedis().lpush("deadletter:events", JSON.stringify(event));
   }
 }

@@ -75,7 +75,7 @@ export class RoleBasedAuth {
 
   constructor(config: AuthConfig, logger: ILogger) {
     this.config = config;
-    this.logger = logger.child({ component: "RoleBasedAuth" });
+    this.logger = createLogger( "RoleBasedAuth" });
   }
 
   /**

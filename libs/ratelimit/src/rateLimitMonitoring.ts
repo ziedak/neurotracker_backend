@@ -1,6 +1,6 @@
-import { ILogger } from "@libs/monitoring";
 import { RateLimitingCacheAdapter } from "./adapters/RateLimitingCacheAdapter";
 import { RateLimitResult } from "./types";
+import { createLogger } from "@libs/utils";
 
 /**
  * Rate limit monitoring service
@@ -21,12 +21,9 @@ export class RateLimitMonitoringService {
     string,
     { threshold: number; triggered: boolean }
   >();
+  logger = createLogger("RateLimitMonitoring");
 
-  constructor(
-    private rateLimiter: RateLimitingCacheAdapter,
-    private logger: ILogger
-  ) {
-    this.logger = logger.child({ component: "RateLimitMonitoring" });
+  constructor(private rateLimiter: RateLimitingCacheAdapter) {
     this.initializeDefaultAlerts();
   }
 

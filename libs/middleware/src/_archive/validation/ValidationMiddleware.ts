@@ -250,7 +250,7 @@ export class ValidationMiddleware extends BaseMiddleware<ValidationConfig> {
     const finalConfig = config ? { ...this.config, ...config } : this.config;
     const middleware = new ValidationMiddleware(
       finalConfig,
-      this.logger,
+
       this.metrics
     );
 

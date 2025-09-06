@@ -14,6 +14,6 @@
     { "path": "../../libs/monitoring" },
     { "path": "../../libs/middleware" }
   ],
-  "include": ["src/**/*"],
-  "exclude": ["node_modules"]
+  "include": ["src", "src/middleware"],
+  "exclude": ["node_modules", "_archives"]
 }

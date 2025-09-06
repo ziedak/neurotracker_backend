@@ -18,7 +18,7 @@ export class ZodValidator implements Validator {
 
   constructor(config: ValidationConfig, logger: ILogger) {
     this.config = config;
-    this.logger = logger.child({ component: "ZodValidator" });
+    this.logger = createLogger( "ZodValidator" });
     this.schemas = new Map();
 
     // Initialize built-in schemas

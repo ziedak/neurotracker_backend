@@ -44,7 +44,7 @@ export class LocalRateLimitCache<T = any> {
   ) {
     this.maxSize = maxSize;
     this.defaultTtlMs = defaultTtlMs;
-    this.logger = logger.child({ component: "LocalRateLimitCache" });
+    this.logger = createLogger( "LocalRateLimitCache" });
   }
 
   /**

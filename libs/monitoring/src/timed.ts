@@ -1,4 +1,5 @@
 import { MetricsCollector } from "./MetricsCollector";
+import { container } from "tsyringe";
 
 // Performance monitoring decorator
 /**
@@ -32,7 +33,7 @@ export function timed(metricName?: string) {
 
     descriptor.value = async function (...args: any[]) {
       const startTime = performance.now();
-      const metrics = MetricsCollector.getInstance();
+      const metrics = container.resolve(MetricsCollector);
 
       try {
         const result = await method.apply(this, args);

@@ -1,19 +1,15 @@
 import { RedisClient } from "@libs/database";
-import { Logger } from "@libs/monitoring";
+import { createLogger } from "@libs/utils";
+import { inject } from "tsyringe";
 
 export class DeduplicationService {
-  private redis: any;
-  private logger: ILogger;
-
-  constructor() {
-    this.redis = RedisClient.getInstance();
-    this.logger = Logger.getInstance("DeduplicationService");
-  }
+  private logger = createLogger("DeduplicationService");
+  constructor(@inject("RedisClient") private redis: RedisClient) {}
 
   async isDuplicate(event: any): Promise<boolean> {
     try {
       const key = `event:${event.eventId}`;
-      const exists = await this.redis.get(key);
+      const exists = await this.redis.safeGet(key);
       if (exists) {
         this.logger.info("Duplicate event detected", {
           eventId: event.eventId,
@@ -21,7 +17,7 @@ export class DeduplicationService {
         return true;
       }
       // Cache event for deduplication (1 hour)
-      await this.redis.set(key, JSON.stringify(event), "EX", 3600);
+      await this.redis.safeSet(key, JSON.stringify(event), 3600);
       return false;
     } catch (error) {
       this.logger.error("Deduplication check failed", error as Error, {

@@ -158,7 +158,7 @@ export class RedisSessionStore {
     metrics: MetricsCollector
   ) {
     this.config = { ...DEFAULT_REDIS_SESSION_CONFIG, ...config };
-    this.logger = logger.child({ component: "RedisSessionStore" });
+    this.logger = createLogger( "RedisSessionStore" });
     this.metrics = metrics;
     this.redis = this.createRedisConnection();
     this.setupEventHandlers();

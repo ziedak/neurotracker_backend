@@ -97,22 +97,26 @@ import {
   wrap,
 } from "cockatiel";
 
+const DEFAULT_OPTIONS: ExecuteWithRetryOptions = {
+  operationName: "Unknown Operation",
+  maxRetries: 3,
+  retryDelay: 1000,
+};
+
 export const executeWithRetryAndBreaker = async <T>(
   operation: () => Promise<T>,
   onError: (error: unknown) => void,
-  options?: ExecuteWithRetryOptions
+  options?: Partial<ExecuteWithRetryOptions>
 ) => {
-  options = {
-    operationName: "Unknown Operation",
-    maxRetries: 3,
-    retryDelay: 1000,
+  let config = {
+    ...DEFAULT_OPTIONS,
     ...options,
   };
   try {
     // Create a retry policy that'll try whatever function we execute 3
     // times with a randomized exponential backoff.
     const retryPolicy = retry(handleAll, {
-      maxAttempts: options.maxRetries,
+      maxAttempts: config.maxRetries,
       backoff: new ExponentialBackoff(),
     });
 
@@ -120,7 +124,7 @@ export const executeWithRetryAndBreaker = async <T>(
     // seconds if it fails 5 times in a row. This can give time for e.g. a database
     // to recover without getting tons of traffic.
     const circuitBreakerPolicy = circuitBreaker(handleAll, {
-      halfOpenAfter: options.retryDelay * 10,
+      halfOpenAfter: config.retryDelay * 10,
       breaker: new ConsecutiveBreaker(5),
     });
     // Combine these! Create a policy that retries 3 times, calling through the circuit breaker
@@ -166,7 +170,8 @@ export interface EnhancedRetryOptions extends ExecuteWithRetryOptions {
 export const executeWithRetry = async <T>(
   operation: () => Promise<T>,
   onError: (error: unknown, attempt?: number) => void,
-  options: Partial<EnhancedRetryOptions> = {}
+  options: Partial<EnhancedRetryOptions> = {},
+  metrics?: any
 ): Promise<T> => {
   const config: EnhancedRetryOptions = {
     operationName: "Unknown Operation",
@@ -191,8 +196,7 @@ export const executeWithRetry = async <T>(
       if (config.enableMetrics) {
         try {
           // Use dynamic import to avoid circular dependencies
-          const { MetricsCollector } = await import("@libs/monitoring");
-          const metrics = MetricsCollector.getInstance();
+
           metrics.recordTimer(
             `${config.operationName}_duration`,
             performance.now() - startTime
@@ -235,8 +239,6 @@ export const executeWithRetry = async <T>(
   // Record failure metrics if enabled
   if (config.enableMetrics) {
     try {
-      const { MetricsCollector } = await import("@libs/monitoring");
-      const metrics = MetricsCollector.getInstance();
       metrics.recordTimer(
         `${config.operationName}_duration`,
         performance.now() - startTime

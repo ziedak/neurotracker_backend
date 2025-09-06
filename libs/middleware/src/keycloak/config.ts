@@ -6,7 +6,7 @@
  */
 
 import { z } from "@libs/utils";
-import { type ILogger } from "@libs/monitoring";
+
 import { KeycloakConfig, KeycloakError, KeycloakErrorType } from "./types";
 import { getArrayEnv, getBooleanEnv, getEnv, getNumberEnv } from "@libs/config";
 

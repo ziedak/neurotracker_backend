@@ -234,8 +234,7 @@ export class JWTRotationManager {
     this.jwtService = jwtService || EnhancedJWTService.getInstance();
     this.blacklistManager = blacklistManager || new JWTBlacklistManager();
     this.sessionManager =
-      sessionManager ||
-      new UnifiedSessionManager({}, this.logger, this.metrics);
+      sessionManager || new UnifiedSessionManager({}, this.metrics);
 
     // Initialize performance components
     this.circuitBreaker = new CircuitBreaker({

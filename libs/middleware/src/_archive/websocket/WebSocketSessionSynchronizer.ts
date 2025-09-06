@@ -66,7 +66,7 @@ export class WebSocketSessionSynchronizer {
   private readonly SESSION_EXPIRE_CHANNEL = "session:expired";
 
   constructor(logger: ILogger, metrics: IMetricsCollector, redis?: any) {
-    this.logger = logger.child({ component: "WebSocketSessionSynchronizer" });
+    this.logger = createLogger( "WebSocketSessionSynchronizer" });
     this.metrics = metrics;
     this.redis = redis;
 

@@ -42,7 +42,7 @@ export class RuleValidator implements Validator {
 
   constructor(config: ValidationConfig, logger: ILogger) {
     this.config = config;
-    this.logger = logger.child({ component: "RuleValidator" });
+    this.logger = createLogger( "RuleValidator" });
     this.ruleSets = new Map();
 
     // Initialize built-in rule sets

@@ -4,16 +4,25 @@
   "description": "event-pipeline microservice",
   "main": "index.js",
   "scripts": {
-    "build": "bun build src/main.ts --outdir=dist --target=bun",
+    "build": "bunx tsc -p tsconfig.json",
     "dev": "bun --watch src/main.ts",
+    "dev:tsyringe": "bun --watch src/main-tsyringe.ts",
     "start": "bun src/main.ts",
+    "start:tsyringe": "bun src/main-tsyringe.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@libs/elysia-server": "workspace:*"
+    "@libs/elysia-server": "workspace:*",
+    "@libs/database": "workspace:*",
+    "@libs/utils": "workspace:*",
+    "@libs/monitoring": "workspace:*",
+    "@libs/config": "workspace:*",
+    "@libs/messaging": "workspace:*",
+    "reflect-metadata": "^0.2.2",
+    "tsyringe": "^4.10.0"
   },
   "devDependencies": {
     "@types/node": "^24.2.1",

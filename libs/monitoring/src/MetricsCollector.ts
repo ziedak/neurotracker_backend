@@ -1,141 +1,266 @@
-// Temporarily removed Redis dependency to resolve circular dependency
-// import { RedisClient } from "@libs/database";
+/**
+ * High-Performance Prometheus Metrics Collector
+ *
+ * Enterprise-grade metrics collection with zero-allocation recording,
+ * proper histogram buckets, and automatic Prometheus exposition.
+ */
 
-// Metrics types
-export interface Metric {
-  name: string;
-  value: number;
-  timestamp: number;
-  tags?: Record<string, string> | undefined;
-}
+import { PrometheusMetricsCollector } from "./PrometheusMetricsCollector";
+import { injectable, singleton, container } from "tsyringe";
 
-export interface TimingMetric extends Metric {
-  duration: number;
-}
-
-export interface CounterMetric extends Metric {
-  count: number;
-}
+// ===================================================================
+// METRICS COLLECTOR INTERFACE
+// ===================================================================
 
 export interface IMetricsCollector {
+  /**
+   * Record counter metric
+   */
   recordCounter(
     name: string,
     value?: number,
-    tags?: Record<string, string>
-  ): Promise<void>;
+    labels?: Record<string, string>
+  ): void;
+
+  /**
+   * Record timer metric (in milliseconds)
+   */
   recordTimer(
     name: string,
-    duration: number,
-    tags?: Record<string, string>
-  ): Promise<void>;
+    value: number,
+    labels?: Record<string, string>
+  ): void;
+
+  /**
+   * Record gauge metric
+   */
   recordGauge(
     name: string,
     value: number,
-    tags?: Record<string, string>
-  ): Promise<void>;
+    labels?: Record<string, string>
+  ): void;
+
+  /**
+   * Record histogram metric
+   */
   recordHistogram(
     name: string,
     value: number,
-    tags?: Record<string, string>
-  ): Promise<void>;
-  getMetrics(name: string, from?: number, to?: number): Promise<Metric[]>;
-}
+    labels?: Record<string, string>,
+    buckets?: number[]
+  ): void;
 
-// Metrics collector
-export class MetricsCollector implements IMetricsCollector {
-  private static instance: MetricsCollector;
-
-  private constructor() {
-    // No need to store redis instance as property since we get it when needed
-  }
-
-  static getInstance(): MetricsCollector {
-    if (!MetricsCollector.instance) {
-      MetricsCollector.instance = new MetricsCollector();
-    }
-    return MetricsCollector.instance;
-  }
-
-  async recordCounter(name: string, value = 1, tags?: Record<string, string>) {
-    const metric: CounterMetric = {
-      name,
-      value,
-      count: value,
-      timestamp: Date.now(),
-      tags,
-    };
-
-    await this.storeMetric(metric);
-  }
-
-  async recordTimer(
+  /**
+   * Record summary metric
+   */
+  recordSummary(
     name: string,
+    value: number,
+    labels?: Record<string, string>
+  ): void;
+
+  /**
+   * Get current metrics as Prometheus exposition format
+   */
+  getMetrics(): Promise<string>;
+
+  // ===================================================================
+  // HIGH-LEVEL BUSINESS METRICS
+  // ===================================================================
+
+  /**
+   * Record API request with full context
+   */
+  recordApiRequest(
+    method: string,
+    route: string,
+    statusCode: number,
     duration: number,
-    tags?: Record<string, string>
-  ) {
-    const metric: TimingMetric = {
-      name,
-      value: duration,
+    service?: string
+  ): void;
+
+  /**
+   * Record database operation
+   */
+  recordDatabaseOperation(
+    clientType: "redis" | "postgres" | "clickhouse",
+    operation: string,
+    duration: number,
+    success: boolean,
+    service?: string
+  ): void;
+
+  /**
+   * Record authentication operation
+   */
+  recordAuthOperation(
+    operation: "login" | "register" | "refresh" | "logout",
+    result: "success" | "failure" | "error",
+    userRole?: string
+  ): void;
+
+  /**
+   * Record WebSocket activity
+   */
+  recordWebSocketActivity(
+    service: string,
+    messageType: string,
+    direction: "inbound" | "outbound",
+    connectionCount?: number
+  ): void;
+
+  /**
+   * Record Node.js process metrics
+   */
+  recordNodeMetrics(service: string): void;
+
+  /**
+   * Measure and record event loop lag
+   */
+  measureEventLoopLag(service: string): void;
+}
+
+// ===================================================================
+// METRICS COLLECTOR IMPLEMENTATION
+// ===================================================================
+
+@injectable()
+@singleton()
+export class MetricsCollector implements IMetricsCollector {
+  private collector: PrometheusMetricsCollector;
+
+  constructor() {
+    this.collector = container.resolve(PrometheusMetricsCollector);
+  }
+
+  // ===================================================================
+  // CORE METRIC METHODS
+  // ===================================================================
+
+  recordCounter(
+    name: string,
+    value = 1,
+    labels?: Record<string, string>
+  ): void {
+    this.collector.recordCounter(name, value, labels);
+  }
+
+  recordTimer(
+    name: string,
+    value: number,
+    labels?: Record<string, string>
+  ): void {
+    this.collector.recordTimer(name, value, labels);
+  }
+
+  recordGauge(
+    name: string,
+    value: number,
+    labels?: Record<string, string>
+  ): void {
+    this.collector.recordGauge(name, value, labels);
+  }
+
+  recordHistogram(
+    name: string,
+    value: number,
+    labels?: Record<string, string>,
+    buckets?: number[]
+  ): void {
+    this.collector.recordHistogram(name, value, labels, buckets);
+  }
+
+  recordSummary(
+    name: string,
+    value: number,
+    labels?: Record<string, string>
+  ): void {
+    this.collector.recordSummary(name, value, labels);
+  }
+
+  async getMetrics(): Promise<string> {
+    return this.collector.getMetrics();
+  }
+
+  // ===================================================================
+  // HIGH-LEVEL BUSINESS METRICS
+  // ===================================================================
+
+  recordApiRequest(
+    method: string,
+    route: string,
+    statusCode: number,
+    duration: number,
+    service = "unknown"
+  ): void {
+    this.collector.recordApiRequest(
+      method,
+      route,
+      statusCode,
       duration,
-      timestamp: Date.now(),
-      tags,
-    };
-
-    await this.storeMetric(metric);
+      service
+    );
   }
 
-  async recordGauge(
-    name: string,
-    value: number,
-    tags?: Record<string, string>
-  ) {
-    const metric: Metric = {
-      name,
-      value,
-      timestamp: Date.now(),
-      tags,
-    };
-
-    await this.storeMetric(metric);
+  recordDatabaseOperation(
+    clientType: "redis" | "postgres" | "clickhouse",
+    operation: string,
+    duration: number,
+    success: boolean,
+    service = "unknown"
+  ): void {
+    this.collector.recordDatabaseOperation(
+      clientType,
+      operation,
+      duration,
+      success,
+      service
+    );
   }
 
-  async recordHistogram(
-    name: string,
-    value: number,
-    tags?: Record<string, string>
-  ) {
-    // For now, treat histogram like a gauge
-    // In production, you'd implement proper histogram buckets
-    const metric: Metric = {
-      name: `${name}_histogram`,
-      value,
-      timestamp: Date.now(),
-      tags,
-    };
-
-    await this.storeMetric(metric);
+  recordAuthOperation(
+    operation: "login" | "register" | "refresh" | "logout",
+    result: "success" | "failure" | "error",
+    userRole = "unknown"
+  ): void {
+    this.collector.recordAuthOperation(operation, result, userRole);
   }
 
-  async getMetrics(
-    _name: string,
-    _from?: number,
-    _to?: number
-  ): Promise<Metric[]> {
-    try {
-      // Temporarily disabled Redis metrics retrieval
-      return [];
-    } catch (error) {
-      console.error("Failed to get metrics", { error });
-      return [];
-    }
+  recordWebSocketActivity(
+    service: string,
+    messageType: string,
+    direction: "inbound" | "outbound",
+    connectionCount?: number
+  ): void {
+    this.collector.recordWebSocketActivity(
+      service,
+      messageType,
+      direction,
+      connectionCount
+    );
   }
 
-  private async storeMetric(metric: Metric) {
-    try {
-      // Temporarily disabled Redis storage
-      console.log("Storing metric:", metric);
-    } catch (error) {
-      console.error("Failed to store metric:", error);
-    }
+  recordNodeMetrics(service: string): void {
+    this.collector.recordNodeMetrics(service);
+  }
+
+  measureEventLoopLag(service: string): void {
+    this.collector.measureEventLoopLag(service);
   }
 }
+
+// ===================================================================
+// DEPENDENCY INJECTION SETUP
+// ===================================================================
+
+// Register the MetricsCollector as a singleton
+container.registerSingleton<IMetricsCollector>(
+  "MetricsCollector",
+  MetricsCollector
+);
+container.registerSingleton<MetricsCollector>(
+  "MetricsCollector",
+  MetricsCollector
+);
+
+export { MetricsCollector as default };

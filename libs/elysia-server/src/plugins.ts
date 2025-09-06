@@ -13,7 +13,7 @@ export function setupCorePlugins(app: Elysia, config: ServerConfig) {
           info: {
             title: config.swagger.title || config.name,
             version: config.swagger.version || config.version,
-            description: config.swagger.description || config.description,
+            description: config.swagger.description ?? config.description ?? "",
           },
         },
       })

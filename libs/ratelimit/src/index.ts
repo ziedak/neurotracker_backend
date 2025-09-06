@@ -14,39 +14,21 @@ export {
 } from "./adapters/RateLimitingCacheAdapter";
 
 // ===== CRITICAL PERFORMANCE OPTIMIZATIONS =====
-export * from "./scriptManager";
-export { SharedScriptManager } from "./scriptManager";
+export * from "./performance/scriptManager";
+export { SharedScriptManager } from "./performance/scriptManager";
 
-export * from "./batchProcessor";
+export * from "./performance/batchProcessor";
 export {
   BatchRateLimitProcessor,
   type BatchRateLimitRequest,
   type BatchRateLimitResponse,
   type BatchStats,
-} from "./batchProcessor";
-
-// ===== MIGRATION COMPATIBILITY LAYER =====
-export {
-  LegacyCompatibleRateLimit,
-  type LegacyRateLimitResult,
-  type LegacyRateLimitConfig,
-  // Re-export for seamless migration
-  type RateLimitResult as CompatibleRateLimitResult,
-  type RateLimitConfig as CompatibleRateLimitConfig,
-} from "./compatibility/legacyInterface";
+} from "./performance/batchProcessor";
 
 // ===== CONFIGURATION MANAGEMENT =====
-export * from "./config/rateLimitConfig";
+// export * from "./config/rateLimitConfig";
 export { RateLimitConfigManager } from "./config/rateLimitConfig";
 export { CompleteRateLimitConfig } from "./config/rateLimitConfig";
 
 // ===== MONITORING AND OBSERVABILITY =====
 export * from "./rateLimitMonitoring";
-
-// ===== LEGACY IMPLEMENTATIONS (ARCHIVED) =====
-// NOTE: Legacy types are now exported from ./types
-// TODO: Remove after middleware migration is complete
-// TODO: Distributed rate limiting moved to archive - will be implemented in next version
-
-// Legacy configuration exports
-export { RateLimitConfig } from "./config/rateLimitConfig";

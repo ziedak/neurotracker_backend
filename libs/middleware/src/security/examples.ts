@@ -18,7 +18,7 @@ export class SecurityMiddlewareExamples {
    * Example 1: Development environment with relaxed security
    */
   createDevelopmentSecurity() {
-    return SecurityMiddleware.createDevelopment(this.logger, this.metrics, {
+    return SecurityMiddleware.createDevelopment(this.metrics, {
       // Additional dev-specific config
       customHeaders: {
         "X-Environment": "development",
@@ -31,7 +31,7 @@ export class SecurityMiddlewareExamples {
    * Example 2: Production environment with strict security
    */
   createProductionSecurity() {
-    return SecurityMiddleware.createProduction(this.logger, this.metrics, {
+    return SecurityMiddleware.createProduction(this.metrics, {
       // Override with stricter CSP
       contentSecurityPolicy: {
         enabled: true,
@@ -52,7 +52,7 @@ export class SecurityMiddlewareExamples {
    * Example 3: API-specific security (no CSP, API-focused headers)
    */
   createApiSecurity() {
-    return SecurityMiddleware.createApi(this.logger, this.metrics, {
+    return SecurityMiddleware.createApi(this.metrics, {
       customHeaders: {
         "Cache-Control": "no-store, no-cache, must-revalidate",
         "X-API-Version": "v1",
@@ -64,7 +64,7 @@ export class SecurityMiddlewareExamples {
    * Example 4: Maximum security for sensitive applications
    */
   createStrictSecurity() {
-    return SecurityMiddleware.createStrict(this.logger, this.metrics, {
+    return SecurityMiddleware.createStrict(this.metrics, {
       // Additional strict headers
       customHeaders: {
         "Cross-Origin-Embedder-Policy": "require-corp",
@@ -126,17 +126,14 @@ export class SecurityMiddlewareExamples {
       },
     };
 
-    return new SecurityMiddleware(this.logger, this.metrics, config);
+    return new SecurityMiddleware(this.metrics, config);
   }
 
   /**
    * Example 6: Using with different configurations per route group
    */
   createRouteSpecificSecurity() {
-    const baseSecurity = SecurityMiddleware.createProduction(
-      this.logger,
-      this.metrics
-    );
+    const baseSecurity = SecurityMiddleware.createProduction(this.metrics);
 
     return {
       // Strict security for admin routes

@@ -12,15 +12,18 @@
     "db:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@clickhouse/client": "^1.12.1",
+    "@libs/config": "workspace:*",
     "@libs/monitoring": "workspace:*",
     "@libs/utils": "workspace:*",
-    "@libs/config": "workspace:*",
-    "@clickhouse/client": "^1.12.1",
     "@prisma/client": "^6.15.0",
     "@prisma/extension-accelerate": "^2.0.2",
     "ioredis": "^5.7.0",
     "lodash": "^4.17.21",
-    "prisma": "^6.15.0"
+    "lru-cache": "^10.4.3",
+    "prisma": "^6.15.0",
+    "tsyringe": "^4.10.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@krsbx/prisma-repo": "^0.2.7",

@@ -1,4 +1,5 @@
 import { MetricsCollector } from "./MetricsCollector";
+import { container } from "tsyringe";
 // Performance monitoring decorator
 /**
  * A method decorator that measures the execution time of an async function and records metrics.
@@ -26,7 +27,7 @@ export function timed(metricName) {
         const name = metricName || `${target.constructor.name}.${propertyName}`;
         descriptor.value = async function (...args) {
             const startTime = performance.now();
-            const metrics = MetricsCollector.getInstance();
+            const metrics = container.resolve(MetricsCollector);
             try {
                 const result = await method.apply(this, args);
                 const duration = performance.now() - startTime;

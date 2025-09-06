@@ -16,7 +16,7 @@ import type { WebSocketContext, WebSocketRateLimitConfig } from "../../types";
 @injectable()
 export class WebSocketService {
   constructor(
-    @inject("ILogger") private logger: ILogger,
+    ,
     @inject("IMetricsCollector") private metrics: IMetricsCollector,
     @inject("RedisClient") private redisClient: RedisClient
   ) {}
@@ -27,7 +27,7 @@ export class WebSocketService {
   createChatRateLimiter(): WebSocketRateLimitMiddleware {
     return WebSocketRateLimitMiddleware.createTyped(
       "chat",
-      this.logger,
+      
       this.metrics,
       this.redisClient,
       {
@@ -44,7 +44,7 @@ export class WebSocketService {
   createGameRateLimiter(): WebSocketRateLimitMiddleware {
     return WebSocketRateLimitMiddleware.createTyped(
       "game",
-      this.logger,
+      
       this.metrics,
       this.redisClient,
       {
@@ -101,7 +101,7 @@ export class WebSocketService {
     };
 
     return new WebSocketRateLimitMiddleware(
-      this.logger,
+      
       this.metrics,
       this.redisClient,
       config
@@ -179,13 +179,13 @@ export class WebSocketServer {
   private rateLimitMiddleware: WebSocketRateLimitMiddleware;
 
   constructor(
-    @inject("ILogger") private logger: ILogger,
+    ,
     @inject("IMetricsCollector") private metrics: IMetricsCollector,
     @inject("RedisClient") private redisClient: RedisClient
   ) {
     this.rateLimitMiddleware = WebSocketRateLimitMiddleware.createTyped(
       "api",
-      this.logger,
+      
       this.metrics,
       this.redisClient
     );
@@ -279,7 +279,7 @@ export class MultiAppWebSocketRateLimiter {
       "chat",
       WebSocketRateLimitMiddleware.createTyped(
         "chat",
-        this.logger,
+        
         this.metrics,
         this.redisClient,
         {
@@ -293,7 +293,7 @@ export class MultiAppWebSocketRateLimiter {
       "trading",
       WebSocketRateLimitMiddleware.createTyped(
         "api",
-        this.logger,
+        
         this.metrics,
         this.redisClient,
         {
@@ -309,7 +309,7 @@ export class MultiAppWebSocketRateLimiter {
       "data-stream",
       WebSocketRateLimitMiddleware.createTyped(
         "data-stream",
-        this.logger,
+        
         this.metrics,
         this.redisClient,
         {
@@ -324,7 +324,7 @@ export class MultiAppWebSocketRateLimiter {
     this.rateLimiters.set(
       "iot",
       new WebSocketRateLimitMiddleware(
-        this.logger,
+        
         this.metrics,
         this.redisClient,
         {
@@ -484,7 +484,7 @@ export class WebSocketPerformanceMonitor {
   private rateLimiters: Map<string, WebSocketRateLimitMiddleware> = new Map();
 
   constructor(
-    @inject("ILogger") private logger: ILogger,
+    ,
     @inject("IMetricsCollector") private metrics: IMetricsCollector,
     @inject("RedisClient") private redisClient: RedisClient
   ) {}
@@ -515,7 +515,7 @@ export class WebSocketPerformanceMonitor {
     };
 
     const rateLimiter = new WebSocketRateLimitMiddleware(
-      this.logger,
+      
       this.metrics,
       this.redisClient,
       enhancedConfig

@@ -43,7 +43,7 @@ export class RedisQueueService implements QueueService {
     name: string,
     config?: Partial<QueueConfig>
   ): QueueProcessingService {
-    const jobState = new JobStateService(this.logger, this.metrics);
+    const jobState = new JobStateService(this.metrics);
     const cleanup = new QueueCleanupService(this.logger);
     const baseConfig: QueueConfig = {
       concurrency: 5,
@@ -56,7 +56,6 @@ export class RedisQueueService implements QueueService {
     };
     const mergedConfig = { ...baseConfig, ...config };
     const queue = new QueueProcessingService(
-      this.logger,
       this.metrics,
       jobState,
       cleanup,

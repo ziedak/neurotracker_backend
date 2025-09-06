@@ -36,7 +36,7 @@ import { generateUUId } from "@libs/utils";
  *   }
  *
  *   protected createInstance(config: MyConfig): MyMiddleware {
- *     return new MyMiddleware(this.logger, this.metrics, config, this.name);
+ *     return new MyMiddleware( this.metrics, config, this.name);
  *   }
  * }
  *
@@ -49,7 +49,7 @@ export abstract class BaseMiddleware<
   TConfig extends MiddlewareOptions = MiddlewareOptions
 > {
   constructor(
-    @inject("ILogger") protected readonly logger: ILogger,
+    ,
     @inject("IMetricsCollector") protected readonly metrics: IMetricsCollector,
     protected readonly config: TConfig,
     protected readonly name: string

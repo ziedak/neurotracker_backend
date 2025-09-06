@@ -1,7 +1,6 @@
 export * from "./MetricsCollector";
-export * from "./Logger";
+export * from "./PrometheusMetricsCollector";
 export * from "./HealthChecker";
 export * from "./RequestTracer";
-export * from "./RateLimiter";
-export * from "./timed";
+export { timed as legacyTimed } from "./timed";
 //# sourceMappingURL=index.d.ts.map

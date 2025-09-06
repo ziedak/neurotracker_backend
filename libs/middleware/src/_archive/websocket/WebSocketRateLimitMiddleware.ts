@@ -18,7 +18,6 @@ export class WebSocketRateLimitMiddleware extends BaseWebSocketMiddleware<WebSoc
   private readonly connectionCounts: Map<string, number> = new Map();
 
   constructor(
-    @inject("ILogger") logger: ILogger,
     @inject("IMetricsCollector") metrics: IMetricsCollector,
     @inject("RedisClient") redisClient: RedisClient,
     config: WebSocketRateLimitConfig
@@ -393,7 +392,6 @@ export class WebSocketRateLimitMiddleware extends BaseWebSocketMiddleware<WebSoc
     // This would typically be handled by the DI container
     // For now, create with same dependencies but new config
     return new WebSocketRateLimitMiddleware(
-      this.logger,
       this.metrics!,
       { getRedis: () => this.redis } as RedisClient,
       config

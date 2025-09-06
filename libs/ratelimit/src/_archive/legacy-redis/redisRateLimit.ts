@@ -208,7 +208,7 @@ export class OptimizedRedisRateLimit {
     protected redisClient: RedisClient,
     protected readonly logger: ILogger
   ) {
-    this.logger = logger.child({ component: "OptimizedRedisRateLimit" });
+    this.logger = createLogger( "OptimizedRedisRateLimit" });
     this.keyPrefix = config.redis?.keyPrefix || "rate_limit";
     this.ttlBuffer = config.redis?.ttlBuffer || 10;
     this.algorithm = config.algorithm || "sliding-window";

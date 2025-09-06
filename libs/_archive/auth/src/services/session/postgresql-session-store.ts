@@ -535,9 +535,9 @@ export class PostgreSQLSessionStore {
     metrics: MetricsCollector
   ) {
     this.config = { ...DEFAULT_POSTGRESQL_SESSION_CONFIG, ...config };
-    this.logger = logger.child({ component: "PostgreSQLSessionStore" });
+    this.logger = createLogger( "PostgreSQLSessionStore" });
     this.metrics = metrics;
-    this.dbHelper = new DatabaseHelper(this.logger, this.metrics);
+    this.dbHelper = new DatabaseHelper(this.metrics);
     this.queryBuilder = new SessionQueryBuilder(this.config);
   }
 

@@ -23,7 +23,6 @@ import { CampaignMetrics, Campaign } from "./types";
 
 export class MetricsService {
   private redis: Redis;
-  private logger: ILogger;
 
   constructor(redis: Redis, logger: ILogger) {
     this.redis = redis;

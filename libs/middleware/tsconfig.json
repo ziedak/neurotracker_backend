@@ -8,7 +8,6 @@
   },
   "references": [
     { "path": "../../libs/config" },
-    { "path": "../../libs/cache" },
     { "path": "../../libs/database" },
     { "path": "../../libs/monitoring" },
     { "path": "../../libs/messaging" },

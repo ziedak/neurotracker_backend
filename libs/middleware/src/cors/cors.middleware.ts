@@ -112,7 +112,7 @@ export class CorsMiddleware extends BaseMiddleware<CorsConfig> {
    * Create new instance with different configuration
    */
   protected override createInstance(config: CorsConfig): CorsMiddleware {
-    return new CorsMiddleware(this.logger, this.metrics, config, this.name);
+    return new CorsMiddleware(this.metrics, config, this.name);
   }
 
   /**

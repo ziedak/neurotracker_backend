@@ -1,83 +1,110 @@
+import "reflect-metadata";
+import { container } from "tsyringe";
 import { ValidationService } from "./ingestion/validation.service";
 import { RoutingService } from "./processing/routing.service";
-import { RedisClient, ClickHouseClient } from "@libs/database";
-import { Logger } from "@libs/monitoring";
+import { WebSocketGateway } from "./ingestion/websocket.gateway";
+import { BatchController } from "./ingestion/batch.controller";
+import { MetricsService } from "./monitoring/metrics.service";
+import {
+  RedisClient,
+  PostgreSQLClient,
+  ClickHouseClient,
+} from "@libs/database";
+import { MetricsCollector } from "@libs/monitoring";
+import { createLogger } from "@libs/utils";
 
 /**
- * Service Container for Dependency Injection
- * Consolidates service creation and manages dependencies
+ * TSyringe-based DI Container for Event Pipeline Service
+ * Replaces the custom ServiceContainer with battle-tested tsyringe
  */
-export class ServiceContainer {
-  private static instance: ServiceContainer;
-  private services: Map<string, any> = new Map();
-
-  private constructor() {}
-
-  static getInstance(): ServiceContainer {
-    if (!ServiceContainer.instance) {
-      ServiceContainer.instance = new ServiceContainer();
-    }
-    return ServiceContainer.instance;
-  }
+export class EventPipelineTsyringeContainer {
+  private static initialized = false;
 
   /**
-   * Initialize all services with proper dependency injection
+   * Initialize all services with tsyringe DI container
    */
-  initializeServices() {
-    // Shared resources
-    const redis = RedisClient.getInstance();
-    const clickhouse = ClickHouseClient.getInstance();
-    const logger = Logger.getInstance("service-container");
+  static async initialize(): Promise<void> {
+    if (this.initialized) return;
 
-    // Core services (no dependencies)
-    this.services.set("ValidationService", new ValidationService());
-    this.services.set("Logger", logger);
-    this.services.set("RedisClient", redis);
-    this.services.set("ClickHouseClient", clickhouse);
+    // Register infrastructure services
+    this.registerInfrastructure();
 
-    // Services with dependencies
-    const routingService = new RoutingService();
-    this.services.set("RoutingService", routingService);
+    // Register database clients
+    this.registerDatabaseClients();
 
-    logger.info("Service container initialized", {
-      serviceCount: this.services.size,
-      services: Array.from(this.services.keys()),
+    // Register business services
+    this.registerBusinessServices();
+
+    this.initialized = true;
+
+    const logger = createLogger("EventPipelineContainer");
+    logger.info("TSyringe container initialized successfully", {
+      servicesRegistered: [
+        "ValidationService",
+        "RoutingService",
+        "RedisClient",
+        "PostgreSQLClient",
+        "MetricsCollector",
+      ],
     });
   }
 
   /**
-   * Get service instance by name
+   * Register infrastructure services (logging, monitoring)
    */
-  getService<T>(serviceName: string): T {
-    const service = this.services.get(serviceName);
-    if (!service) {
-      throw new Error(`Service ${serviceName} not found in container`);
-    }
-    return service;
+  private static registerInfrastructure(): void {
+    // Register MetricsCollector as singleton with string token
+    container.registerSingleton("MetricsCollector", MetricsCollector);
   }
 
   /**
-   * Check if service exists
+   * Register database clients as singletons
    */
-  hasService(serviceName: string): boolean {
-    return this.services.has(serviceName);
+  private static registerDatabaseClients(): void {
+    // Register database clients using string tokens to match @inject decorators
+    container.registerSingleton("RedisClient", RedisClient);
+    container.registerSingleton("PostgreSQLClient", PostgreSQLClient);
+    container.registerSingleton("ClickHouseClient", ClickHouseClient);
   }
 
   /**
-   * Get all service names
+   * Register business services
    */
-  getServiceNames(): string[] {
-    return Array.from(this.services.keys());
+  private static registerBusinessServices(): void {
+    // Register validation service as singleton with string token
+    container.registerSingleton("ValidationService", ValidationService);
+
+    // Register routing service as singleton with string token
+    container.registerSingleton("RoutingService", RoutingService);
+
+    // Register services with @inject dependencies
+    container.registerSingleton("WebSocketGateway", WebSocketGateway);
+    container.registerSingleton("BatchController", BatchController);
+    container.registerSingleton("MetricsService", MetricsService);
   }
 
   /**
-   * Clean up all services (for graceful shutdown)
+   * Get service instance with type safety
    */
-  cleanup() {
-    const logger = this.getService<Logger>("Logger");
-    logger.info("Cleaning up service container");
+  static getService<T>(serviceClass: new (...args: any[]) => T): T {
+    return container.resolve(serviceClass);
+  }
 
-    // Clear all service references
-    this.services.clear();
+  /**
+   * Get service by token
+   */
+  static getServiceByToken<T>(token: string): T {
+    return container.resolve<T>(token);
+  }
+
+  /**
+   * Clear container (for testing)
+   */
+  static clear(): void {
+    container.clearInstances();
+    this.initialized = false;
   }
 }
+
+// Export the container for backwards compatibility
+export const tsyringeContainer = EventPipelineTsyringeContainer;

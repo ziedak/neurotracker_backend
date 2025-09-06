@@ -1,15 +1,16 @@
 import { BaseMiddleware } from "../base";
 import { MiddlewareContext, MiddlewareOptions } from "../types";
-import { type ILogger, type IMetricsCollector } from "@libs/monitoring";
-import {
-  RateLimitingCacheAdapter,
-  type RateLimitResult,
-  type RateLimitAlgorithm,
-  type RateLimitingAdapterConfig,
-} from "@libs/ratelimit";
 import { IpStrategy, UserStrategy, ApiKeyStrategy } from "./strategies";
+import { type ILogger, type IMetricsCollector } from "@libs/monitoring";
+// import {
+//   RateLimitingCacheAdapter,
+//   type RateLimitResult,
+//   type RateLimitAlgorithm,
+//   type RateLimitingAdapterConfig,
+// } from "@libs/ratelimit";
 import { inject } from "@libs/utils";
 import type { CacheService, CacheConfigValidator } from "@libs/cache";
+import type { RateLimitAlgorithm } from "@libs/ratelimit";
 
 /**
  * Rate limit configuration for middleware
@@ -47,7 +48,6 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
   private readonly cacheService: CacheService;
 
   constructor(
-    @inject("ILogger") logger: ILogger,
     @inject("IMetricsCollector") metrics: IMetricsCollector,
     @inject("CacheService") cacheService: CacheService,
     config: RateLimitConfig
@@ -185,7 +185,6 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
     config: RateLimitConfig
   ): RateLimitMiddleware {
     return new RateLimitMiddleware(
-      this.logger,
       this.metrics,
       this.cacheService, // Use our own cache service reference
       config

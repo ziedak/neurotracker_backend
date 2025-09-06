@@ -236,20 +236,20 @@ export class ElysiaServerBuilder {
   build(): Elysia {
     let app = new Elysia({
       websocket: this.config.websocket?.enabled
-        ? {
+        ? ({
             idleTimeout: this.config.websocket.idleTimeout,
             maxPayloadLength: this.config.websocket.maxPayloadLength,
             perMessageDeflate: this.config.websocket.perMessageDeflate,
             backpressureLimit: this.config.websocket.backpressureLimit,
             closeOnBackpressureLimit:
               this.config.websocket.closeOnBackpressureLimit,
-          }
+          } as any)
         : undefined,
     });
 
     // Setup core functionality
     setupCorePlugins(app, this.config);
-    setupErrorHandling(app, this.config);
+    setupErrorHandling(app);
     setupMiddleware(app, this.config);
 
     // Add default health endpoint
@@ -354,6 +354,7 @@ export class ElysiaServerBuilder {
       this.logger.info("Shutting down gracefully");
       // Cleanup all WebSocket connections
       for (const [connectionId, ws] of this.connections) {
+        this.cleanupConnection(connectionId, ws);
         ws.close(1001, "Server shutting down");
       }
       server.stop();

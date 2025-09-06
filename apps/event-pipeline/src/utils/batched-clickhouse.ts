@@ -1,20 +1,20 @@
 import { ClickHouseClient } from "@libs/database";
-import { Logger } from "@libs/monitoring";
+import { createLogger } from "@libs/utils";
+import { inject } from "tsyringe";
 
 /**
  * Optimized ClickHouse operations for batch processing
  * Reduces database overhead through efficient batching
  */
 export class BatchedClickHouseOperations {
-  private clickhouse: any;
-  private logger: ILogger;
   private batchSize: number;
   private pendingEvents: any[] = [];
   private flushTimer: NodeJS.Timeout | null = null;
-
-  constructor(clickhouseClient?: any, batchSize: number = 100) {
-    this.clickhouse = clickhouseClient || ClickHouseClient.getInstance();
-    this.logger = Logger.getInstance("BatchedClickHouseOperations");
+  private logger = createLogger("BatchedClickHouseOperations");
+  constructor(
+    @inject("ClickHouseClient") private clickhouse: ClickHouseClient,
+    batchSize: number = 100
+  ) {
     this.batchSize = batchSize;
   }
 

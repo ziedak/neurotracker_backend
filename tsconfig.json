@@ -5,13 +5,16 @@
     { "path": "apps/event-pipeline" },
     { "path": "apps/dashboard" },
     { "path": "apps/ai-engine" },
+
     { "path": "libs/auth" },
+    { "path": "libs/cache" },
     { "path": "libs/config" },
     { "path": "libs/database" },
     { "path": "libs/elysia-server" },
     { "path": "libs/messaging" },
+    { "path": "libs/middleware" },
     { "path": "libs/monitoring" },
-    { "path": "libs/utils" },
-    { "path": "libs/middleware" }
+    { "path": "libs/ratelimit" },
+    { "path": "libs/utils" }
   ]
 }

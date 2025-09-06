@@ -1,5 +1,6 @@
 import { ServiceRegistry, IServiceRegistry } from "@libs/utils";
 import { RedisClient, PostgreSQLClient } from "@libs/database";
+import { CacheService } from "@libs/cache";
 import { Logger, MetricsCollector, HealthChecker } from "@libs/monitoring";
 import { DeliveryService } from "./delivery/delivery.service";
 import { TemplateService } from "./notifications/template.service";
@@ -83,18 +84,23 @@ export class InterventionEngineContainer {
   }
 
   /**
-   * Register database clients as singletons using static getInstance() patterns
+   * Register database clients with proper dependency injection
    */
   private registerDatabaseClients(): void {
-    // Redis client - using static getInstance
+    // Redis client - using static getInstance (legacy pattern)
     this._registry.registerSingleton("redisClient", () =>
       RedisClient.getInstance()
     );
 
-    // PostgreSQL client - using static getInstance (for intervention data)
-    this._registry.registerSingleton("postgresClient", () =>
-      PostgreSQLClient.getInstance()
-    );
+    // PostgreSQL client - using proper TSyringe DI (for intervention data)
+    this._registry.registerSingleton("postgresClient", () => {
+      const logger = this._registry.resolve<Logger>("logger");
+      const metrics =
+        this._registry.resolve<MetricsCollector>("metricsCollector");
+      const cacheService = this._registry.resolve<CacheService>("cacheService");
+
+      return new PostgreSQLClient(logger, metrics, cacheService);
+    });
   }
 
   /**

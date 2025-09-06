@@ -1,7 +1,8 @@
-import { Logger, MetricsCollector } from "@libs/monitoring";
+import { MetricsCollector } from "@libs/monitoring";
 import { PostgreSQLClient } from "@libs/database";
 import { CacheService } from "./CacheService";
 import { APIGatewayService } from "./APIGatewayService";
+import { createLogger } from "@libs/utils";
 
 export interface User {
   id: string;
@@ -47,21 +48,19 @@ export interface UpdateUserData {
  * Handles user management and authentication
  */
 export class UserService {
-  private readonly db = PostgreSQLClient.getInstance();
+  private readonly db = PostgreSQLClient;
   private readonly cache: CacheService;
   private readonly gateway: APIGatewayService;
-  private readonly logger: ILogger;
+  private readonly logger = createLogger("dashboard-user-service");
   private readonly metrics: MetricsCollector;
 
   constructor(
     cache: CacheService,
     gateway: APIGatewayService,
-    logger: ILogger,
     metrics: MetricsCollector
   ) {
     this.cache = cache;
     this.gateway = gateway;
-    this.logger = logger;
     this.metrics = metrics;
   }
 

@@ -1,30 +1,34 @@
-import { Logger } from "@libs/monitoring";
+import { createLogger } from "@libs/utils";
 import { HttpClient } from "@libs/messaging";
+import { injectable } from "tsyringe";
 
+@injectable()
 export class RoutingService {
-  private logger: ILogger;
+  private logger;
+  private httpClient: HttpClient;
 
   constructor() {
-    this.logger = Logger.getInstance("RoutingService");
+    this.logger = createLogger("RoutingService");
+    this.httpClient = new HttpClient();
   }
 
   async route(event: any): Promise<void> {
     try {
       switch (event.eventType) {
         case "cart_abandoned":
-          await HttpClient.post(
+          await this.httpClient.post(
             "http://prediction:3002/api/predict/analyze",
             event
           );
           break;
         case "cart_updated":
-          await HttpClient.post(
+          await this.httpClient.post(
             "http://analytics:3004/api/analytics/update",
             event
           );
           break;
         case "purchase_completed":
-          await HttpClient.post(
+          await this.httpClient.post(
             "http://completion:3005/api/completion/trigger",
             event
           );

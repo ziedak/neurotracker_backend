@@ -29,7 +29,7 @@ export function setupMiddleware(app: Elysia, config: ServerConfig) {
 
   // Basic rate limiting placeholder
   if (config.rateLimiting?.enabled) {
-    app.onBeforeHandle(async ({ request, set }: any) => {
+    app.onBeforeHandle(async ({ request }: any) => {
       try {
         const url = new URL(request.url);
 

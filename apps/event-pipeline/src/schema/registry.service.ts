@@ -1,6 +1,4 @@
-import { Logger } from "@libs/monitoring";
-
-const logger = Logger.getInstance("event-pipeline-schema-registry");
+import { createLogger } from "libs/utils/src/Logger";
 
 interface SchemaVersion {
   version: string;
@@ -10,6 +8,7 @@ interface SchemaVersion {
 
 export class RegistryService {
   private registry: Map<string, SchemaVersion> = new Map();
+  private logger = createLogger("event-pipeline-schema-registry");
 
   registerSchema(version: string, schema: any) {
     this.registry.set(version, {
@@ -17,7 +16,7 @@ export class RegistryService {
       schema,
       registeredAt: new Date().toISOString(),
     });
-    logger.info("Schema registered", { version });
+    this.logger.info("Schema registered", { version });
   }
 
   getSchema(version: string): SchemaVersion | undefined {

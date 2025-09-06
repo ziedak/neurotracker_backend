@@ -4,9 +4,10 @@ import Redis, {
   type ChainableCommander,
   type RedisKey,
 } from "ioredis";
-import { injectable, inject, executeRedisWithRetry } from "@libs/utils";
-import { MetricsCollector, type ILogger } from "@libs/monitoring";
+import { injectable, inject } from "tsyringe";
+import { MetricsCollector } from "@libs/monitoring";
 import { getEnv, getNumberEnv, getBooleanEnv } from "@libs/config";
+import { createLogger, executeRedisWithRetry } from "@libs/utils";
 
 @injectable()
 export class RedisClient {
@@ -15,9 +16,9 @@ export class RedisClient {
   private retryCount = 0;
   private maxRetries = 3;
   private reconnectDelay = 1000;
+  private readonly logger = createLogger("RedisClient");
 
   constructor(
-    @inject("Logger") private logger: ILogger,
     @inject("MetricsCollector") private metrics: MetricsCollector,
     redisOptions?: RedisOptions
   ) {
@@ -135,6 +136,9 @@ export class RedisClient {
     }
   }
 
+  exists(...args: RedisKey[]): Promise<number> {
+    return this.redis.exists(...args);
+  }
   async ping(): Promise<boolean> {
     try {
       const result = await this.redis.ping();
@@ -200,6 +204,28 @@ export class RedisClient {
 
   getRedis(): Redis {
     return this.redis;
+  }
+
+  async safeMget(...args: RedisKey[]): Promise<(string | null)[]> {
+    try {
+      return await executeRedisWithRetry(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.mget(...args)),
+        (error) =>
+          this.logger.warn(
+            `Safe mget failed for keys ${args.join(", ")}`,
+            error
+          ),
+        {
+          operationName: "redis_mget",
+          enableCircuitBreaker: true, // Enable for command-level protection
+          enableMetrics: true,
+        }
+      );
+    } catch (error) {
+      this.logger.warn(`Safe mget failed for keys ${args.join(", ")}`, error);
+      return new Array(args.length).fill(null);
+    }
   }
 
   /**
@@ -341,7 +367,7 @@ export class RedisClient {
     }
   }
 
-  async isAvailable(): Promise<boolean> {
+  async isHealthy(): Promise<boolean> {
     if (!this.redis) {
       return false;
     }
@@ -355,10 +381,6 @@ export class RedisClient {
     } catch {
       return false;
     }
-  }
-
-  isHealthy(): boolean {
-    return this.isConnected;
   }
 
   /**

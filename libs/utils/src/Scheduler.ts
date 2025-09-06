@@ -1,19 +1,22 @@
+import { setTimeout, setInterval, clearTimeout, clearInterval } from "timers";
+import { injectable } from "tsyringe";
+
 interface Timer {
   type: "timeout" | "interval";
-  id: number;
+  id: NodeJS.Timeout | number; // Support both Node.js and browser environments
 }
 
 export interface IScheduler {
   setInterval(key: string, ms: number, callback: () => void): void;
   setTimeout(key: string, ms: number, callback: () => void): void;
-  clearInterval(key: string): void;
-  clearTimeout(key: string): void;
+  clear(key: string): void;
   clearAll(): void;
 }
 /**
  * Service for managing timeouts and intervals across the application
  * Prevents memory leaks by ensuring all timers are properly cleaned up
  */
+@injectable()
 export class Scheduler implements IScheduler {
   private timers: Map<string, Timer> = new Map();
 
@@ -22,7 +25,7 @@ export class Scheduler implements IScheduler {
    */
   public setInterval(key: string, ms: number, callback: () => void): void {
     this.clearInterval(key); // Clear any existing interval with this key
-    const id = window.setInterval(callback, ms);
+    const id = setInterval(callback, ms);
     this.timers.set(key, { type: "interval", id });
   }
 
@@ -31,20 +34,29 @@ export class Scheduler implements IScheduler {
    */
   public setTimeout(key: string, ms: number, callback: () => void): void {
     this.clearTimeout(key); // Clear any existing timeout with this key
-    const id = window.setTimeout(() => {
+    const id = setTimeout(() => {
       callback();
       this.timers.delete(key);
     }, ms);
     this.timers.set(key, { type: "timeout", id });
   }
+  public clear(key: string): void {
+    this.clearInterval(key);
+    this.clearTimeout(key);
+  }
+  public clearByKeys(keys: string[]): void {
+    keys.forEach((key) => {
+      this.clear(key);
+    });
+  }
 
   /**
    * Clear an interval by key
    */
-  public clearInterval(key: string): void {
+  private clearInterval(key: string): void {
     const timer = this.timers.get(key);
     if (timer?.type === "interval") {
-      window.clearInterval(timer.id);
+      clearInterval(timer.id as NodeJS.Timeout);
       this.timers.delete(key);
     }
   }
@@ -52,10 +64,10 @@ export class Scheduler implements IScheduler {
   /**
    * Clear a timeout by key
    */
-  public clearTimeout(key: string): void {
+  private clearTimeout(key: string): void {
     const timer = this.timers.get(key);
     if (timer?.type === "timeout") {
-      window.clearTimeout(timer.id);
+      clearTimeout(timer.id as NodeJS.Timeout);
       this.timers.delete(key);
     }
   }
@@ -66,9 +78,9 @@ export class Scheduler implements IScheduler {
   public clearAll(): void {
     for (const [key, timer] of this.timers) {
       if (timer.type === "interval") {
-        window.clearInterval(timer.id);
+        clearInterval(timer.id as NodeJS.Timeout);
       } else {
-        window.clearTimeout(timer.id);
+        clearTimeout(timer.id as NodeJS.Timeout);
       }
       this.timers.delete(key);
     }

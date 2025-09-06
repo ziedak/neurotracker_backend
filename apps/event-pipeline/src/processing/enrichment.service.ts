@@ -1,14 +1,10 @@
 import { PostgreSQLClient } from "@libs/database";
-import { Logger } from "@libs/monitoring";
+import { createLogger } from "libs/utils/src/Logger";
+import { inject } from "tsyringe";
 
 export class EnrichmentService {
-  private db: any;
-  private logger: ILogger;
-
-  constructor() {
-    this.db = PostgreSQLClient.getInstance();
-    this.logger = Logger.getInstance("EnrichmentService");
-  }
+  private logger = createLogger("EnrichmentService");
+  constructor(@inject("PostgreSQLClient") private db: PostgreSQLClient) {}
 
   async enrich(event: any): Promise<any> {
     try {

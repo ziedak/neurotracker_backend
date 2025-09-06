@@ -70,7 +70,7 @@ export class BasicWebSocketService {
   private rateLimiter: ElysiaWebSocketRateLimiter;
 
   constructor(
-    @inject("ILogger") private logger: ILogger,
+    ,
     @inject("IMetricsCollector") private metrics: IMetricsCollector,
     @inject("RedisClient") private redisClient: RedisClient
   ) {
@@ -247,7 +247,7 @@ export class MultiAppWebSocketService {
   private rateLimiter: ElysiaWebSocketRateLimiter;
 
   constructor(
-    @inject("ILogger") private logger: ILogger,
+    ,
     @inject("IMetricsCollector") private metrics: IMetricsCollector,
     @inject("RedisClient") private redisClient: RedisClient
   ) {
@@ -475,7 +475,7 @@ export class CustomRateLimitWebSocketService {
   private rateLimiter: ElysiaWebSocketRateLimiter;
 
   constructor(
-    @inject("ILogger") private logger: ILogger,
+    ,
     @inject("IMetricsCollector") private metrics: IMetricsCollector,
     @inject("RedisClient") private redisClient: RedisClient
   ) {

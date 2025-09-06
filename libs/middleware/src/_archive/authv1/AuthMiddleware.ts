@@ -203,7 +203,7 @@ export class AuthMiddleware extends BaseMiddleware<AuthConfig> {
     const finalConfig = config ? { ...this.config, ...config } : this.config;
     const middleware = new AuthMiddleware(
       finalConfig,
-      this.logger,
+
       this.metrics
     );
 

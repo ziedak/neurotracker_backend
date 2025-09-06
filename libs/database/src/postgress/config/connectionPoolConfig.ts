@@ -1,4 +1,4 @@
-import { z } from "@libs/utils";
+import { z } from "zod";
 import { getBooleanEnv, getNumberEnv } from "@libs/config";
 
 export interface ConnectionPoolStats {

@@ -73,7 +73,6 @@ export class SecurityMiddleware extends BaseMiddleware<SecurityConfig> {
   };
 
   constructor(
-    @inject("ILogger") logger: ILogger,
     @inject("IMetricsCollector") metrics: IMetricsCollector,
     config: SecurityConfig
   ) {
@@ -123,7 +122,7 @@ export class SecurityMiddleware extends BaseMiddleware<SecurityConfig> {
   protected override createInstance(
     config: SecurityConfig
   ): SecurityMiddleware {
-    return new SecurityMiddleware(this.logger, this.metrics, config);
+    return new SecurityMiddleware(this.metrics, config);
   }
 
   /**

@@ -1,12 +1,14 @@
 /**
- *import { type ILogger } from "@libs/monitoring";Phase 2: Connection Pool Management Service
+ * Phase 2: Connection Pool Management Service
  * Advanced connection lifecycle and pool optimization
  */
 
+import { PrismaClient } from "@prisma/client";
 import { PostgreSQLClient } from "./PostgreSQLClient";
-import { type ILogger } from "@libs/monitoring";
+
 import {
   AppError,
+  createLogger,
   executeWithRetry,
   Scheduler,
   type IScheduler,
@@ -25,7 +27,7 @@ export interface IConnectionPoolManager {
     release: () => void;
   }>;
   getConnectionPrisma(): Promise<{
-    prisma: ReturnType<typeof PostgreSQLClient.getInstance>;
+    prisma: PrismaClient;
     release: () => void;
   }>;
   executeQuery<T>(query: string, params?: any[]): Promise<T[]>;
@@ -45,7 +47,9 @@ export interface IConnectionPoolManager {
  */
 export class ConnectionPoolManager implements IConnectionPoolManager {
   private readonly config: ConnectionPoolConfig;
-  private readonly logger: ILogger;
+  private readonly logger = createLogger("ConnectionPoolManager");
+
+  private readonly postgresClient: PostgreSQLClient;
 
   private stats: ConnectionPoolStats = {
     activeConnections: 0,
@@ -68,7 +72,10 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
   private queryTimingIndex = 0;
   private scheduler: IScheduler;
 
-  constructor(logger: ILogger, config: Partial<ConnectionPoolConfig> = {}) {
+  constructor(
+    postgresClient: PostgreSQLClient,
+    config: Partial<ConnectionPoolConfig> = {}
+  ) {
     const mergedConfig = { ...DEFAULT_POOL_CONFIG, ...config };
     const parsedConfig = ConnectionPoolConfigSchema.safeParse(mergedConfig);
     if (!parsedConfig.success) {
@@ -80,7 +87,7 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
     }
     this.config = parsedConfig.data;
 
-    this.logger = logger.child({ context: "ConnectionPoolManager" });
+    this.postgresClient = postgresClient;
     this.scheduler = new Scheduler();
     // Store circuit breaker configuration
     this.circuitBreakerEnabled = this.config.enableCircuitBreaker || false;
@@ -160,9 +167,10 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
         execute: async <T>(query: string, params?: any[]): Promise<T[]> => {
           const queryStart = performance.now();
           try {
-            const result = (await PostgreSQLClient.getInstance()[
-              "$queryRawUnsafe"
-            ](query, ...(params || []))) as T[];
+            const result = (await this.postgresClient.executeRaw(
+              query,
+              ...(params || [])
+            )) as T[];
             this.updateQueryTiming(performance.now() - queryStart);
             return result;
           } catch (error) {
@@ -189,13 +197,13 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
    * Get connection for Prisma ORM queries
    */
   async getConnectionPrisma(): Promise<{
-    prisma: ReturnType<typeof PostgreSQLClient.getInstance>;
+    prisma: PrismaClient;
     release: () => void;
   }> {
     try {
       const { release } = await this.acquireConnection();
       return {
-        prisma: PostgreSQLClient.getInstance(),
+        prisma: this.postgresClient,
         release,
       };
     } catch (error) {
@@ -240,7 +248,7 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
     const startTime = performance.now();
 
     try {
-      const result = await PostgreSQLClient.transaction(async (prisma) => {
+      const result = await this.postgresClient.transaction(async (prisma) => {
         const execute = async (
           query: string,
           params?: any[]
@@ -328,9 +336,9 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
       async () => {
         const startTime = performance.now();
 
-        await PostgreSQLClient.connect();
+        await this.postgresClient.connect();
 
-        const health = await PostgreSQLClient.healthCheck();
+        const health = await this.postgresClient.healthCheck();
         if (health.status !== "healthy") {
           throw new AppError(
             `Connection health check failed: ${health.status}`,
@@ -408,7 +416,7 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
   }> {
     try {
       // Check database connectivity
-      const health = await PostgreSQLClient.healthCheck();
+      const health = await this.postgresClient.healthCheck();
       if (health.status !== "healthy") {
         return {
           healthy: false,

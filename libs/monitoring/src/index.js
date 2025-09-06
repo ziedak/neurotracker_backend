@@ -1,7 +1,9 @@
+// Export Pino-based logger as the primary logger
+// Keep other monitoring exports
 export * from "./MetricsCollector";
-export * from "./Logger";
+export * from "./PrometheusMetricsCollector";
 export * from "./HealthChecker";
 export * from "./RequestTracer";
-export * from "./RateLimiter";
-export * from "./timed";
+// Re-export specific items to avoid conflicts
+export { timed as legacyTimed } from "./timed";
 //# sourceMappingURL=index.js.map

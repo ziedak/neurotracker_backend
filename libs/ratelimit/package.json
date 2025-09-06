@@ -13,7 +13,6 @@
     "lint:fix": "eslint src/**/*.ts --fix"
   },
   "dependencies": {
-    "@libs/cache": "workspace:*",
     "@libs/database": "workspace:*",
     "@libs/monitoring": "workspace:*",
     "@libs/utils": "workspace:*"

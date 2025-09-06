@@ -86,7 +86,7 @@ class SessionSynchronizer {
   private readonly metrics: MetricsCollector;
 
   constructor(logger: ILogger, metrics: MetricsCollector) {
-    this.logger = logger.child({ component: "SessionSynchronizer" });
+    this.logger = createLogger( "SessionSynchronizer" });
     this.metrics = metrics;
   }
 
@@ -371,18 +371,18 @@ export class UnifiedSessionManager {
     metrics: MetricsCollector
   ) {
     this.config = { ...DEFAULT_UNIFIED_SESSION_MANAGER_CONFIG, ...config };
-    this.logger = logger.child({ component: "UnifiedSessionManager" });
+    this.logger = createLogger( "UnifiedSessionManager" });
     this.metrics = metrics;
 
     // Initialize stores
     this.redisStore = new RedisSessionStore(
       this.config.redis,
-      this.logger,
+
       this.metrics
     );
     this.postgresStore = new PostgreSQLSessionStore(
       this.config.postgresql,
-      this.logger,
+
       this.metrics
     );
 
@@ -392,8 +392,8 @@ export class UnifiedSessionManager {
       timeout: this.config.circuitBreakerTimeout,
       resetTimeout: this.config.circuitBreakerTimeout * 2,
     });
-    this.synchronizer = new SessionSynchronizer(this.logger, this.metrics);
-    this.operationHelper = new OperationHelper(this.logger, this.metrics);
+    this.synchronizer = new SessionSynchronizer(this.metrics);
+    this.operationHelper = new OperationHelper(this.metrics);
   }
 
   /**

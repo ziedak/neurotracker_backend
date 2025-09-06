@@ -4,6 +4,7 @@ import {
   ClickHouseClient,
   PostgreSQLClient,
 } from "@libs/database";
+import { CacheService } from "@libs/cache";
 import { Logger, MetricsCollector, HealthChecker } from "@libs/monitoring";
 import { FeatureStoreService } from "./services/featureStore.service";
 import { DataExportService } from "./services/dataExport.service";
@@ -119,23 +120,28 @@ export class DataIntelligenceContainer {
   }
 
   /**
-   * Register database clients as singletons using static getInstance() patterns
+   * Register database clients as singletons using proper dependency injection
    */
   private registerDatabaseClients(): void {
-    // Redis client - using static getInstance
+    // Redis client - using static getInstance (legacy pattern)
     this._registry.registerSingleton("redisClient", () =>
       RedisClient.getInstance()
     );
 
-    // ClickHouse client - using static getInstance
+    // ClickHouse client - using static getInstance (legacy pattern)
     this._registry.registerSingleton("clickhouseClient", () =>
       ClickHouseClient.getInstance()
     );
 
-    // PostgreSQL client - using static getInstance
-    this._registry.registerSingleton("postgresClient", () =>
-      PostgreSQLClient.getInstance()
-    );
+    // PostgreSQL client - using proper TSyringe DI
+    this._registry.registerSingleton("postgresClient", () => {
+      const logger = this._registry.resolve<Logger>("logger");
+      const metrics =
+        this._registry.resolve<MetricsCollector>("metricsCollector");
+      const cacheService = this._registry.resolve<CacheService>("cacheService");
+
+      return new PostgreSQLClient(logger, metrics, cacheService);
+    });
   }
 
   /**
@@ -295,9 +301,14 @@ export class DataIntelligenceContainer {
    */
   public async connectDatabases(): Promise<void> {
     try {
+      // Redis and ClickHouse - legacy static connections
       await RedisClient.connect();
       // ClickHouse connects automatically on first query
-      await PostgreSQLClient.connect();
+
+      // PostgreSQL - use DI instance
+      const postgresClient =
+        this._registry.resolve<PostgreSQLClient>("postgresClient");
+      await postgresClient.connect();
 
       const logger = this._registry.resolve<Logger>("logger");
       logger.info("Database connections established");
@@ -316,11 +327,15 @@ export class DataIntelligenceContainer {
       const logger = this._registry.resolve<Logger>("logger");
       logger.info("Disposing Data Intelligence Container");
 
-      // Close database connections using static methods
+      // Close database connections
+      const postgresClient =
+        this._registry.resolve<PostgreSQLClient>("postgresClient");
       await Promise.all([
+        // Legacy static disconnections for Redis/ClickHouse
         RedisClient.disconnect(),
         ClickHouseClient.disconnect(),
-        PostgreSQLClient.disconnect(),
+        // DI instance disconnection for PostgreSQL
+        postgresClient.disconnect(),
       ]);
 
       // Dispose registry

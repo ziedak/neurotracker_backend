@@ -44,7 +44,7 @@ export class ApiKeyAuth {
 
   constructor(config: AuthConfig, logger: ILogger) {
     this.config = config;
-    this.logger = logger.child({ component: "ApiKeyAuth" });
+    this.logger = createLogger( "ApiKeyAuth" });
   }
 
   /**

@@ -1,18 +1,14 @@
 import { RedisClient } from "@libs/database";
-import { Logger } from "@libs/monitoring";
+import { createLogger } from "libs/utils/src/Logger";
+import inject from "tsyringe/dist/typings/decorators/inject";
 
 /**
  * Optimized batch operations for Redis
  * Reduces network overhead by grouping operations
  */
 export class BatchedRedisOperations {
-  private redis: any;
-  private logger: ILogger;
-
-  constructor(redisClient?: any) {
-    this.redis = redisClient || RedisClient.getInstance();
-    this.logger = Logger.getInstance("BatchedRedisOperations");
-  }
+  private logger = createLogger("BatchedRedisOperations");
+  constructor(@inject("RedisClient") private redis: RedisClient) {}
 
   /**
    * Batch duplicate check for multiple events
@@ -22,7 +18,7 @@ export class BatchedRedisOperations {
     if (eventKeys.length === 0) return [];
 
     try {
-      const pipeline = this.redis.pipeline();
+      const pipeline = await this.redis.safePipeline();
 
       // Add all exists commands to pipeline
       eventKeys.forEach((key) => {
@@ -32,7 +28,7 @@ export class BatchedRedisOperations {
       const results = await pipeline.exec();
 
       // Extract boolean results
-      const duplicates = results.map((result: any) => {
+      const duplicates = (results ?? []).map((result: any) => {
         const [error, value] = result;
         if (error) {
           this.logger.warn("Redis exists check failed", {
@@ -66,7 +62,7 @@ export class BatchedRedisOperations {
     if (eventData.length === 0) return;
 
     try {
-      const pipeline = this.redis.pipeline();
+      const pipeline = await this.redis.safePipeline();
 
       // Add all setex commands to pipeline
       eventData.forEach(({ key, value, ttl = 3600 }) => {
@@ -111,11 +107,14 @@ export class BatchedRedisOperations {
     }
 
     // Return results
-    return events.map((event, index) => ({
-      key: event.key,
-      isDuplicate: duplicates[index],
-      cached: !duplicates[index],
-    }));
+    return events.map((event, index) => {
+      const isDuplicate = duplicates[index] ?? false;
+      return {
+        key: event.key,
+        isDuplicate,
+        cached: !isDuplicate,
+      };
+    });
   }
 
   /**
@@ -125,7 +124,7 @@ export class BatchedRedisOperations {
     if (keys.length === 0) return [];
 
     try {
-      return await this.redis.mget(...keys);
+      return await this.redis.safeMget(...keys);
     } catch (error) {
       this.logger.error("Batch get failed", error as Error);
       return new Array(keys.length).fill(null);
@@ -140,7 +139,7 @@ export class BatchedRedisOperations {
     if (entries.length === 0) return;
 
     try {
-      const pipeline = this.redis.pipeline();
+      const pipeline = await this.redis.safePipeline();
 
       entries.forEach(([key, value]) => {
         pipeline.set(key, value);

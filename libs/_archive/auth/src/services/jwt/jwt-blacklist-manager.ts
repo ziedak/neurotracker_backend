@@ -199,7 +199,7 @@ class RedisStorageAdapter {
     logger: ILogger,
     metrics: MetricsCollector
   ) {
-    this.logger = logger.child({ component: "RedisStorageAdapter" });
+    this.logger = createLogger( "RedisStorageAdapter" });
     this.metrics = metrics;
     this.keyPrefix = config.keyPrefix;
 
@@ -548,7 +548,7 @@ class BlacklistBusinessLogic {
 
   constructor(config: BlacklistManagerConfig, logger: ILogger) {
     this.config = config;
-    this.logger = logger.child({ component: "BlacklistBusinessLogic" });
+    this.logger = createLogger( "BlacklistBusinessLogic" });
   }
 
   /**
@@ -711,7 +711,7 @@ class BlacklistCacheManager {
     logger: ILogger,
     metrics: MetricsCollector
   ) {
-    this.logger = logger.child({ component: "BlacklistCacheManager" });
+    this.logger = createLogger( "BlacklistCacheManager" });
     this.metrics = metrics;
 
     // Initialize token revocation cache
@@ -972,13 +972,13 @@ export class JWTBlacklistManager {
     // Initialize components
     this.storage = new RedisStorageAdapter(
       this.config,
-      this.logger,
+
       this.metrics
     );
     this.business = new BlacklistBusinessLogic(this.config, this.logger);
     this.cache = new BlacklistCacheManager(
       this.config,
-      this.logger,
+
       this.metrics
     );
   }

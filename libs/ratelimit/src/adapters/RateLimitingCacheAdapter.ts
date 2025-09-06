@@ -3,12 +3,12 @@
  * Phase 3.1.2: Enterprise-grade adapter combining cache library with rate limiting
  */
 
-import { type ILogger } from "@libs/monitoring";
 import {
   CacheService,
   CacheOperationLockManager,
   CacheConfigValidator,
 } from "@libs/cache";
+import { createLogger } from "@libs/utils";
 
 /**
  * Rate limiting result with detailed metrics
@@ -111,19 +111,15 @@ export class RateLimitingCacheAdapter {
   private readonly config: RateLimitingAdapterConfig;
   private readonly stats: RateLimitingStats;
   private readonly lockManager: CacheOperationLockManager;
-  private readonly logger: ILogger;
+  private readonly logger = createLogger("RateLimitingCacheAdapter");
 
   constructor(
     private readonly cacheService: CacheService,
     private readonly configValidator: CacheConfigValidator,
-    logger: ILogger,
+
     config: Partial<RateLimitingAdapterConfig> = {}
   ) {
     this.config = { ...DEFAULT_RATE_LIMITING_ADAPTER_CONFIG, ...config };
-    this.logger = logger.child({
-      service: "RateLimitingCacheAdapter",
-      keyPrefix: this.config.keyPrefix,
-    });
 
     this.lockManager = new CacheOperationLockManager(this.logger);
 

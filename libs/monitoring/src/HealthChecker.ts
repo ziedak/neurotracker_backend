@@ -1,4 +1,4 @@
-import type { ILogger } from "./Logger";
+import { createLogger } from "@libs/utils";
 
 // Health check utility
 export interface HealthCheck {
@@ -14,11 +14,8 @@ export class HealthChecker {
     { fn: () => Promise<boolean>; timeout?: number | undefined }
   > = new Map();
   private results: Map<string, HealthCheck> = new Map();
-  private logger: ILogger;
 
-  constructor(logger: ILogger) {
-    this.logger = logger.child({ component: "HealthChecker" });
-  }
+  private logger = createLogger("PrometheusMetricsCollector");
 
   registerCheck(
     name: string,

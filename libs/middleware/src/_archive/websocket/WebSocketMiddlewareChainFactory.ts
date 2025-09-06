@@ -270,14 +270,14 @@ export class WebSocketMiddlewareChainFactory {
     sessionManager: UnifiedSessionManager,
     permissionService?: PermissionService
   ): WebSocketMiddlewareChain {
-    const chain = new WebSocketMiddlewareChain(this.logger, this.metrics);
+    const chain = new WebSocketMiddlewareChain(this.metrics);
 
     // Initialize permission service if not provided
     const ps =
       permissionService ||
       new PermissionService(
         DEFAULT_PERMISSION_SERVICE_CONFIG,
-        this.logger,
+
         this.metrics || MetricsCollector.getInstance()
       );
 
@@ -285,7 +285,7 @@ export class WebSocketMiddlewareChainFactory {
     if (config.originValidation) {
       const originValidation = new WebSocketOriginValidationMiddleware(
         config.originValidation,
-        this.logger,
+
         this.metrics
       );
 
@@ -303,7 +303,7 @@ export class WebSocketMiddlewareChainFactory {
     if (config.rateLimit) {
       const rateLimit = new WebSocketRateLimitMiddleware(
         config.rateLimit,
-        this.logger,
+
         this.metrics
       );
 
@@ -322,7 +322,7 @@ export class WebSocketMiddlewareChainFactory {
     const auth = new WebSocketAuthMiddleware(
       config.auth,
       sessionManager,
-      this.logger,
+
       this.metrics,
       ps
     );
@@ -383,20 +383,20 @@ export class WebSocketMiddlewareChainFactory {
     sessionManager: UnifiedSessionManager,
     permissionService?: PermissionService
   ): WebSocketMiddlewareChain {
-    const chain = new WebSocketMiddlewareChain(this.logger, this.metrics);
+    const chain = new WebSocketMiddlewareChain(this.metrics);
 
     const ps =
       permissionService ||
       new PermissionService(
         DEFAULT_PERMISSION_SERVICE_CONFIG,
-        this.logger,
+
         this.metrics || MetricsCollector.getInstance()
       );
 
     const auth = new WebSocketAuthMiddleware(
       authConfig,
       sessionManager,
-      this.logger,
+
       this.metrics,
       ps
     );

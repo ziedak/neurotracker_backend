@@ -1,9 +1,10 @@
-import { UserEvent } from "@libs/models";
+import { UserEvent, RedisClient } from "@libs/database";
 import { ClickHouseClient } from "@libs/database";
-import { Logger } from "@libs/monitoring";
 import { RoutingService } from "../processing/routing.service";
 import { ValidationService } from "./validation.service";
-import { ServiceContainer } from "../container";
+
+import { createLogger } from "@libs/utils";
+import { inject } from "tsyringe";
 
 interface WebSocketMessage {
   type: string;
@@ -14,19 +15,15 @@ interface WebSocketMessage {
 }
 
 export class WebSocketGateway {
-  private redis: any;
-  private routingService: RoutingService;
-  private validationService: ValidationService;
-  private logger: ILogger;
+  private logger = createLogger("WebSocketGateway");
 
-  constructor() {
+  constructor(
     // Get services from container to avoid duplicate instantiation
-    const container = ServiceContainer.getInstance();
-    this.redis = container.getService("RedisClient");
-    this.routingService = container.getService("RoutingService");
-    this.validationService = container.getService("ValidationService");
-    this.logger = container.getService("Logger");
-  }
+    @inject("RedisClient") private redis: RedisClient,
+    @inject("ClickHouseClient") private clickhouse: ClickHouseClient,
+    @inject("RoutingService") private routingService: RoutingService,
+    @inject("ValidationService") private validationService: ValidationService
+  ) {}
 
   async handleConnection(ws: any) {
     this.logger.info("WebSocket connection opened", {
@@ -77,8 +74,8 @@ export class WebSocketGateway {
 
       // Deduplication (assume eventType+timestamp+userId as unique key)
       const eventKey = `event:${event.userId}:${event.eventType}:${event.timestamp}`;
-      const isDuplicate = await this.redis.exists(eventKey);
-      if (isDuplicate) {
+      const existingValue = await this.redis.safeGet(eventKey);
+      if (existingValue) {
         this.logger.info("Duplicate event ignored", { eventKey });
         ws.send(
           JSON.stringify({
@@ -97,10 +94,10 @@ export class WebSocketGateway {
       };
 
       // Store event in ClickHouse using static method
-      await ClickHouseClient.insert("raw_events", [clickhouseEvent]);
+      await this.clickhouse.insert("raw_events", [clickhouseEvent]);
 
       // Cache event in Redis for deduplication
-      await this.redis.setex(eventKey, 3600, JSON.stringify(event));
+      await this.redis.safeSetEx(eventKey, 3600, JSON.stringify(event));
 
       // Route event to downstream services
       await this.routingService.route(event);

@@ -1,10 +1,8 @@
+import { createLogger } from "@libs/utils";
 export class HealthChecker {
     checks = new Map();
     results = new Map();
-    logger;
-    constructor(logger) {
-        this.logger = logger.child({ component: "HealthChecker" });
-    }
+    logger = createLogger("PrometheusMetricsCollector");
     registerCheck(name, checkFn, timeoutMs) {
         this.checks.set(name, { fn: checkFn, timeout: timeoutMs });
     }

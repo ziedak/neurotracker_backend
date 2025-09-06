@@ -1,4 +1,3 @@
-import { type ILogger } from "@libs/monitoring";
 import { BaseMiddleware } from "../base";
 import type { MiddlewareContext, MiddlewareOptions } from "../types";
 import { generateUUId, inject } from "@libs/utils";

@@ -1,11 +1,10 @@
-import { Logger } from "@libs/monitoring";
-
-const logger = Logger.getInstance("event-pipeline-alerts");
+import { createLogger } from "@libs/utils";
 
 export class AlertsService {
+  private logger = createLogger("event-pipeline-alerts");
   alert(message: string, meta?: any) {
     // Log alert and optionally store/notify
-    logger.warn(`ALERT: ${message}`, meta);
+    this.logger.warn(`ALERT: ${message}`, meta);
     // TODO: Integrate with notification system (email, Slack, etc.)
   }
 }

@@ -25,7 +25,7 @@ export class MiddlewareChain {
     @inject("MiddlewareChainConfig") config: MiddlewareChainConfig,
     @inject("ILogger") logger: ILogger
   ) {
-    this.logger = logger.child({ component: "MiddlewareChain" });
+    this.logger = createLogger( "MiddlewareChain" });
     this.middlewares = config.middlewares
       .filter((m) => m.enabled !== false)
       .map((m) => ({

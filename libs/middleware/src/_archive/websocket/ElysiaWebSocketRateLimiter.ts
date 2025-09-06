@@ -65,7 +65,7 @@ export class ElysiaWebSocketRateLimiter {
   private readonly connectionCounts: Map<string, number> = new Map();
 
   constructor(
-    @inject("ILogger") private logger: ILogger,
+    ,
     @inject("IMetricsCollector") private metrics: IMetricsCollector,
     @inject("RedisClient") redisClient: RedisClient
   ) {

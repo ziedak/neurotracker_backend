@@ -1,7 +1,6 @@
 import { Elysia } from "elysia";
-import { ServerConfig } from "./config";
 
-export function setupErrorHandling(app: Elysia, config: ServerConfig) {
+export function setupErrorHandling(app: Elysia) {
   return app.onError(({ error, set, request }: any) => {
     const requestId = `err_${Date.now()}_${Math.random()
       .toString(36)

@@ -1,3 +1,4 @@
+import "reflect-metadata";
 import { WebSocketGateway } from "./ingestion/websocket.gateway";
 import { ValidationService } from "./ingestion/validation.service";
 import { RoutingService } from "./processing/routing.service";
@@ -5,44 +6,64 @@ import { BatchController } from "./ingestion/batch.controller";
 import { MetricsService } from "./monitoring/metrics.service";
 import { AlertsService } from "./monitoring/alerts.service";
 import { RedisClient, ClickHouseClient } from "@libs/database";
-import { Logger } from "@libs/monitoring";
+import { createLogger } from "@libs/utils";
 import { createElysiaServer, t } from "@libs/elysia-server";
 import { RegistryService } from "./schema/registry.service";
 import { ValidatorService as SchemaValidatorService } from "./schema/validator.service";
 import { MigrationService } from "./schema/migration.service";
-import { DeadLetterHandler } from "./deadletter/handler.service";
 import { RetryService } from "./deadletter/retry.service";
-import { ServiceContainer } from "./container";
+import { EventPipelineTsyringeContainer } from "./container";
 
-// Initialize the service container with all services
-const container = ServiceContainer.getInstance();
-container.initializeServices();
+// Initialize the tsyringe container
+await EventPipelineTsyringeContainer.initialize();
 
-// Get core services from container
-const logger = container.getService<Logger>("Logger");
-const redis = container.getService<any>("RedisClient");
-const clickhouse = container.getService<any>("ClickHouseClient");
+// Get core services from tsyringe container
+const logger = createLogger("event-pipeline-main");
 const validationService =
-  container.getService<ValidationService>("ValidationService");
-const routingService = container.getService<RoutingService>("RoutingService");
+  EventPipelineTsyringeContainer.getService(ValidationService);
+const routingService =
+  EventPipelineTsyringeContainer.getService(RoutingService);
+const redisClient =
+  EventPipelineTsyringeContainer.getServiceByToken<RedisClient>("RedisClient");
+const clickHouseClient =
+  EventPipelineTsyringeContainer.getServiceByToken<ClickHouseClient>(
+    "ClickHouseClient"
+  );
 
-// Initialize remaining services (will be added to container gradually)
-const wsGateway = new WebSocketGateway();
-const batchController = new BatchController();
-const metricsService = new MetricsService();
+// Resolve services with dependencies from container (they have @inject decorators)
+const wsGateway =
+  EventPipelineTsyringeContainer.getServiceByToken<WebSocketGateway>(
+    "WebSocketGateway"
+  );
+const batchController =
+  EventPipelineTsyringeContainer.getServiceByToken<BatchController>(
+    "BatchController"
+  );
+const metricsService =
+  EventPipelineTsyringeContainer.getServiceByToken<MetricsService>(
+    "MetricsService"
+  );
+
+// Initialize remaining services that don't use DI yet
 const alertsService = new AlertsService();
 const registryService = new RegistryService();
 const schemaValidator = new SchemaValidatorService();
 const migrationService = new MigrationService();
-const deadLetterHandler = new DeadLetterHandler();
 const retryService = new RetryService();
+
+logger.info("TSyringe container initialized successfully", {
+  validationService: !!validationService,
+  routingService: !!routingService,
+  redisClient: !!redisClient,
+  clickHouseClient: !!clickHouseClient,
+});
 
 const serverBuilder = createElysiaServer(
   {
     name: "event-pipeline Service",
     port: 3001,
     version: "1.0.0",
-    description: "Handles user event-pipeline and processing",
+    description: "Handles user event-pipeline and processing with TSyringe DI",
     swagger: {
       enabled: true,
       title: "event-pipeline API",
@@ -57,15 +78,15 @@ const serverBuilder = createElysiaServer(
       path: "/events/stream",
       maxPayloadLength: 16 * 1024,
       idleTimeout: 120,
-      // maxConnections: 50000,
     },
   },
   (app: any) => {
     return (
       app
         .get("/events", () => ({
-          service: "event-pipeline Service",
+          service: "event-pipeline Service (TSyringe)",
           status: "ready",
+          containerType: "tsyringe",
           endpoints: {
             "POST /events": "Ingest new events",
             "POST /events/batch": "Ingest batch of events",
@@ -81,7 +102,7 @@ const serverBuilder = createElysiaServer(
 
               // Deduplication
               const eventKey = `event:${event.userId}:${event.eventType}:${event.timestamp}`;
-              const isDuplicate = await redis.exists(eventKey);
+              const isDuplicate = await redisClient.safeGet(eventKey);
               if (isDuplicate) {
                 logger.info("Duplicate event ignored", { eventKey });
                 return { status: "duplicate", eventKey };
@@ -93,11 +114,11 @@ const serverBuilder = createElysiaServer(
                 metadata: JSON.stringify(event.metadata || {}),
               };
 
-              // Store event in ClickHouse using static method
-              await ClickHouseClient.insert("raw_events", [clickhouseEvent]);
+              // Store event in ClickHouse using the resolved instance
+              await clickHouseClient.insert("raw_events", [clickhouseEvent]);
 
               // Cache event in Redis for deduplication
-              await redis.setex(eventKey, 3600, JSON.stringify(event));
+              await redisClient.safeSet(eventKey, JSON.stringify(event), 3600);
 
               // Route event to downstream services
               await routingService.route(event);
@@ -147,9 +168,7 @@ const serverBuilder = createElysiaServer(
 
         // Metrics endpoint
         .get("/metrics", async () => {
-          const ingestionMetrics = await metricsService.getMetrics(
-            "batch_processed"
-          );
+          const ingestionMetrics = await metricsService.getMetrics();
           return { metrics: ingestionMetrics };
         })
 
@@ -220,8 +239,9 @@ const serverBuilder = createElysiaServer(
 
         // Dead letter endpoints
         .get("/deadletter", async () => {
-          const events = await redis.lrange("deadletter:events", 0, 99);
-          return { events: events.map((e: string) => JSON.parse(e)) };
+          const events =
+            (await redisClient.safeGet("deadletter:events")) || "[]";
+          return { events: JSON.parse(events) };
         })
         .post(
           "/deadletter/retry",
@@ -245,5 +265,5 @@ const serverBuilder = createElysiaServer(
       wsGateway.handleDisconnection(ws, code, reason),
   });
 
-const { app, server } = serverBuilder.start();
+const { server } = serverBuilder.start();
 server;

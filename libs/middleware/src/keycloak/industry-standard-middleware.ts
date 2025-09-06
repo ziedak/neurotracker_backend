@@ -123,11 +123,7 @@ export class IndustryStandardKeycloakMiddleware extends BaseMiddleware<IKeycloak
   protected override createInstance(
     options: IKeycloakMiddlewareOptions
   ): BaseMiddleware<IKeycloakMiddlewareOptions> {
-    return new IndustryStandardKeycloakMiddleware(
-      this.logger,
-      this.metrics,
-      options
-    );
+    return new IndustryStandardKeycloakMiddleware(this.metrics, options);
   }
 
   /**

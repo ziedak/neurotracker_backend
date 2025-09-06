@@ -165,7 +165,7 @@ export class WebSocketMiddlewareChain {
   private executionOrder: string[] = [];
 
   constructor(logger: ILogger, metrics?: MetricsCollector) {
-    this.logger = logger.child({ component: "WebSocketMiddlewareChain" });
+    this.logger = createLogger( "WebSocketMiddlewareChain" });
     this.metrics = metrics;
   }
 

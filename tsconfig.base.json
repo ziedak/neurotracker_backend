@@ -29,16 +29,15 @@
     "emitDecoratorMetadata": true,
     "baseUrl": ".",
     "paths": {
-      "@libs/models": ["libs/models/src"],
-      "@libs/utils": ["libs/utils/src"],
-      "@libs/config": ["libs/config/src"],
-      "@libs/messaging": ["libs/messaging/src"],
-      "@libs/database": ["libs/database/src"],
-      "@libs/cache": ["libs/cache/src"],
       "@libs/auth": ["libs/auth/src"],
-      "@libs/monitoring": ["libs/monitoring/src"],
+      "@libs/cache": ["libs/cache/src"],
+      "@libs/config": ["libs/config/src"],
+      "@libs/database": ["libs/database/src"],
       "@libs/elysia-server": ["libs/elysia-server/src"],
-      "@libs/middleware": ["libs/middleware/src"]
+      "@libs/messaging": ["libs/messaging/src"],
+      "@libs/middleware": ["libs/middleware/src"],
+      "@libs/monitoring": ["libs/monitoring/src"],
+      "@libs/utils": ["libs/utils/src"]
     }
   }
 }

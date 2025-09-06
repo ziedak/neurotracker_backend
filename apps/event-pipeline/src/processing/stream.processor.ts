@@ -1,12 +1,9 @@
 import { KafkaClient } from "@libs/messaging";
-import { Logger } from "@libs/monitoring";
+import { createLogger } from "@libs/utils";
 
 export class StreamProcessor {
-  private logger: ILogger;
-
-  constructor() {
-    this.logger = Logger.getInstance("StreamProcessor");
-  }
+  private logger = createLogger("StreamProcessor");
+  constructor() {}
 
   async process(event: any): Promise<void> {
     try {
