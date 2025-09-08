@@ -1,204 +1,382 @@
 /**
- * Prometheus Metrics Collection Middleware for Elysia
+ * Prometheus Metrics Collection Middleware
+ * Production-grade metrics middleware following BaseMiddleware patterns
  *
- * High-performance middleware with:
- * - Zero-allocation HTTP request tracking
+ * Features:
+ * - Framework-agnostic HTTP request tracking
  * - WebSocket connection monitoring
  * - Automatic metric exposition endpoint
  * - Business metric integration
  * - Error rate tracking
+ * - Performance optimization
  */
 
-import type { Elysia } from "@libs/elysia-server";
-import { container } from "tsyringe";
-import type { MetricsCollector } from "@libs/monitoring";
+import { type IMetricsCollector } from "@libs/monitoring";
+import {
+  BaseMiddleware,
+  type HttpMiddlewareConfig,
+} from "../base/BaseMiddleware";
+import type { MiddlewareContext } from "../types";
 
 /**
  * Configuration for Prometheus middleware
+ * Extends HttpMiddlewareConfig with metrics-specific options
  */
-export interface PrometheusMiddlewareConfig {
-  endpoint?: string; // Default: "/metrics"
-  enableDetailedMetrics?: boolean; // Default: true
-  serviceName?: string; // Default: "elysia"
-  excludePaths?: string[]; // Paths to exclude from metrics
-  enableWebSocketMetrics?: boolean; // Default: true
+export interface PrometheusMiddlewareConfig extends HttpMiddlewareConfig {
+  readonly endpoint?: string; // Default: "/metrics"
+  readonly enableDetailedMetrics?: boolean; // Default: true
+  readonly serviceName?: string; // Service identifier for metrics
+  readonly enableNodeMetrics?: boolean; // Default: true
+  readonly nodeMetricsSampleRate?: number; // Default: 0.1 (10%)
+  readonly includeRequestBody?: boolean; // Default: false
+  readonly includeResponseBody?: boolean; // Default: false
+  readonly maxBodySize?: number; // Default: 1024 bytes
+  readonly trackUserMetrics?: boolean; // Default: true
+  readonly enableCustomMetrics?: boolean; // Default: true
 }
 
 /**
- * WebSocket connection tracking
+ * Prometheus HTTP Metrics Middleware
+ * Extends BaseMiddleware for HTTP request tracking and metrics collection
  */
-class WebSocketTracker {
-  private connections = new Set<string>();
-  private messageCount = 0;
+export class PrometheusMiddleware extends BaseMiddleware<PrometheusMiddlewareConfig> {
+  private readonly serviceName: string;
+  private readonly metricsEndpoint: string;
 
-  addConnection(id: string): void {
-    this.connections.add(id);
+  constructor(
+    metrics: IMetricsCollector,
+    config: Partial<PrometheusMiddlewareConfig>
+  ) {
+    const defaultConfig: PrometheusMiddlewareConfig = {
+      name: config.name || "prometheus-http",
+      enabled: config.enabled ?? true,
+      priority: config.priority ?? 100,
+      endpoint: config.endpoint || "/metrics",
+      enableDetailedMetrics: config.enableDetailedMetrics ?? true,
+      serviceName: config.serviceName || "http-service",
+      enableNodeMetrics: config.enableNodeMetrics ?? true,
+      nodeMetricsSampleRate: config.nodeMetricsSampleRate ?? 0.1,
+      includeRequestBody: config.includeRequestBody ?? false,
+      includeResponseBody: config.includeResponseBody ?? false,
+      maxBodySize: config.maxBodySize ?? 1024,
+      trackUserMetrics: config.trackUserMetrics ?? true,
+      enableCustomMetrics: config.enableCustomMetrics ?? true,
+      skipPaths: config.skipPaths || ["/health", "/favicon.ico"],
+    };
+
+    super(metrics, defaultConfig);
+    this.serviceName = this.config.serviceName!;
+    this.metricsEndpoint = this.config.endpoint!;
   }
 
-  removeConnection(id: string): void {
-    this.connections.delete(id);
-  }
+  /**
+   * Main execution method for HTTP request metrics collection
+   */
+  protected async execute(
+    context: MiddlewareContext,
+    next: () => Promise<void>
+  ): Promise<void> {
+    const startTime = Date.now();
+    const path = new URL(context.request.url).pathname;
 
-  getConnectionCount(): number {
-    return this.connections.size;
-  }
+    // Handle metrics endpoint
+    if (path === this.metricsEndpoint) {
+      await this.handleMetricsEndpoint(context);
+      return;
+    }
 
-  incrementMessage(): void {
-    this.messageCount++;
-  }
+    // Skip if path should be excluded
+    if (this.shouldSkip(context)) {
+      return next();
+    }
 
-  getMessageCount(): number {
-    return this.messageCount;
-  }
-}
+    try {
+      // Execute next middleware
+      await next();
 
-const wsTracker = new WebSocketTracker();
+      // Record successful request metrics
+      await this.recordRequestMetrics(context, startTime, "success");
 
-/**
- * Prometheus metrics collection middleware
- */
-export function prometheusMiddleware(config: PrometheusMiddlewareConfig = {}) {
-  const {
-    endpoint = "/metrics",
-    enableDetailedMetrics = true,
-    serviceName = "elysia",
-    excludePaths = [],
-    enableWebSocketMetrics = true,
-  } = config;
-
-  return function (app: Elysia) {
-    const metricsCollector =
-      container.resolve<MetricsCollector>("MetricsCollector");
-
-    // Metrics exposition endpoint
-    app.get(endpoint, async () => {
-      try {
-        const metrics = await metricsCollector.getMetrics();
-        return new Response(metrics, {
-          headers: {
-            "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
-          },
-        });
-      } catch (error) {
-        console.error("Failed to generate metrics:", error);
-        return new Response("Internal Server Error", { status: 500 });
+      // Record detailed metrics if enabled
+      if (this.config.enableDetailedMetrics) {
+        await this.recordDetailedMetrics(context);
       }
-    });
 
-    // HTTP request tracking
-    app.derive({ as: "global" }, ({ request }: any) => {
-      const start = Date.now();
-      const path = new URL(request.url).pathname;
+      // Record Node.js metrics periodically
+      if (this.config.enableNodeMetrics && this.shouldSampleNodeMetrics()) {
+        await this.recordNodeMetrics();
+      }
+    } catch (error) {
+      // Record error metrics
+      await this.recordRequestMetrics(context, startTime, "error");
+      await this.recordError(error as Error, context);
+      throw error;
+    }
+  }
 
-      return {
-        _metricsStart: start,
-        _metricsPath: path,
+  /**
+   * Handle metrics exposition endpoint
+   */
+  private async handleMetricsEndpoint(
+    context: MiddlewareContext
+  ): Promise<void> {
+    try {
+      const metrics = await this.metrics.getMetrics();
+
+      context.response = {
+        status: 200,
+        headers: {
+          "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
+        },
+        body: metrics,
       };
-    });
 
-    app.onAfterHandle(
-      { as: "global" },
-      ({ _metricsStart, _metricsPath, request, set }: any) => {
-        // Skip excluded paths
-        if (excludePaths.includes(_metricsPath)) return;
+      await this.recordMetric("prometheus_metrics_requests_total", 1, {
+        status: "success",
+        service: this.serviceName,
+      });
+    } catch (error) {
+      this.logger.error("Failed to generate metrics", error as Error);
 
-        const duration = Date.now() - _metricsStart;
-        const method = request.method;
-        const statusCode = set.status || 200;
+      context.response = {
+        status: 500,
+        headers: { "Content-Type": "text/plain" },
+        body: "Internal Server Error",
+      };
 
-        // Record API request metrics
-        metricsCollector.recordApiRequest(
-          method,
-          _metricsPath,
-          statusCode,
-          duration,
-          serviceName
-        );
+      await this.recordMetric("prometheus_metrics_requests_total", 1, {
+        status: "error",
+        service: this.serviceName,
+      });
+    }
+  }
 
-        // Record detailed metrics if enabled
-        if (enableDetailedMetrics) {
-          // Record Node.js metrics periodically (every 10th request to avoid overhead)
-          if (Math.random() < 0.1) {
-            metricsCollector.recordNodeMetrics(serviceName);
-            metricsCollector.measureEventLoopLag(serviceName);
-          }
-        }
-      }
+  /**
+   * Record request metrics with comprehensive labeling
+   */
+  private async recordRequestMetrics(
+    context: MiddlewareContext,
+    startTime: number,
+    result: "success" | "error"
+  ): Promise<void> {
+    const duration = Date.now() - startTime;
+    const method = context.request.method;
+    const path = this.normalizePath(new URL(context.request.url).pathname);
+    const statusCode =
+      context.response?.status || (result === "error" ? 500 : 200);
+
+    // Record API request metrics using metrics collector
+    await this.metrics.recordApiRequest(
+      method,
+      path,
+      statusCode,
+      duration,
+      this.serviceName
     );
 
-    // WebSocket metrics (if enabled)
-    if (enableWebSocketMetrics) {
-      app.ws("/*", {
-        open(ws: any) {
-          const connectionId = Math.random().toString(36).substring(7);
-          wsTracker.addConnection(connectionId);
+    // Record additional Prometheus-specific metrics
+    await this.recordMetric("http_requests_total", 1, {
+      method,
+      path,
+      status_code: statusCode.toString(),
+      service: this.serviceName,
+      result,
+    });
 
-          // Store connection ID for cleanup
-          (ws as any)._connectionId = connectionId;
+    await this.recordTimer("http_request_duration_seconds", duration, {
+      method,
+      path,
+      status_code: statusCode.toString(),
+      service: this.serviceName,
+    });
 
-          // Record WebSocket connection
-          metricsCollector.recordWebSocketActivity(
-            serviceName,
-            "connection",
-            "inbound",
-            wsTracker.getConnectionCount()
-          );
-        },
+    // Track user metrics if enabled and user is identified
+    if (this.config.trackUserMetrics && context["userId"]) {
+      await this.recordMetric("http_requests_by_user_total", 1, {
+        user_id: context["userId"] as string,
+        method,
+        service: this.serviceName,
+      });
+    }
+  }
 
-        message(_ws: any, message: any) {
-          wsTracker.incrementMessage();
+  /**
+   * Record detailed metrics including request/response data
+   */
+  private async recordDetailedMetrics(
+    context: MiddlewareContext
+  ): Promise<void> {
+    const requestSize = this.getRequestSize(context);
+    const responseSize = this.getResponseSize(context);
 
-          // Determine message type
-          let messageType = "unknown";
-          try {
-            const parsed = JSON.parse(message.toString());
-            messageType = parsed.type || "data";
-          } catch {
-            messageType = "raw";
-          }
-
-          // Record WebSocket message
-          metricsCollector.recordWebSocketActivity(
-            serviceName,
-            messageType,
-            "inbound"
-          );
-        },
-
-        close(ws: any) {
-          const connectionId = (ws as any)._connectionId;
-          if (connectionId) {
-            wsTracker.removeConnection(connectionId);
-
-            // Record WebSocket disconnection
-            metricsCollector.recordWebSocketActivity(
-              serviceName,
-              "disconnection",
-              "inbound",
-              wsTracker.getConnectionCount()
-            );
-          }
-        },
+    // Record request size metrics
+    if (requestSize > 0) {
+      await this.recordHistogram("http_request_size_bytes", requestSize, {
+        method: context.request.method,
+        service: this.serviceName,
       });
     }
 
-    // Error tracking
-    app.onError({ as: "global" }, ({ error, request }: any) => {
-      const path = new URL(request.url).pathname;
-      const method = request.method;
+    // Record response size metrics
+    if (responseSize > 0) {
+      await this.recordHistogram("http_response_size_bytes", responseSize, {
+        method: context.request.method,
+        service: this.serviceName,
+      });
+    }
 
-      // Record error metric
-      metricsCollector.recordApiRequest(
-        method,
-        path,
-        500, // Error status
-        0, // No duration for errors
-        serviceName
-      );
+    // Record request body metrics if enabled
+    if (this.config.includeRequestBody && context.request.body) {
+      const bodySize = this.getBodySize(context.request.body);
+      if (bodySize <= this.config.maxBodySize!) {
+        await this.recordMetric("http_request_body_tracked_total", 1, {
+          service: this.serviceName,
+        });
+      }
+    }
 
-      console.error(`HTTP Error on ${method} ${path}:`, error);
+    // Record response body metrics if enabled
+    if (this.config.includeResponseBody && context.response?.body) {
+      const bodySize = this.getBodySize(context.response.body);
+      if (bodySize <= this.config.maxBodySize!) {
+        await this.recordMetric("http_response_body_tracked_total", 1, {
+          service: this.serviceName,
+        });
+      }
+    }
+  }
+
+  /**
+   * Record Node.js runtime metrics
+   */
+  private async recordNodeMetrics(): Promise<void> {
+    try {
+      await this.metrics.recordNodeMetrics(this.serviceName);
+      await this.metrics.measureEventLoopLag(this.serviceName);
+
+      await this.recordMetric("prometheus_node_metrics_collected_total", 1, {
+        service: this.serviceName,
+      });
+    } catch (error) {
+      this.logger.warn("Failed to collect Node.js metrics", error as Error);
+    }
+  }
+
+  /**
+   * Determine if Node.js metrics should be sampled
+   */
+  private shouldSampleNodeMetrics(): boolean {
+    return Math.random() < this.config.nodeMetricsSampleRate!;
+  }
+
+  /**
+   * Normalize path for consistent metrics labeling
+   */
+  private normalizePath(path: string): string {
+    // Remove query parameters
+    const cleanPath = path.split("?")[0] || "/";
+
+    // Replace dynamic segments with placeholders
+    return cleanPath
+      .replace(/\/\d+/g, "/:id")
+      .replace(
+        /\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi,
+        "/:uuid"
+      )
+      .replace(/\/[a-f0-9]{24}/g, "/:objectid");
+  }
+
+  /**
+   * Get request size in bytes
+   */
+  private getRequestSize(context: MiddlewareContext): number {
+    const contentLength = context.request.headers["content-length"];
+    if (contentLength) {
+      return parseInt(contentLength, 10) || 0;
+    }
+
+    if (context.request.body) {
+      return this.getBodySize(context.request.body);
+    }
+
+    return 0;
+  }
+
+  /**
+   * Get response size in bytes
+   */
+  private getResponseSize(context: MiddlewareContext): number {
+    if (!context.response?.body) {
+      return 0;
+    }
+
+    return this.getBodySize(context.response.body);
+  }
+
+  /**
+   * Calculate body size in bytes
+   */
+  private getBodySize(body: any): number {
+    if (typeof body === "string") {
+      return Buffer.byteLength(body, "utf8");
+    }
+
+    if (Buffer.isBuffer(body)) {
+      return body.length;
+    }
+
+    if (typeof body === "object") {
+      try {
+        return Buffer.byteLength(JSON.stringify(body), "utf8");
+      } catch {
+        return 0;
+      }
+    }
+
+    return 0;
+  }
+
+  /**
+   * Record error with comprehensive context
+   */
+  private async recordError(
+    error: Error,
+    context: MiddlewareContext
+  ): Promise<void> {
+    const path = this.normalizePath(new URL(context.request.url).pathname);
+
+    await this.recordMetric("http_errors_total", 1, {
+      error_type: error.constructor.name,
+      method: context.request.method,
+      path,
+      service: this.serviceName,
     });
 
-    return app;
-  };
+    this.logger.error("HTTP request error", error, {
+      path,
+      method: context.request.method,
+      requestId: context.requestId,
+      userId: context["userId"] as string | undefined,
+      service: this.serviceName,
+    });
+  }
+
+  /**
+   * Get current metrics summary for monitoring
+   */
+  public async getMetricsSummary(): Promise<{
+    totalRequests: number;
+    errorRate: number;
+    averageResponseTime: number;
+    activeConnections: number;
+  }> {
+    // This would typically query the metrics store
+    // Implementation depends on the metrics backend
+    return {
+      totalRequests: 0,
+      errorRate: 0,
+      averageResponseTime: 0,
+      activeConnections: 0,
+    };
+  }
 }

@@ -28,6 +28,9 @@ export * from "./factories/ChainFactory";
 // Export rate limiting middleware
 export * from "./rateLimit";
 
+// Export authentication middleware
+export * from "./auth";
+
 // Export error middleware (specific exports to avoid conflicts)
 export {
   ErrorMiddleware,
@@ -45,6 +48,22 @@ export {
   type WebSocketErrorResponse,
   type WebSocketCustomError,
 } from "./error/websocket-error.middleware";
+
+// Export audit middleware (specific exports to avoid conflicts)
+export {
+  AuditMiddleware,
+  createAuditMiddleware,
+  type AuditEvent,
+  type AuditQuery,
+  type AuditSummary,
+  type AuditConfig,
+} from "./audit/audit.middleware";
+
+// Export WebSocket audit middleware
+export * from "./audit/websocket";
+
+// Export Prometheus middleware
+export * from "./prometheus";
 
 // import { Logger, MetricsCollector } from "@libs/monitoring";
 // import { RedisClient, ClickHouseClient } from "@libs/database";

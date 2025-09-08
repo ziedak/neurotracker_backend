@@ -18,29 +18,21 @@
 
 export * from "./types";
 
-import {
+export {
   AuthenticationService,
   createAuthenticationService,
   initializeAuthenticationService,
 } from "./services/auth-service";
-import { JWTService } from "./services/jwt-service";
-import { KeycloakService } from "./services/keycloak-service";
-import { PermissionService } from "./services/permission-service";
-import { SessionService } from "./services/session-service";
-import { ApiKeyService } from "./services/api-key-service";
-import {
-  AuthMiddleware,
-  createAuthMiddleware,
-} from "./middleware/http-middleware";
+export { JWTService } from "./services/jwt-service";
+export { KeycloakService } from "./services/keycloak-service";
+export { PermissionService } from "./services/permission-service";
+export { SessionService } from "./services/session-service";
+export { ApiKeyService } from "./services/api-key-service";
 
-// ===================================================================
-// ENHANCED SERVICES (PHASE 3B ENHANCEMENTS)
-// ===================================================================
-
-import { EnhancedMonitoringService } from "./services/enhanced-monitoring-service";
-import { ConfigValidationService } from "./services/config-validation-service";
-import { EnhancedPermissionCacheService } from "./services/enhanced-permission-cache-service";
-import { AdvancedThreatDetectionService } from "./services/advanced-threat-detection-service";
+export { EnhancedMonitoringService } from "./services/enhanced-monitoring-service";
+export { ConfigValidationService } from "./services/config-validation-service";
+export { EnhancedPermissionCacheService } from "./services/enhanced-permission-cache-service";
+export { AdvancedThreatDetectionService } from "./services/advanced-threat-detection-service";
 
 // ===================================================================
 // UTILITY FUNCTIONS
@@ -49,49 +41,52 @@ import { AdvancedThreatDetectionService } from "./services/advanced-threat-detec
 /**
  * Quick setup function for basic authentication
  */
-export async function setupBasicAuth(
-  config: import("./types").AuthConfig,
-  deps: import("./types").ServiceDependencies
-) {
-  const authService = createAuthenticationService(config, deps);
-  await initializeAuthenticationService(authService);
+// export async function setupBasicAuth(
+//   config: import("./types").AuthConfig,
+//   deps: import("./types").ServiceDependencies
+// ) {
+//   const authService = createAuthenticationService(config, deps);
+//   await initializeAuthenticationService(authService);
 
-  const middleware = createAuthMiddleware(authService, deps);
+//   const middleware = createAuthMiddleware(authService, deps);
 
-  return {
-    authService,
-    middleware,
-    // Convenience methods
-    requireAuth: () => middleware.create({ requireAuth: true }),
-    requireRole: (roles: string[]) => middleware.requireRole(roles),
-    requirePermission: (permissions: string[]) =>
-      middleware.requirePermission(permissions),
-    optionalAuth: () => middleware.optional(),
-  };
-}
+//   return {
+//     authService,
+//     middleware,
+//     // Convenience methods
+//     requireAuth: () => middleware.create({ requireAuth: true }),
+//     requireRole: (roles: string[]) => middleware.requireRole(roles),
+//     requirePermission: (permissions: string[]) =>
+//       middleware.requirePermission(permissions),
+//     optionalAuth: () => middleware.optional(),
+//   };
+// }
 
 /**
  * Health check for the entire auth system
  */
-export async function healthCheck(authService: AuthenticationService) {
-  return await authService.healthCheck();
-}
+// export async function healthCheck(authService: AuthenticationService) {
+//   return await authService.healthCheck();
+// }
 
 // ===================================================================
 // DEFAULT EXPORTS
 // ===================================================================
 
-export default {
-  AuthenticationService,
-  JWTService,
-  KeycloakService,
-  PermissionService,
-  SessionService,
-  ApiKeyService,
-  AuthMiddleware,
-  // Enhanced Services
-  EnhancedMonitoringService,
-  ConfigValidationService,
-  EnhancedPermissionCacheService,
-  AdvancedThreatDetectionService,
-};
+// export default {
+//   createAuthenticationService,
+//   initializeAuthenticationService,
+//   AuthenticationService,
+//   JWTService,
+//   KeycloakService,
+//   PermissionService,
+//   SessionService,
+//   ApiKeyService,
+
+//   // Enhanced Services
+
+//   EnhancedMonitoringService,
+//   ConfigValidationService,
+//   EnhancedPermissionCacheService,
+//   AdvancedThreatDetectionService,
+// };

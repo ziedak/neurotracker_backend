@@ -1,5 +1,5 @@
 import { RedisClient, ClickHouseClient } from "@libs/database";
-import { Logger, MetricsCollector, type ILogger } from "@libs/monitoring";
+import { Logger, MetricsCollector } from "@libs/monitoring";
 
 export interface AuditEvent {
   id?: string | undefined;
