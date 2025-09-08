@@ -29,6 +29,20 @@ export { PermissionService } from "./services/permission-service";
 export { SessionService } from "./services/session-service";
 export { ApiKeyService } from "./services/api-key-service";
 
+// Phase 2: Focused Services (Single Responsibility Principle)
+export {
+  UserAuthenticationService,
+  type IUserAuthenticationService,
+} from "./services/user-authentication-service";
+export {
+  TokenManagementService,
+  type ITokenManagementService,
+} from "./services/token-management-service";
+export {
+  UserManagementService,
+  type IUserManagementService,
+} from "./services/user-management-service";
+
 export { EnhancedMonitoringService } from "./services/enhanced-monitoring-service";
 export { ConfigValidationService } from "./services/config-validation-service";
 export { EnhancedPermissionCacheService } from "./services/enhanced-permission-cache-service";

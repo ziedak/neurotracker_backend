@@ -27,6 +27,21 @@ import { EnhancedMonitoringService } from "./enhanced-monitoring-service";
 import { ConfigValidationService } from "./config-validation-service";
 import { EnhancedPermissionCacheService } from "./enhanced-permission-cache-service";
 import { AdvancedThreatDetectionService } from "./advanced-threat-detection-service";
+import { PasswordPolicyService } from "./password-policy-service";
+
+// Phase 2: Focused Services Integration
+import {
+  UserAuthenticationService,
+  type IUserAuthenticationService,
+} from "./user-authentication-service";
+import {
+  TokenManagementService,
+  type ITokenManagementService,
+} from "./token-management-service";
+import {
+  UserManagementService,
+  type IUserManagementService,
+} from "./user-management-service";
 
 // ===================================================================
 // AUTHENTICATION SERVICE CLASS
@@ -39,11 +54,17 @@ export class AuthenticationService {
   private sessionService: SessionService;
   private apiKeyService: ApiKeyService;
 
+  // Phase 2: Focused Services (Single Responsibility Principle)
+  private userAuthService: IUserAuthenticationService;
+  private tokenManagementService: ITokenManagementService;
+  private userManagementService: IUserManagementService;
+
   // Enhanced Services (optional)
   private monitoringService?: EnhancedMonitoringService;
   private configValidator?: ConfigValidationService;
   private permissionCache?: EnhancedPermissionCacheService;
   private threatDetector?: AdvancedThreatDetectionService;
+  private passwordPolicyService?: PasswordPolicyService;
 
   constructor(private config: AuthConfig, private deps: ServiceDependencies) {
     this.jwtService = new JWTService(this.config, deps);
@@ -51,6 +72,30 @@ export class AuthenticationService {
     this.permissionService = new PermissionService(deps);
     this.sessionService = new SessionService(this.config, deps);
     this.apiKeyService = new ApiKeyService(this.config, deps);
+
+    // Initialize password policy service if configuration is provided
+    if (this.config.passwordPolicy) {
+      this.passwordPolicyService = new PasswordPolicyService(this.config, deps);
+    }
+
+    // Initialize Phase 2 focused services
+    this.userAuthService = new UserAuthenticationService(deps, {
+      keycloakService: this.keycloakService,
+      jwtService: this.jwtService,
+      sessionService: this.sessionService,
+      ...(this.passwordPolicyService && {
+        passwordPolicyService: this.passwordPolicyService,
+      }),
+    });
+
+    this.tokenManagementService = new TokenManagementService(deps, {
+      jwtService: this.jwtService,
+    });
+
+    this.userManagementService = new UserManagementService(deps, {
+      keycloakService: this.keycloakService,
+      sessionService: this.sessionService,
+    });
   }
 
   /**
@@ -99,152 +144,29 @@ export class AuthenticationService {
 
   /**
    * Login user with email and password
+   * Delegates to UserAuthenticationService for focused responsibility
    */
   async login(credentials: LoginCredentials): Promise<AuthResult> {
-    let sanitizedEmail = credentials.email; // Default fallback
-
     try {
-      // Input validation and sanitization
-      const validationResult = this.validateLoginCredentials(credentials);
-      if (!validationResult.valid) {
-        this.deps.monitoring.logger.warn("Login failed - invalid input", {
-          email: credentials.email,
-          errors: validationResult.errors,
-        });
+      // Delegate to focused UserAuthenticationService
+      const result = await this.userAuthService.login(credentials);
 
+      // Enrich with permissions if successful
+      if (result.success && result.user) {
+        const userWithPermissions = await this.enrichUserWithPermissions(
+          result.user
+        );
         return {
-          success: false,
-          error: "Invalid input provided",
-          code: "VALIDATION_ERROR",
+          ...result,
+          user: userWithPermissions,
         };
       }
 
-      // Sanitize email for database queries
-      sanitizedEmail = this.sanitizeEmail(credentials.email);
-      // Check if account is locked (threat detection)
-      if (this.threatDetector?.isAccountLocked(sanitizedEmail)) {
-        this.monitoringService?.recordAuthEvent(
-          "login_failure",
-          sanitizedEmail,
-          {
-            reason: "account_locked",
-            ipAddress: credentials.deviceInfo?.name,
-          }
-        );
-        return {
-          success: false,
-          error: "Account is temporarily locked due to security policy",
-          code: "ACCOUNT_LOCKED",
-        };
-      }
-
-      // Check if IP is blocked
-      if (
-        credentials.deviceInfo?.name &&
-        this.threatDetector?.isIPBlocked(credentials.deviceInfo.name)
-      ) {
-        this.monitoringService?.recordAuthEvent(
-          "login_failure",
-          credentials.email,
-          {
-            reason: "ip_blocked",
-            ipAddress: credentials.deviceInfo.name,
-          }
-        );
-        return {
-          success: false,
-          error: "Access denied from this location",
-          code: "IP_BLOCKED",
-        };
-      }
-
-      // Authenticate with Keycloak (enhanced version)
-      const authOptions: {
-        validateAccountStatus: true;
-        recordLoginAttempt: true;
-        ipAddress?: string;
-        userAgent?: string;
-      } = {
-        validateAccountStatus: true,
-        recordLoginAttempt: true,
-      };
-
-      if (credentials.deviceInfo?.name) {
-        authOptions.ipAddress = credentials.deviceInfo.name;
-      }
-
-      if (credentials.deviceInfo?.browser) {
-        authOptions.userAgent = credentials.deviceInfo.browser;
-      }
-
-      // Authenticate directly with database using real password verification
-      const user = await this.jwtService.authenticateUser(
-        sanitizedEmail,
-        credentials.password
-      );
-
-      if (!user) {
-        // Record failed attempt
-        if (credentials.deviceInfo?.name) {
-          await this.threatDetector?.recordFailedAttempt(
-            sanitizedEmail,
-            credentials.deviceInfo.name,
-            credentials.deviceInfo.os,
-            { userAgent: credentials.deviceInfo.browser }
-          );
-        }
-
-        this.monitoringService?.recordAuthEvent(
-          "login_failure",
-          sanitizedEmail,
-          {
-            reason: "invalid_credentials",
-            ipAddress: credentials.deviceInfo?.name,
-          }
-        );
-
-        return {
-          success: false,
-          error: "Invalid email or password",
-          code: "INVALID_CREDENTIALS",
-        };
-      }
-
-      // Record successful login
-      if (credentials.deviceInfo?.name) {
-        await this.threatDetector?.recordSuccessfulAuth(
-          user.id,
-          credentials.deviceInfo.name,
-          credentials.deviceInfo.os
-        );
-      }
-
-      this.monitoringService?.recordAuthEvent("login_success", user.id, {
-        ipAddress: credentials.deviceInfo?.name,
-        userAgent: credentials.deviceInfo?.browser,
-      });
-
-      // Get user permissions (with caching)
-      const userWithPermissions = await this.enrichUserWithPermissions(user);
-
-      // Generate JWT tokens
-      const tokens = await this.jwtService.generateTokens(userWithPermissions);
-
-      return {
-        success: true,
-        user: userWithPermissions,
-        tokens,
-      };
+      return result;
     } catch (error) {
-      this.deps.monitoring.logger.error("Login failed", {
-        email: sanitizedEmail,
-        error,
-      });
-
-      // Record monitoring event
-      this.monitoringService?.recordAuthEvent("login_failure", sanitizedEmail, {
-        reason: "system_error",
-        error: error instanceof Error ? error.message : "Unknown error",
+      this.deps.monitoring.logger.error("Login delegation failed", {
+        email: credentials.email,
+        error: error instanceof Error ? error.message : String(error),
       });
 
       return {
@@ -257,33 +179,29 @@ export class AuthenticationService {
 
   /**
    * Register new user
+   * Delegates to UserAuthenticationService for focused responsibility
    */
   async register(data: RegisterData): Promise<AuthResult> {
     try {
-      // Register with Keycloak
-      const keycloakResult = await this.keycloakService.registerUser(data);
+      // Delegate to focused UserAuthenticationService
+      const result = await this.userAuthService.register(data);
 
-      if (!keycloakResult.success || !keycloakResult.user) {
-        return keycloakResult;
+      // Enrich with permissions if successful
+      if (result.success && result.user) {
+        const userWithPermissions = await this.enrichUserWithPermissions(
+          result.user
+        );
+        return {
+          ...result,
+          user: userWithPermissions,
+        };
       }
 
-      // Get user permissions
-      const userWithPermissions = await this.enrichUserWithPermissions(
-        keycloakResult.user
-      );
-
-      // Generate JWT tokens
-      const tokens = await this.jwtService.generateTokens(userWithPermissions);
-
-      return {
-        success: true,
-        user: userWithPermissions,
-        tokens,
-      };
+      return result;
     } catch (error) {
-      this.deps.monitoring.logger.error("Registration failed", {
+      this.deps.monitoring.logger.error("Registration delegation failed", {
         email: data.email,
-        error,
+        error: error instanceof Error ? error.message : String(error),
       });
 
       return {
@@ -297,20 +215,33 @@ export class AuthenticationService {
   /**
    * Refresh access token
    */
+  /**
+   * Refresh access token
+   * Delegates to TokenManagementService for focused responsibility
+   */
   async refreshToken(refreshToken: string): Promise<AuthResult> {
     try {
-      const tokens = await this.jwtService.refreshToken(refreshToken);
+      // Delegate to focused TokenManagementService
+      const result = await this.tokenManagementService.refreshToken(
+        refreshToken
+      );
 
-      // Get user from token
-      const user = await this.jwtService.verifyToken(tokens.accessToken!);
+      // Enrich with permissions if successful
+      if (result.success && result.user) {
+        const userWithPermissions = await this.enrichUserWithPermissions(
+          result.user
+        );
+        return {
+          ...result,
+          user: userWithPermissions,
+        };
+      }
 
-      return {
-        success: true,
-        user,
-        tokens,
-      };
+      return result;
     } catch (error) {
-      this.deps.monitoring.logger.error("Token refresh failed", { error });
+      this.deps.monitoring.logger.error("Token refresh delegation failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
 
       return {
         success: false,
@@ -323,20 +254,19 @@ export class AuthenticationService {
   /**
    * Logout user (revoke tokens)
    */
+  /**
+   * Logout user and revoke tokens
+   * Delegates to UserAuthenticationService for focused responsibility
+   */
   async logout(userId: string, token?: string): Promise<boolean> {
     try {
-      if (token) {
-        // Revoke specific token
-        await this.jwtService.revokeToken(token);
-      } else {
-        // Revoke all user tokens
-        await this.jwtService.revokeAllUserTokens(userId);
-      }
-
-      this.deps.monitoring.logger.info("User logged out", { userId });
-      return true;
+      // Delegate to focused UserAuthenticationService
+      return await this.userAuthService.logout(userId, token);
     } catch (error) {
-      this.deps.monitoring.logger.error("Logout failed", { userId, error });
+      this.deps.monitoring.logger.error("Logout delegation failed", {
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return false;
     }
   }
@@ -344,12 +274,27 @@ export class AuthenticationService {
   /**
    * Verify JWT token and return user
    */
+  /**
+   * Verify JWT token and return user
+   * Delegates to TokenManagementService for focused responsibility
+   */
   async verifyToken(token: string): Promise<User | null> {
     try {
-      const user = await this.jwtService.verifyToken(token);
-      return await this.enrichUserWithPermissions(user);
+      // Delegate to focused TokenManagementService
+      const user = await this.tokenManagementService.verifyToken(token);
+
+      if (user) {
+        return await this.enrichUserWithPermissions(user);
+      }
+
+      return null;
     } catch (error) {
-      this.deps.monitoring.logger.error("Token verification failed", { error });
+      this.deps.monitoring.logger.error(
+        "Token verification delegation failed",
+        {
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
       return null;
     }
   }
@@ -357,17 +302,24 @@ export class AuthenticationService {
   /**
    * Get user by ID
    */
+  /**
+   * Get user by ID
+   * Delegates to UserManagementService for focused responsibility
+   */
   async getUserById(userId: string): Promise<User | null> {
     try {
-      const user = await this.keycloakService.getUserById(userId);
+      // Delegate to focused UserManagementService
+      const user = await this.userManagementService.getUserById(userId);
+
       if (user) {
         return await this.enrichUserWithPermissions(user);
       }
+
       return null;
     } catch (error) {
-      this.deps.monitoring.logger.error("Failed to get user", {
+      this.deps.monitoring.logger.error("Get user delegation failed", {
         userId,
-        error,
+        error: error instanceof Error ? error.message : String(error),
       });
       return null;
     }
@@ -375,14 +327,16 @@ export class AuthenticationService {
 
   /**
    * Update user
+   * Delegates to UserManagementService for focused responsibility
    */
   async updateUser(userId: string, updates: Partial<User>): Promise<boolean> {
     try {
-      return await this.keycloakService.updateUser(userId, updates);
+      // Delegate to focused UserManagementService
+      return await this.userManagementService.updateUser(userId, updates);
     } catch (error) {
-      this.deps.monitoring.logger.error("Failed to update user", {
+      this.deps.monitoring.logger.error("Update user delegation failed", {
         userId,
-        error,
+        error: error instanceof Error ? error.message : String(error),
       });
       return false;
     }
@@ -600,80 +554,6 @@ export class AuthenticationService {
       );
       return user;
     }
-  }
-
-  /**
-   * Validate login credentials with comprehensive input validation
-   */
-  private validateLoginCredentials(credentials: LoginCredentials): {
-    valid: boolean;
-    errors: string[];
-  } {
-    const errors: string[] = [];
-
-    // Email validation
-    if (!credentials.email || typeof credentials.email !== "string") {
-      errors.push("Email is required");
-    } else {
-      // Trim and normalize email
-      const email = credentials.email.trim().toLowerCase();
-
-      // Basic email format validation
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        errors.push("Invalid email format");
-      }
-
-      // Email length validation
-      if (email.length > 254) {
-        errors.push("Email is too long");
-      }
-    }
-
-    // Password validation
-    if (!credentials.password || typeof credentials.password !== "string") {
-      errors.push("Password is required");
-    } else {
-      // Password length validation
-      if (credentials.password.length < 1) {
-        errors.push("Password cannot be empty");
-      }
-      if (credentials.password.length > 128) {
-        errors.push("Password is too long");
-      }
-    }
-
-    // Device info validation (optional)
-    if (credentials.deviceInfo) {
-      if (
-        credentials.deviceInfo.name &&
-        typeof credentials.deviceInfo.name !== "string"
-      ) {
-        errors.push("Invalid device name");
-      }
-      if (
-        credentials.deviceInfo.type &&
-        typeof credentials.deviceInfo.type !== "string"
-      ) {
-        errors.push("Invalid device type");
-      }
-    }
-
-    return {
-      valid: errors.length === 0,
-      errors,
-    };
-  }
-
-  /**
-   * Sanitize email input to prevent common attacks
-   */
-  private sanitizeEmail(email: string): string {
-    return email
-      .trim()
-      .toLowerCase()
-      .replace(/[<>\"'&]/g, "") // Remove potentially dangerous characters
-      .substring(0, 254); // Limit length
   }
 }
 

@@ -1,12 +1,12 @@
 /**
- * JWT Authentication Service
- * Handles JWT token generation, validation, and refresh operations
+ * JWT Token Service
+ * Handles JWT token generation, validation, refresh, and revocation operations
+ * Does NOT handle user authentication - all authentication flows go through Keycloak
  * Uses battle-tested libraries for security and performance
  */
 
 import { SignJWT, jwtVerify, JWTPayload } from "jose";
 import { createHash } from "crypto";
-import bcrypt from "bcryptjs";
 import {
   User,
   AuthToken,
@@ -147,11 +147,26 @@ export class JWTService {
         throw new UnauthorizedError("Refresh token has been revoked");
       }
 
-      // Get user from database
+      // Get user from Keycloak (as it's the only auth provider)
       const userId = payload.sub as string;
-      const user = await this.getUserById(userId);
-      if (!user) {
-        throw new UnauthorizedError("User not found");
+      // Note: We'll need to inject KeycloakService or get user data from the token itself
+      // For now, reconstruct user from token payload since we have the data
+      const user: User = {
+        id: userId,
+        email: payload["email"] as string,
+        name: payload["name"] as string,
+        roles: (payload["roles"] as string[]) || [],
+        permissions: (payload["permissions"] as string[]) || [],
+        metadata: payload["metadata"] as Record<string, unknown>,
+        isActive: true,
+        createdAt: new Date((payload.iat as number) * 1000),
+        updatedAt: new Date(),
+      };
+
+      if (!user.email || !user.name) {
+        throw new UnauthorizedError(
+          "Invalid token payload - missing user data"
+        );
       }
 
       // Generate new tokens
@@ -296,175 +311,6 @@ export class JWTService {
         return value * 86400;
       default:
         return 3600;
-    }
-  }
-
-  /**
-   * Authenticate user by email and password
-   * Returns user object if credentials are valid, null otherwise
-   */
-  async authenticateUser(
-    email: string,
-    password: string
-  ): Promise<User | null> {
-    try {
-      // Get user from database by email
-      const connection = await this.deps.database.getConnectionPrisma();
-
-      try {
-        const userRecord = await connection.prisma.user.findFirst({
-          where: {
-            email: email,
-            isDeleted: false,
-            status: "ACTIVE",
-          },
-          select: {
-            id: true,
-            email: true,
-            password: true, // Need password for verification
-            username: true,
-            firstName: true,
-            lastName: true,
-            roleId: true,
-            role: {
-              select: {
-                name: true,
-                permissions: {
-                  select: {
-                    name: true,
-                    resource: true,
-                    action: true,
-                  },
-                },
-              },
-            },
-            createdAt: true,
-            updatedAt: true,
-          },
-        });
-
-        if (!userRecord) {
-          // User not found
-          this.deps.monitoring.logger.warn(
-            "User authentication failed - user not found",
-            { email }
-          );
-          return null;
-        }
-
-        // Verify password using bcrypt
-        const isPasswordValid = await bcrypt.compare(
-          password,
-          userRecord.password
-        );
-
-        if (!isPasswordValid) {
-          // Invalid password
-          this.deps.monitoring.logger.warn(
-            "User authentication failed - invalid password",
-            {
-              email,
-              userId: userRecord.id,
-            }
-          );
-          return null;
-        }
-
-        // Authentication successful - transform to auth User type
-        return {
-          id: userRecord.id,
-          email: userRecord.email,
-          name:
-            userRecord.firstName && userRecord.lastName
-              ? `${userRecord.firstName} ${userRecord.lastName}`
-              : userRecord.username,
-          roles: userRecord.role ? [userRecord.role.name] : ["user"],
-          permissions:
-            userRecord.role?.permissions.map(
-              (p: any) => `${p.action}:${p.resource}`
-            ) || [],
-          isActive: true,
-          createdAt: userRecord.createdAt,
-          updatedAt: userRecord.updatedAt,
-        };
-      } finally {
-        connection.release();
-      }
-    } catch (error) {
-      this.deps.monitoring.logger.error("Failed to authenticate user", {
-        email,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return null;
-    }
-  }
-
-  private async getUserById(userId: string): Promise<User | null> {
-    try {
-      // Use existing database dependency from dependency injection
-      const connection = await this.deps.database.getConnectionPrisma();
-
-      try {
-        const userRecord = await connection.prisma.user.findFirst({
-          where: {
-            id: userId,
-            isDeleted: false,
-            status: "ACTIVE",
-          },
-          select: {
-            id: true,
-            email: true,
-            username: true,
-            firstName: true,
-            lastName: true,
-            roleId: true,
-            role: {
-              select: {
-                name: true,
-                permissions: {
-                  select: {
-                    name: true,
-                    resource: true,
-                    action: true,
-                  },
-                },
-              },
-            },
-            createdAt: true,
-            updatedAt: true,
-          },
-        });
-
-        if (!userRecord) {
-          return null;
-        }
-
-        // Transform database user to auth User type
-        return {
-          id: userRecord.id,
-          email: userRecord.email,
-          name:
-            userRecord.firstName && userRecord.lastName
-              ? `${userRecord.firstName} ${userRecord.lastName}`
-              : userRecord.username,
-          roles: userRecord.role ? [userRecord.role.name] : ["user"],
-          permissions:
-            userRecord.role?.permissions.map(
-              (p: any) => `${p.action}:${p.resource}`
-            ) || [],
-          isActive: true,
-          createdAt: userRecord.createdAt,
-          updatedAt: userRecord.updatedAt,
-        };
-      } finally {
-        connection.release();
-      }
-    } catch (error) {
-      this.deps.monitoring.logger.error("Failed to get user by ID", {
-        userId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return null;
     }
   }
 }

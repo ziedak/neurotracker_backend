@@ -162,6 +162,7 @@ export interface AuthConfig {
     prefix: string;
     length: number;
   };
+  passwordPolicy?: PasswordPolicyConfig;
 }
 
 export interface ServiceDependencies {
@@ -421,6 +422,41 @@ export interface ThreatDetectionConfig {
   enableAutoLockout: boolean;
   enableIPBlocking: boolean;
   notifyOnThreat: boolean;
+}
+
+// ===================================================================
+// PASSWORD POLICY TYPES
+// ===================================================================
+
+export interface PasswordPolicyConfig {
+  minLength: number;
+  maxLength: number;
+  requireUppercase: boolean;
+  requireLowercase: boolean;
+  requireNumbers: boolean;
+  requireSpecialChars: boolean;
+  specialChars: string;
+  blacklistedPasswords: string[];
+  enableCommonPasswordCheck: boolean;
+  enableCompromisedPasswordCheck: boolean;
+}
+
+export interface PasswordValidationResult {
+  isValid: boolean;
+  strength: "weak" | "medium" | "strong" | "very-strong";
+  score: number; // 0-100
+  errors: string[];
+  suggestions: string[];
+}
+
+export interface PasswordComplexityRequirements {
+  length: boolean;
+  uppercase: boolean;
+  lowercase: boolean;
+  numbers: boolean;
+  specialChars: boolean;
+  notCommon: boolean;
+  notCompromised: boolean;
 }
 
 // ===================================================================
