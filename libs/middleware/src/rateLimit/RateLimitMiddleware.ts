@@ -3,7 +3,6 @@ import { BaseMiddleware, type HttpMiddlewareConfig } from "../base";
 import type { MiddlewareContext } from "../types";
 import {
   RateLimitingCacheAdapter,
-  type RateLimitResult,
   type RateLimitAlgorithm,
   type RateLimitingAdapterConfig,
 } from "@libs/ratelimit";
@@ -14,6 +13,23 @@ import {
   ApiKeyStrategy,
   type RateLimitStrategy,
 } from "./strategies";
+
+/**
+ * Internal rate limit result interface for middleware use
+ */
+export interface RateLimitResult {
+  allowed: boolean;
+  totalHits: number;
+  remaining: number;
+  resetTime: number;
+  windowStart: number;
+  windowEnd: number;
+  limit: number;
+  retryAfter?: number;
+  algorithm: RateLimitAlgorithm;
+  cached: boolean;
+  responseTime: number;
+}
 
 /**
  * Rate limit configuration interface
@@ -338,33 +354,51 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
    * Check current rate limit status
    */
   private async checkRateLimit(key: string): Promise<RateLimitResult> {
-    const result = await this.rateLimiter.checkRateLimit(
+    const adapterResult = await this.rateLimiter.checkRateLimit(
       key,
       this.config.maxRequests,
       this.config.windowMs,
       this.config.algorithm
     );
 
-    // Ensure all required RateLimitResult properties are present
-    const baseResult = {
-      allowed: result.allowed,
-      totalHits:
-        result.totalHits ??
-        (typeof result.remaining === "number"
-          ? this.config.maxRequests - result.remaining
-          : 0),
-      remaining: result.remaining,
-      resetTime: result.resetTime,
-      algorithm: result.algorithm,
-      windowStart: result.windowStart ?? Date.now() - this.config.windowMs,
-      windowEnd: result.windowEnd ?? result.resetTime,
-      limit: result.limit ?? this.config.maxRequests,
-      cached: result.cached ?? false,
-      responseTime: result.responseTime ?? 0,
+    // Convert adapter result to middleware result format
+    // Handle both number and Date types for resetTime
+    const resetTime =
+      typeof adapterResult.resetTime === "number"
+        ? adapterResult.resetTime
+        : (adapterResult.resetTime as Date).getTime();
+
+    const windowStart = adapterResult.windowStart
+      ? typeof adapterResult.windowStart === "number"
+        ? adapterResult.windowStart
+        : (adapterResult.windowStart as Date).getTime()
+      : Date.now() - this.config.windowMs;
+
+    const windowEnd = adapterResult.windowEnd
+      ? typeof adapterResult.windowEnd === "number"
+        ? adapterResult.windowEnd
+        : (adapterResult.windowEnd as Date).getTime()
+      : resetTime;
+
+    const result: RateLimitResult = {
+      allowed: adapterResult.allowed,
+      totalHits: (adapterResult as any).totalHits || 0,
+      remaining: adapterResult.remaining,
+      resetTime,
+      algorithm: adapterResult.algorithm,
+      windowStart,
+      windowEnd,
+      limit: (adapterResult as any).limit || this.config.maxRequests,
+      cached: (adapterResult as any).cached || false,
+      responseTime: (adapterResult as any).responseTime || 0,
     };
-    return result.retryAfter !== undefined
-      ? { ...baseResult, retryAfter: result.retryAfter }
-      : baseResult;
+
+    // Add retryAfter only if rate limited
+    if (!adapterResult.allowed) {
+      result.retryAfter = Math.max(0, resetTime - Date.now());
+    }
+
+    return result;
   }
 
   /**
@@ -389,7 +423,8 @@ export class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
     context: MiddlewareContext,
     result: RateLimitResult
   ): void {
-    context.set.headers["X-RateLimit-Limit"] = result.limit.toString();
+    const limit = result.limit || this.config.maxRequests;
+    context.set.headers["X-RateLimit-Limit"] = limit.toString();
     context.set.headers["X-RateLimit-Remaining"] = Math.max(
       0,
       result.remaining

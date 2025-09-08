@@ -6,11 +6,27 @@ import {
 import type { WebSocketContext } from "../types";
 import {
   RateLimitingCacheAdapter,
-  type RateLimitResult,
   type RateLimitAlgorithm,
   type RateLimitingAdapterConfig,
 } from "@libs/ratelimit";
 import type { CacheService, CacheConfigValidator } from "@libs/database";
+
+/**
+ * Internal WebSocket rate limit result interface
+ */
+export interface WebSocketRateLimitResult {
+  allowed: boolean;
+  totalHits: number;
+  remaining: number;
+  resetTime: number;
+  windowStart: number;
+  windowEnd: number;
+  limit: number;
+  retryAfter?: number;
+  algorithm: RateLimitAlgorithm;
+  cached: boolean;
+  responseTime: number;
+}
 /**
  * Advanced WebSocket Rate limit configuration interface
  * Extends WebSocketMiddlewareConfig with comprehensive rate limiting options
@@ -34,9 +50,8 @@ export interface AdvancedWebSocketRateLimitConfig
     readonly ttlBuffer: number;
   };
   readonly onLimitReached?: (
-    result: RateLimitResult,
-    context: WebSocketContext,
-    limitType: "message" | "connection"
+    result: WebSocketRateLimitResult,
+    context: WebSocketContext
   ) => void;
   readonly message: {
     readonly rateLimitExceeded: string;
@@ -391,13 +406,54 @@ export class WebSocketRateLimitMiddleware extends BaseWebSocketMiddleware<Advanc
   /**
    * Check message rate limits
    */
-  private async checkMessageRateLimit(key: string): Promise<RateLimitResult> {
-    return this.rateLimiter.checkRateLimit(
+  private async checkMessageRateLimit(
+    key: string
+  ): Promise<WebSocketRateLimitResult> {
+    const adapterResult = await this.rateLimiter.checkRateLimit(
       key,
       this.config.maxMessagesPerMinute,
       this.config.windowMs,
       this.config.algorithm
     );
+
+    // Convert adapter result to WebSocket result format
+    // Handle both number and Date types for resetTime
+    const resetTime =
+      typeof adapterResult.resetTime === "number"
+        ? adapterResult.resetTime
+        : (adapterResult.resetTime as Date).getTime();
+
+    const windowStart = (adapterResult as any).windowStart
+      ? typeof (adapterResult as any).windowStart === "number"
+        ? (adapterResult as any).windowStart
+        : ((adapterResult as any).windowStart as Date).getTime()
+      : Date.now() - this.config.windowMs;
+
+    const windowEnd = (adapterResult as any).windowEnd
+      ? typeof (adapterResult as any).windowEnd === "number"
+        ? (adapterResult as any).windowEnd
+        : ((adapterResult as any).windowEnd as Date).getTime()
+      : resetTime;
+
+    const result: WebSocketRateLimitResult = {
+      allowed: adapterResult.allowed,
+      totalHits: (adapterResult as any).totalHits || 0,
+      remaining: adapterResult.remaining,
+      resetTime,
+      algorithm: adapterResult.algorithm,
+      windowStart,
+      windowEnd,
+      limit: (adapterResult as any).limit || this.config.maxMessagesPerMinute,
+      cached: (adapterResult as any).cached || false,
+      responseTime: (adapterResult as any).responseTime || 0,
+    };
+
+    // Add retryAfter only if rate limited
+    if (!adapterResult.allowed) {
+      result.retryAfter = Math.max(0, resetTime - Date.now());
+    }
+
+    return result;
   }
 
   /**
@@ -405,7 +461,7 @@ export class WebSocketRateLimitMiddleware extends BaseWebSocketMiddleware<Advanc
    */
   private async handleRateLimitExceeded(
     context: WebSocketContext,
-    result: RateLimitResult,
+    result: WebSocketRateLimitResult,
     key: string,
     requestId: string,
     limitType: "message" | "connection"
@@ -413,7 +469,7 @@ export class WebSocketRateLimitMiddleware extends BaseWebSocketMiddleware<Advanc
     // Execute callback if configured
     if (this.config.onLimitReached) {
       try {
-        this.config.onLimitReached(result, context, limitType);
+        this.config.onLimitReached(result, context);
       } catch (callbackError) {
         this.logger.warn("Rate limit callback error", {
           error:
@@ -488,7 +544,7 @@ export class WebSocketRateLimitMiddleware extends BaseWebSocketMiddleware<Advanc
    */
   private async checkAndSendWarning(
     context: WebSocketContext,
-    result: RateLimitResult
+    result: WebSocketRateLimitResult
   ): Promise<void> {
     const usagePercentage =
       ((result.limit - result.remaining) / result.limit) * 100;
