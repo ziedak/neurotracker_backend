@@ -7,7 +7,6 @@
     { "path": "apps/ai-engine" },
 
     { "path": "libs/auth" },
-    { "path": "libs/cache" },
     { "path": "libs/config" },
     { "path": "libs/database" },
     { "path": "libs/elysia-server" },

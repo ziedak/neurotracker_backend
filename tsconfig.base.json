@@ -30,13 +30,13 @@
     "baseUrl": ".",
     "paths": {
       "@libs/auth": ["libs/auth/src"],
-      "@libs/cache": ["libs/cache/src"],
       "@libs/config": ["libs/config/src"],
       "@libs/database": ["libs/database/src"],
       "@libs/elysia-server": ["libs/elysia-server/src"],
       "@libs/messaging": ["libs/messaging/src"],
       "@libs/middleware": ["libs/middleware/src"],
       "@libs/monitoring": ["libs/monitoring/src"],
+      "@libs/ratelimit": ["libs/ratelimit/src"],
       "@libs/utils": ["libs/utils/src"]
     }
   }

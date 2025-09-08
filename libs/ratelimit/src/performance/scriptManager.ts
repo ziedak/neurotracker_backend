@@ -6,7 +6,6 @@ import { createLogger } from "@libs/utils";
  * Prevents redundant script loading across multiple instances
  */
 export class SharedScriptManager {
-  private static instance: SharedScriptManager;
   private readonly scriptShas = new Map<string, string>();
   private scriptsInitialized = false;
   private initPromise: Promise<void> | undefined;

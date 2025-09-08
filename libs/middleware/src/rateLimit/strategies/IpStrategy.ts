@@ -1,5 +1,4 @@
 import { MiddlewareContext } from "../../types";
-import { z } from "@libs/utils";
 
 export interface RateLimitStrategy {
   generateKey(context: MiddlewareContext): string;
@@ -67,14 +66,14 @@ export class IpStrategy implements RateLimitStrategy {
   }
 
   /**
-   * Validate IP address format using zod (IPv4 and IPv6)
+   * Validate IP address format (IPv4 and IPv6) using regex
    */
   private isValidIp(ip: string): boolean {
-    const ipSchema = z.union([
-      z.string().ip({ version: "v4" }),
-      z.string().ip({ version: "v6" }),
-    ]);
-    return ipSchema.safeParse(ip).success;
+    // Simple IPv4 and IPv6 regex patterns
+    const ipv4Pattern =
+      /^(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)){3}$/;
+    const ipv6Pattern = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|::1)$/;
+    return ipv4Pattern.test(ip) || ipv6Pattern.test(ip);
   }
 
   /**

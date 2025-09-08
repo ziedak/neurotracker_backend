@@ -6,7 +6,7 @@
  */
 
 import { WebSocketContext, WebSocketMiddlewareFunction } from "../types";
-import { ILogger, MetricsCollector } from "@libs/monitoring";
+import { MetricsCollector } from "@libs/monitoring";
 import { RedisClient } from "@libs/database";
 import { KeycloakService } from "./Keycloak.service";
 import {
@@ -38,15 +38,13 @@ export class KeycloakWebSocketMiddleware extends BaseWebSocketMiddleware<Keycloa
 
   constructor(
     config: KeycloakWebSocketConfig,
-    logger: ILogger,
     metrics: MetricsCollector,
     redis?: RedisClient
   ) {
     super(
-      "keycloak-websocket-auth",
+      metrics,
       { ...config, name: "keycloak-websocket-auth" },
-      logger,
-      metrics
+      "keycloak-websocket-auth"
     );
 
     // KeycloakService requires redis, logger, metrics, and config
@@ -55,9 +53,7 @@ export class KeycloakWebSocketMiddleware extends BaseWebSocketMiddleware<Keycloa
         "KeycloakWebSocketMiddleware requires RedisClient instance"
       );
     }
-    if (!logger) {
-      throw new Error("KeycloakWebSocketMiddleware requires ILogger instance");
-    }
+
     if (!metrics) {
       throw new Error(
         "KeycloakWebSocketMiddleware requires MetricsCollector instance"
@@ -66,7 +62,6 @@ export class KeycloakWebSocketMiddleware extends BaseWebSocketMiddleware<Keycloa
 
     this.keycloakService = new KeycloakService(
       redis,
-      logger,
       metrics as MetricsCollector,
       config // config already extends KeycloakConfig
     );

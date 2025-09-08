@@ -14,3 +14,4 @@ export {
 // policies such as Retry, Circuit Breaker, Timeout, Bulkhead Isolation, and Fallback
 export { default as lodash } from "lodash";
 export { v4 as uuidv4 } from "uuid";
+export { z } from "zod";

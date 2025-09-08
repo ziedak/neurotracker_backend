@@ -1,4 +1,4 @@
-import { Elysia } from "elysia";
+import { Elysia } from "@libs/elysia-server";
 import {
   createErrorMiddleware,
   ErrorMiddleware,
@@ -13,7 +13,8 @@ const metrics = new MetricsCollector();
 // Example 1: Simple factory usage
 console.log("=== Example 1: Simple Factory Usage ===");
 const errorMiddleware = createErrorMiddleware(metrics, {
-  includeStackTrace: process.env.NODE_ENV === "development",
+  // includeStackTrace: process.env.NODE_ENV === "development",
+  includeStackTrace: true,
   logErrors: true,
 });
 
@@ -42,7 +43,7 @@ console.log("✅ Created custom error middleware with specific config");
 
 // Example 3: Elysia integration with adapter
 console.log("\n=== Example 3: Elysia Integration ===");
-const app = new Elysia()
+new Elysia()
   .use(new ElysiaMiddlewareAdapter(errorMiddleware).plugin())
   .get("/", () => ({ message: "Hello World!" }))
   .get("/error", () => {
@@ -82,12 +83,9 @@ const publicErrorMiddleware = baseErrorMiddleware.withConfig({
   },
 });
 
-const routedApp = new Elysia()
-  .use("/dev", new ElysiaMiddlewareAdapter(devErrorMiddleware).plugin())
-  .use(
-    "/api/public",
-    new ElysiaMiddlewareAdapter(publicErrorMiddleware).plugin()
-  )
+new Elysia()
+  .use(new ElysiaMiddlewareAdapter(devErrorMiddleware).plugin())
+  .use(new ElysiaMiddlewareAdapter(publicErrorMiddleware).plugin())
   .get("/dev/test", () => {
     throw ErrorMiddleware.createValidationError("Dev test error");
   })

@@ -6,7 +6,7 @@
  */
 
 import { type ILogger, MetricsCollector, RateLimiter } from "@libs/monitoring";
-import { executeWithRetryAndBreaker, inject, injectable } from "@libs/utils";
+import { createLogger, executeWithRetryAndBreaker, inject, injectable } from "@libs/utils";
 import { RedisClient } from "@libs/database";
 import {
   HttpStatus,
@@ -27,6 +27,7 @@ import {
   KeycloakErrorType,
 } from "./types";
 import { IKeycloakService } from "./interfaces";
+import { create } from "domain";
 
 /**
  * Keycloak Authentication Service
@@ -42,10 +43,9 @@ export class KeycloakService implements IKeycloakService {
     new Map();
   private joseModule: typeof import("jose") | null = null;
   private isJoseAvailable = false;
-
+  private logger = createLogger("KeycloakService");
   constructor(
     @inject("RedisClient") private redis: RedisClient,
-    @inject("Logger") private logger: ILogger,
     @inject("MetricsCollector") private metrics: MetricsCollector,
     config: KeycloakConfig
   ) {

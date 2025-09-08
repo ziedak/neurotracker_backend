@@ -9,20 +9,7 @@ import {
   CacheConfigValidator,
 } from "@libs/database";
 import { createLogger } from "@libs/utils";
-
-/**
- * Rate limiting result with detailed metrics
- */
-export interface RateLimitResult {
-  allowed: boolean;
-  limit: number;
-  remaining: number;
-  resetTime: number;
-  retryAfter?: number;
-  algorithm: RateLimitAlgorithm;
-  cached: boolean;
-  responseTime: number;
-}
+import type { RateLimitResult } from "../types";
 
 /**
  * Rate limiting algorithms supported
@@ -201,6 +188,9 @@ export class RateLimitingCacheAdapter {
         algorithm,
         cached: false,
         responseTime: performance.now() - startTime,
+        totalHits: 0,
+        windowStart: Date.now(),
+        windowEnd: Date.now() + windowMs,
       };
     }
   }
@@ -253,6 +243,9 @@ export class RateLimitingCacheAdapter {
           algorithm: request.algorithm || this.config.defaultAlgorithm,
           cached: false,
           responseTime: 0,
+          totalHits: 0,
+          windowStart: Date.now(),
+          windowEnd: Date.now() + request.windowMs,
         };
       }
     });
@@ -330,6 +323,9 @@ export class RateLimitingCacheAdapter {
         resetTime: this.getNextWindowStart(windowMs),
         algorithm: "fixed-window",
         cached,
+        totalHits: currentCount,
+        windowStart: Math.floor(Date.now() / windowMs) * windowMs,
+        windowEnd: this.getNextWindowStart(windowMs),
       };
     }
 
@@ -344,6 +340,9 @@ export class RateLimitingCacheAdapter {
       resetTime: this.getNextWindowStart(windowMs),
       algorithm: "fixed-window",
       cached,
+      totalHits: newCount,
+      windowStart: Math.floor(Date.now() / windowMs) * windowMs,
+      windowEnd: this.getNextWindowStart(windowMs),
     };
   }
 
@@ -380,6 +379,9 @@ export class RateLimitingCacheAdapter {
         resetTime,
         algorithm: "sliding-window",
         cached,
+        totalHits: validEntries.length,
+        windowStart,
+        windowEnd: Date.now() + windowMs,
       };
     }
 
@@ -401,6 +403,9 @@ export class RateLimitingCacheAdapter {
       resetTime,
       algorithm: "sliding-window",
       cached,
+      totalHits: validEntries.length,
+      windowStart,
+      windowEnd: Date.now() + windowMs,
     };
   }
 
@@ -434,10 +439,13 @@ export class RateLimitingCacheAdapter {
         allowed: false,
         limit,
         remaining: 0,
-        resetTime: now + Math.ceil((1 - currentTokens) / refillRate),
+        resetTime: Date.now() + Math.ceil((1 - currentTokens) / refillRate),
         retryAfter: Math.ceil((1 - currentTokens) / refillRate),
         algorithm: "token-bucket",
         cached,
+        totalHits: limit - Math.floor(currentTokens),
+        windowStart: Date.now() - windowMs,
+        windowEnd: Date.now() + windowMs,
       };
     }
 
@@ -458,9 +466,12 @@ export class RateLimitingCacheAdapter {
       allowed: true,
       limit,
       remaining: Math.floor(newTokens),
-      resetTime: now + Math.ceil((limit - newTokens) / refillRate),
+      resetTime: Date.now() + Math.ceil((limit - newTokens) / refillRate),
       algorithm: "token-bucket",
       cached,
+      totalHits: limit - Math.floor(newTokens),
+      windowStart: Date.now() - windowMs,
+      windowEnd: Date.now() + windowMs,
     };
   }
 
@@ -494,10 +505,14 @@ export class RateLimitingCacheAdapter {
         allowed: false,
         limit,
         remaining: 0,
-        resetTime: now + Math.ceil((currentVolume - limit + 1) / leakRate),
+        resetTime:
+          Date.now() + Math.ceil((currentVolume - limit + 1) / leakRate),
         retryAfter: Math.ceil((currentVolume - limit + 1) / leakRate),
         algorithm: "leaky-bucket",
         cached,
+        totalHits: Math.floor(currentVolume),
+        windowStart: Date.now() - windowMs,
+        windowEnd: Date.now() + windowMs,
       };
     }
 
@@ -518,9 +533,12 @@ export class RateLimitingCacheAdapter {
       allowed: true,
       limit,
       remaining: Math.floor(limit - newVolume),
-      resetTime: now + Math.ceil(newVolume / leakRate),
+      resetTime: Date.now() + Math.ceil(newVolume / leakRate),
       algorithm: "leaky-bucket",
       cached,
+      totalHits: Math.floor(newVolume),
+      windowStart: Date.now() - windowMs,
+      windowEnd: Date.now() + windowMs,
     };
   }
 

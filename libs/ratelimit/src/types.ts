@@ -2,6 +2,8 @@
  * Core types for rate limiting system
  */
 
+import type { RateLimitAlgorithm } from "./adapters/RateLimitingCacheAdapter";
+
 /**
  * Rate limit result interface
  */
@@ -9,11 +11,14 @@ export interface RateLimitResult {
   allowed: boolean;
   totalHits: number;
   remaining: number;
-  resetTime: Date;
-  retryAfter: number | undefined;
-  algorithm: string;
-  windowStart: Date;
-  windowEnd: Date;
+  resetTime: number;
+  windowStart: number;
+  windowEnd: number;
+  limit: number;
+  retryAfter?: number;
+  algorithm: RateLimitAlgorithm;
+  cached: boolean;
+  responseTime: number;
 }
 
 /**
