@@ -5,7 +5,7 @@ module.exports = {
   moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],
   rootDir: ".",
   testPathIgnorePatterns: ["/node_modules/", "/dist/"],
-  moduleNameMapping: {
+  moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/src/$1",
   },
   collectCoverageFrom: [
@@ -16,4 +16,5 @@ module.exports = {
   ],
   coverageDirectory: "coverage",
   coverageReporters: ["text", "lcov", "html"],
+  setupFilesAfterEnv: ["<rootDir>/tests/setup.ts"],
 };
