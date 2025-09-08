@@ -1,16 +1,43 @@
-import {
-  MiddlewareContext,
-  MiddlewareFunction,
-  MiddlewareChainConfig,
-} from "../types";
-import { injectable, inject } from "@libs/utils";
-import { ILogger } from "@libs/monitoring";
+import { MiddlewareContext, MiddlewareFunction } from "../types";
+import { createLogger, type ILogger } from "@libs/utils";
+import { type IMetricsCollector } from "@libs/monitoring";
 
 /**
- * Utility class for chaining multiple middleware functions
- * Handles priority ordering and error propagation
+ * Middleware configuration for HTTP middleware chain
  */
-@injectable()
+export interface MiddlewareChainConfig {
+  readonly name: string;
+  readonly middlewares: readonly MiddlewareChainItem[];
+}
+
+/**
+ * Individual middleware configuration in chain
+ */
+export interface MiddlewareChainItem {
+  readonly name: string;
+  readonly middleware: MiddlewareFunction;
+  readonly priority?: number;
+  readonly enabled?: boolean;
+}
+
+/**
+ * Utility class for chaining multiple HTTP middleware functions
+ * Handles priority ordering, error propagation, and execution statistics
+ *
+ * Features:
+ * - Direct instantiation (no DI)
+ * - Priority-based execution ordering
+ * - Error isolation and propagation
+ * - Execution metrics and monitoring
+ * - Dynamic middleware management
+ *
+ * Usage:
+ * ```typescript
+ * const chain = new MiddlewareChain(metrics, config);
+ * const chainFunction = chain.execute();
+ * app.use(chainFunction);
+ * ```
+ */
 export class MiddlewareChain {
   private readonly middlewares: Array<{
     name: string;
@@ -20,12 +47,14 @@ export class MiddlewareChain {
   }>;
 
   private readonly logger: ILogger;
+  private readonly metrics: IMetricsCollector;
+  private readonly chainName: string;
 
-  constructor(
-    @inject("MiddlewareChainConfig") config: MiddlewareChainConfig,
-    @inject("ILogger") logger: ILogger
-  ) {
-    this.logger = createLogger( "MiddlewareChain" });
+  constructor(metrics: IMetricsCollector, config: MiddlewareChainConfig) {
+    this.metrics = metrics;
+    this.chainName = config.name;
+    this.logger = createLogger(`MiddlewareChain:${config.name}`);
+
     this.middlewares = config.middlewares
       .filter((m) => m.enabled !== false)
       .map((m) => ({
@@ -34,8 +63,10 @@ export class MiddlewareChain {
         priority: m.priority ?? 0,
         enabled: m.enabled ?? true,
       }))
-      .sort((a, b) => b.priority - a.priority);
-    this.logger.info("Middleware chain initialized", {
+      .sort((a, b) => b.priority - a.priority); // Higher priority first
+
+    this.logger.info("HTTP middleware chain initialized", {
+      chainName: this.chainName,
       count: this.middlewares.length,
       middlewares: this.middlewares.map((m) => ({
         name: m.name,
@@ -52,7 +83,16 @@ export class MiddlewareChain {
       context: MiddlewareContext,
       finalNext: () => Promise<void>
     ) => {
+      const startTime = performance.now();
+      const executionId = this.generateExecutionId();
       let currentIndex = 0;
+
+      this.logger.debug("Starting middleware chain execution", {
+        chainName: this.chainName,
+        executionId,
+        middlewareCount: this.middlewares.length,
+        requestPath: context.request.url,
+      });
 
       const next = async (): Promise<void> => {
         if (currentIndex >= this.middlewares.length) {
@@ -62,30 +102,63 @@ export class MiddlewareChain {
 
         const current = this.middlewares[currentIndex++];
 
-        if (!current) {
-          this.logger.error("No middleware found at index", undefined, {
-            index: currentIndex - 1,
-          });
-          return;
+        if (!current || !current.enabled) {
+          return next(); // Skip disabled middleware
         }
 
         try {
           this.logger.debug("Executing middleware", {
+            chainName: this.chainName,
+            executionId,
             name: current.name,
             index: currentIndex - 1,
           });
-          return await current.middleware(context, next);
+
+          const middlewareStartTime = performance.now();
+          await current.middleware(context, next);
+          const middlewareExecutionTime =
+            performance.now() - middlewareStartTime;
+
+          await this.recordMiddlewareMetrics(
+            current.name,
+            "success",
+            middlewareExecutionTime
+          );
         } catch (error) {
+          const middlewareExecutionTime = performance.now() - startTime;
+
           this.logger.error("Middleware execution failed", error as Error, {
+            chainName: this.chainName,
+            executionId,
             middleware: current.name,
             index: currentIndex - 1,
           });
 
+          await this.recordMiddlewareMetrics(
+            current.name,
+            "failure",
+            middlewareExecutionTime
+          );
           throw error;
         }
       };
 
-      return next();
+      try {
+        await next();
+
+        const totalTime = performance.now() - startTime;
+        await this.recordChainMetrics("success", totalTime);
+
+        this.logger.debug("Middleware chain execution completed", {
+          chainName: this.chainName,
+          executionId,
+          totalTime: `${totalTime.toFixed(2)}ms`,
+        });
+      } catch (error) {
+        const totalTime = performance.now() - startTime;
+        await this.recordChainMetrics("failure", totalTime);
+        throw error;
+      }
     };
   }
 
@@ -174,6 +247,7 @@ export class MiddlewareChain {
     priority: number = 0
   ): MiddlewareChain {
     const newConfig: MiddlewareChainConfig = {
+      name: `${this.chainName}-extended`,
       middlewares: [
         ...this.middlewares.map((m) => ({
           name: m.name,
@@ -185,6 +259,70 @@ export class MiddlewareChain {
       ],
     };
 
-    return new MiddlewareChain(newConfig, this.logger);
+    return new MiddlewareChain(this.metrics, newConfig);
+  }
+
+  /**
+   * Record chain-level metrics
+   */
+  private async recordChainMetrics(
+    result: "success" | "failure",
+    totalTime: number
+  ): Promise<void> {
+    try {
+      await Promise.all([
+        this.metrics.recordCounter(`middleware_chain_${result}`, 1, {
+          chainName: this.chainName,
+          middlewareCount: this.middlewares.length.toString(),
+        }),
+        this.metrics.recordTimer("middleware_chain_duration", totalTime, {
+          chainName: this.chainName,
+          result,
+        }),
+      ]);
+    } catch (error) {
+      this.logger.warn("Failed to record chain metrics", {
+        error: (error as Error).message,
+      });
+    }
+  }
+
+  /**
+   * Record individual middleware metrics
+   */
+  private async recordMiddlewareMetrics(
+    middlewareName: string,
+    result: "success" | "failure",
+    executionTime: number
+  ): Promise<void> {
+    try {
+      await Promise.all([
+        this.metrics.recordCounter(`middleware_execution_${result}`, 1, {
+          chainName: this.chainName,
+          middleware: middlewareName,
+        }),
+        this.metrics.recordTimer(
+          "middleware_execution_duration",
+          executionTime,
+          {
+            chainName: this.chainName,
+            middleware: middlewareName,
+            result,
+          }
+        ),
+      ]);
+    } catch (error) {
+      this.logger.warn("Failed to record middleware metrics", {
+        middleware: middlewareName,
+        error: (error as Error).message,
+      });
+    }
+  }
+
+  /**
+   * Generate unique execution ID for tracing
+   */
+  private generateExecutionId(): string {
+    return `exec_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   }
 }

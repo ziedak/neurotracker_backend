@@ -1,362 +1,511 @@
-# Enhanced BaseMiddleware for Elysia
+# Enhanced Middleware Architecture
 
-A production-grade base class for creating Elysia middleware with standardized patterns, comprehensive error handling, and metrics integration.
+A production-grade middleware system with protocol-agnostic design, comprehensive error handling, and advanced chain management. Supports both HTTP and WebSocket protocols with consistent patterns and monitoring.
 
-## Features
+## Architecture Overview
 
-- **Framework Abstraction**: Works with Elysia while maintaining framework-agnostic patterns
-- **Multiple Integration Patterns**: Simple plugins, advanced plugins with decorators, and framework-agnostic middleware functions
-- **Built-in Monitoring**: Integrated logging and metrics collection
-- **Production-Ready**: Error handling, security utilities, and performance optimization
-- **TypeScript Strict Mode**: Full type safety and modern TypeScript patterns
-- **Clean Architecture**: Follows SOLID principles with clear separation of concerns
+Our middleware system follows a layered architecture:
+
+- **AbstractMiddleware**: Common base functionality for all middleware types
+- **BaseMiddleware**: HTTP-specific middleware implementation
+- **BaseWebSocketMiddleware**: WebSocket-specific middleware implementation
+- **MiddlewareChain**: HTTP middleware composition and execution
+- **WebSocketMiddlewareChain**: WebSocket middleware with advanced features (circuit breakers, retry logic)
+- **ElysiaMiddlewareAdapter**: Framework integration adapter
+- **ChainFactory**: Convenient creation functions and patterns
+
+## Key Principles
+
+- ✅ **Direct Instantiation**: No dependency injection required
+- ✅ **Immutable Configuration**: Per-route config via `withConfig()`
+- ✅ **Framework Independence**: Core logic separated from framework specifics
+- ✅ **Protocol Agnostic**: Shared patterns across HTTP and WebSocket
+- ✅ **Production Ready**: Comprehensive monitoring and error handling
 
 ## Quick Start
 
-### 1. Extend BaseMiddleware
+### 1. HTTP Middleware
 
 ```typescript
-import { BaseMiddleware } from "@libs/middleware";
-import {
-  type MiddlewareContext,
-  type MiddlewareOptions,
-} from "@libs/middleware";
+import { BaseMiddleware, type HttpMiddlewareConfig } from "@libs/middleware";
+import { type IMetricsCollector } from "@libs/monitoring";
 
-interface MyConfig extends MiddlewareOptions {
-  customOption?: string;
-  threshold?: number;
+interface SecurityConfig extends HttpMiddlewareConfig {
+  readonly strictMode?: boolean;
+  readonly allowedOrigins?: readonly string[];
 }
 
-class MyMiddleware extends BaseMiddleware<MyConfig> {
+class SecurityMiddleware extends BaseMiddleware<SecurityConfig> {
+  constructor(metrics: IMetricsCollector, config: SecurityConfig) {
+    super(metrics, config, "security");
+  }
+
   protected async execute(
     context: MiddlewareContext,
     next: () => Promise<void>
   ): Promise<void> {
-    // Your middleware logic here
-    this.logger.info("Processing request", {
-      method: context.request.method,
-      path: context.request.url,
-    });
-
-    await next(); // Call downstream middleware/handlers
-
-    // Post-processing logic
-    await this.recordMetric("requests_processed");
-  }
-
-  protected override createInstance(config: MyConfig): MyMiddleware {
-    return new MyMiddleware(this.logger, this.metrics, config, this.name);
-  }
-}
-```
-
-### 2. Use with Elysia
-
-#### Simple Plugin Pattern
-
-```typescript
-import { Elysia } from "elysia";
-
-const middleware = new MyMiddleware(logger, metrics, config, "my-middleware");
-
-const app = new Elysia()
-  .use(middleware.elysia()) // Simple integration
-  .get("/", () => "Hello World");
-```
-
-#### Advanced Plugin Pattern with Decorators
-
-```typescript
-const app = new Elysia()
-  .use(middleware.plugin()) // Advanced integration with decorators
-  .get("/", ({ myMiddleware }) => {
-    return {
-      message: "Hello World",
-      middlewareConfig: myMiddleware.config,
+    // Add security headers
+    context.set.headers = {
+      ...context.set.headers,
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "X-XSS-Protection": "1; mode=block",
     };
-  });
-```
 
-#### Framework-Agnostic Usage
-
-```typescript
-const middlewareFunction = middleware.middleware();
-// Use with any framework that supports standard middleware functions
-```
-
-## API Reference
-
-### BaseMiddleware Methods
-
-#### Core Methods
-
-##### `execute(context, next)` - **Abstract**
-
-Must be implemented by subclasses. Contains the core middleware logic.
-
-```typescript
-protected abstract execute(
-  context: MiddlewareContext,
-  next: () => Promise<void>
-): Promise<void>;
-```
-
-##### `elysia(config?)` - Elysia Plugin
-
-Returns a simple Elysia plugin function.
-
-```typescript
-public elysia(config?: Partial<TConfig>): (app: Elysia) => Elysia
-```
-
-##### `plugin(config?)` - Advanced Elysia Plugin
-
-Returns an advanced Elysia plugin with decorators and derived context.
-
-```typescript
-public plugin(config?: Partial<TConfig>): Elysia
-```
-
-##### `middleware()` - Framework-Agnostic
-
-Returns a standard middleware function for framework-agnostic usage.
-
-```typescript
-public middleware(): MiddlewareFunction
-```
-
-#### Utility Methods
-
-##### `shouldSkip(context)` - Path Skipping
-
-Checks if the current request should skip this middleware based on `skipPaths` configuration.
-
-##### `getClientIp(context)` - IP Extraction
-
-Extracts client IP from various headers (X-Forwarded-For, X-Real-IP, etc.).
-
-##### `getRequestId(context)` - Request ID
-
-Generates or extracts a unique request ID for correlation.
-
-##### `sanitizeObject(obj, sensitiveFields?)` - Security
-
-Sanitizes objects by masking sensitive fields for safe logging.
-
-##### `recordMetric(name, value?, tags?)` - Metrics
-
-Records counter metrics with optional tags.
-
-##### `recordTimer(name, duration, tags?)` - Timing Metrics
-
-Records timing metrics for performance monitoring.
-
-##### `recordHistogram(name, value, tags?)` - Distribution Metrics
-
-Records histogram metrics for value distribution analysis.
-
-## Configuration
-
-### Base Configuration (MiddlewareOptions)
-
-```typescript
-interface MiddlewareOptions {
-  enabled?: boolean; // Enable/disable middleware (default: true)
-  priority?: number; // Execution priority (default: 0)
-  skipPaths?: string[]; // Paths to skip (supports wildcards)
-  name?: string; // Middleware name for logging
-}
-```
-
-### Path Skipping Examples
-
-```typescript
-const config = {
-  skipPaths: [
-    "/health", // Exact match
-    "/public/*", // Wildcard prefix
-    "/api/v1/auth", // Exact path with prefix matching
-  ],
-};
-```
-
-## Examples
-
-### Simple Request Logging Middleware
-
-```typescript
-class RequestLoggerMiddleware extends BaseMiddleware {
-  protected async execute(
-    context: MiddlewareContext,
-    next: () => Promise<void>
-  ) {
-    const start = Date.now();
-    const requestId = this.getRequestId(context);
-
-    this.logger.info("Request started", {
-      requestId,
-      method: context.request.method,
-      path: context.request.url,
-      ip: this.getClientIp(context),
-    });
-
-    await next();
-
-    const duration = Date.now() - start;
-    this.logger.info("Request completed", {
-      requestId,
-      duration,
-      status: context.set.status,
-    });
-
-    await this.recordTimer("request_duration", duration);
-  }
-}
-```
-
-### Authentication Middleware
-
-```typescript
-interface AuthConfig extends MiddlewareOptions {
-  requireAuth?: boolean;
-  allowedRoles?: string[];
-}
-
-class AuthMiddleware extends BaseMiddleware<AuthConfig> {
-  protected async execute(
-    context: MiddlewareContext,
-    next: () => Promise<void>
-  ) {
-    const token = context.request.headers.authorization?.replace("Bearer ", "");
-
-    if (!token && this.config.requireAuth) {
-      context.set.status = 401;
-      throw new Error("Authentication required");
-    }
-
-    if (token) {
-      // Validate token and set user context
-      context.user = await this.validateToken(token);
-
-      if (this.config.allowedRoles) {
-        const hasRole = context.user.roles?.some((role) =>
-          this.config.allowedRoles!.includes(role)
-        );
-
-        if (!hasRole) {
-          context.set.status = 403;
-          throw new Error("Insufficient permissions");
-        }
+    // Check origin if strict mode
+    if (this.config.strictMode) {
+      const origin = context.request.headers.origin;
+      if (origin && !this.config.allowedOrigins?.includes(origin)) {
+        context.set.status = 403;
+        throw new Error("Origin not allowed");
       }
     }
 
     await next();
   }
-
-  private async validateToken(token: string) {
-    // Token validation logic
-    return { id: "user123", roles: ["user"] };
-  }
 }
+
+// Usage
+const metrics = new MetricsCollector();
+const securityMiddleware = new SecurityMiddleware(metrics, {
+  name: "security",
+  enabled: true,
+  priority: 100,
+  strictMode: true,
+  allowedOrigins: ["https://app.example.com"],
+});
+
+// Direct usage
+const middlewareFunction = securityMiddleware.middleware();
+
+// Framework integration
+import { ElysiaMiddlewareAdapter } from "@libs/middleware/adapters";
+const adapter = new ElysiaMiddlewareAdapter(securityMiddleware);
+app.use(adapter.plugin());
 ```
 
-### Rate Limiting Middleware
+### 2. WebSocket Middleware
 
 ```typescript
-interface RateLimitConfig extends MiddlewareOptions {
-  maxRequests: number;
-  windowMs: number;
-  keyStrategy: "ip" | "user";
+import {
+  BaseWebSocketMiddleware,
+  type WebSocketMiddlewareConfig,
+} from "@libs/middleware";
+
+interface WSAuthConfig extends WebSocketMiddlewareConfig {
+  readonly requireAuth?: boolean;
+  readonly allowedMessageTypes?: readonly string[];
 }
 
-class RateLimitMiddleware extends BaseMiddleware<RateLimitConfig> {
-  private store = new Map<string, { count: number; resetTime: number }>();
+class WSAuthMiddleware extends BaseWebSocketMiddleware<WSAuthConfig> {
+  constructor(metrics: IMetricsCollector, config: WSAuthConfig) {
+    super(metrics, config, "ws-auth");
+  }
 
   protected async execute(
-    context: MiddlewareContext,
+    context: WebSocketContext,
     next: () => Promise<void>
-  ) {
-    const key =
-      this.config.keyStrategy === "ip"
-        ? this.getClientIp(context)
-        : context.user?.id || "anonymous";
-
-    const now = Date.now();
-    const entry = this.store.get(key);
-
-    if (!entry || now > entry.resetTime) {
-      this.store.set(key, {
-        count: 1,
-        resetTime: now + this.config.windowMs,
+  ): Promise<void> {
+    if (this.config.requireAuth && !context.authenticated) {
+      this.sendResponse(context, {
+        type: "error",
+        message: "Authentication required",
       });
-    } else {
-      entry.count++;
-
-      if (entry.count > this.config.maxRequests) {
-        context.set.status = 429;
-        context.set.headers["Retry-After"] = String(
-          Math.ceil((entry.resetTime - now) / 1000)
-        );
-
-        await this.recordMetric("rate_limit_exceeded", 1, { key });
-        throw new Error("Rate limit exceeded");
-      }
+      return; // Don't call next() to stop execution
     }
 
-    await this.recordMetric("rate_limit_check", 1, {
-      key: this.config.keyStrategy,
-    });
+    // Validate message type
+    if (this.config.allowedMessageTypes) {
+      const messageType = context.message.type;
+      if (!this.config.allowedMessageTypes.includes(messageType)) {
+        this.sendResponse(context, {
+          type: "error",
+          message: `Message type '${messageType}' not allowed`,
+        });
+        return;
+      }
+    }
 
     await next();
   }
 }
+
+// Usage
+const wsAuthMiddleware = new WSAuthMiddleware(metrics, {
+  name: "ws-auth",
+  enabled: true,
+  priority: 100,
+  requireAuth: true,
+  allowedMessageTypes: ["ping", "message", "subscribe"],
+});
+
+const middlewareFunction = wsAuthMiddleware.middleware();
 ```
 
-## Error Handling
-
-The BaseMiddleware automatically handles errors and provides comprehensive logging:
+### 3. Middleware Chains
 
 ```typescript
-// Errors are automatically logged with context
-this.logger.error("Middleware error", error, {
-  requestId: context.requestId,
-  path: context.request.url,
-  method: context.request.method,
+import { MiddlewareChain, WebSocketMiddlewareChain } from "@libs/middleware";
+
+// HTTP Chain
+const httpChain = new MiddlewareChain(metrics, {
+  name: "api-security-chain",
+  middlewares: [
+    {
+      name: "cors",
+      middleware: corsMiddleware.middleware(),
+      priority: 100,
+      enabled: true,
+    },
+    {
+      name: "security",
+      middleware: securityMiddleware.middleware(),
+      priority: 90,
+      enabled: true,
+    },
+    {
+      name: "auth",
+      middleware: authMiddleware.middleware(),
+      priority: 80,
+      enabled: true,
+    },
+  ],
 });
 
-// Metrics are recorded for errors
-await this.recordMetric("middleware_error", 1, {
-  middleware: this.name,
-  errorType: error.constructor.name,
+app.use(httpChain.execute());
+
+// WebSocket Chain with Advanced Features
+const wsChain = new WebSocketMiddlewareChain(metrics, "ws-chain");
+
+wsChain.register(
+  {
+    name: "auth",
+    priority: 100,
+    circuitBreakerConfig: {
+      failureThreshold: 5,
+      recoveryTimeout: 30000,
+      halfOpenMaxCalls: 3,
+    },
+  },
+  wsAuthMiddleware.middleware()
+);
+
+wsChain.register(
+  {
+    name: "rate-limit",
+    priority: 90,
+    retryConfig: {
+      maxRetries: 3,
+      baseDelay: 1000,
+      maxDelay: 5000,
+      backoffMultiplier: 2,
+    },
+  },
+  wsRateLimitMiddleware.middleware()
+);
+
+wsHandler.use(wsChain.createExecutor());
+```
+
+### 4. Factory Functions
+
+```typescript
+import {
+  createHttpMiddlewareChain,
+  createWebSocketMiddlewareChain,
+  MiddlewareChainPatterns,
+} from "@libs/middleware/factories";
+
+// HTTP chain with auto-priorities
+const securityChain = createHttpMiddlewareChain(metrics, "security", [
+  { name: "cors", middleware: corsMiddleware },
+  { name: "security", middleware: securityMiddleware },
+  { name: "auth", middleware: authMiddleware },
+]);
+
+// WebSocket chain with patterns
+const pattern = MiddlewareChainPatterns.PRODUCTION_WS();
+const wsChain = createWebSocketMiddlewareChain(metrics, pattern.name, [
+  {
+    name: "auth",
+    middleware: wsAuthMiddleware,
+    priority: pattern.priorities.auth,
+  },
+  {
+    name: "rate-limit",
+    middleware: wsRateLimitMiddleware,
+    priority: pattern.priorities.rateLimit,
+  },
+]);
+```
+
+## Configuration Management
+
+### Immutable Configuration with withConfig()
+
+```typescript
+// Base middleware instance
+const baseSecurityMiddleware = new SecurityMiddleware(metrics, {
+  name: "security",
+  enabled: true,
+  strictMode: false,
 });
+
+// Per-route configuration (creates new instance)
+const strictSecurityMiddleware = baseSecurityMiddleware.withConfig({
+  strictMode: true,
+  allowedOrigins: ["https://admin.example.com"],
+});
+
+// Different config for public routes
+const publicSecurityMiddleware = baseSecurityMiddleware.withConfig({
+  skipPaths: ["/public/*", "/health"],
+});
+
+// Each instance is independent
+app.use("/admin/*", strictSecurityMiddleware.middleware());
+app.use("/api/*", publicSecurityMiddleware.middleware());
+```
+
+## Advanced Features
+
+### Circuit Breakers (WebSocket)
+
+```typescript
+wsChain.register(
+  {
+    name: "external-service",
+    priority: 50,
+    circuitBreakerConfig: {
+      failureThreshold: 5, // Open after 5 failures
+      recoveryTimeout: 30000, // Try recovery after 30s
+      halfOpenMaxCalls: 3, // Allow 3 calls in half-open state
+    },
+  },
+  externalServiceMiddleware
+);
+```
+
+### Retry Logic (WebSocket)
+
+```typescript
+wsChain.register(
+  {
+    name: "rate-limit",
+    priority: 90,
+    retryConfig: {
+      maxRetries: 3,
+      baseDelay: 1000, // Start with 1s delay
+      maxDelay: 5000, // Max 5s delay
+      backoffMultiplier: 2, // Exponential backoff
+    },
+  },
+  rateLimitMiddleware
+);
+```
+
+### Dependency Resolution (WebSocket)
+
+```typescript
+// Register dependencies first
+wsChain.register({ name: "auth", priority: 100 }, authMiddleware);
+
+// Dependent middleware
+wsChain.register(
+  {
+    name: "user-validation",
+    priority: 90,
+    dependencies: ["auth"], // Requires auth to run first
+  },
+  userValidationMiddleware
+);
+```
+
+## Monitoring and Metrics
+
+All middleware automatically provides:
+
+### Execution Metrics
+
+- `middleware_execution_success/failure` - Individual middleware results
+- `middleware_execution_duration` - Execution timing
+- `middleware_chain_success/failure` - Chain-level results
+- `middleware_chain_duration` - Total chain execution time
+
+### Error Tracking
+
+- Automatic error logging with context
+- Error type classification
+- Request correlation IDs
+- Sanitized context information
+
+### Performance Monitoring
+
+- Per-middleware execution timing
+- Chain composition analysis
+- Circuit breaker state tracking
+- Retry attempt monitoring
+
+## Framework Integration
+
+### Elysia Integration
+
+```typescript
+import { ElysiaMiddlewareAdapter } from "@libs/middleware/adapters";
+
+const middleware = new SecurityMiddleware(metrics, config);
+const adapter = new ElysiaMiddlewareAdapter(middleware);
+
+// Simple plugin
+app.use(adapter.plugin());
+
+// Advanced plugin with decorators
+app.use(adapter.advancedPlugin());
+
+// Per-route configuration
+app.use("/api/*", adapter.plugin({ enabled: true }));
+app.use("/public/*", adapter.plugin({ enabled: false }));
+```
+
+### Other Frameworks
+
+```typescript
+// Framework-agnostic middleware function
+const middlewareFunction = securityMiddleware.middleware();
+
+// Use with Express-like frameworks
+expressApp.use(middlewareFunction);
+
+// Use with custom framework
+customFramework.addMiddleware(middlewareFunction);
 ```
 
 ## Best Practices
 
-1. **Always call `await next()`** in your execute method unless you want to short-circuit the request
-2. **Override `createInstance()`** for proper configuration isolation
-3. **Use meaningful metric names** that follow your monitoring conventions
-4. **Sanitize sensitive data** before logging using `sanitizeObject()`
-5. **Handle errors gracefully** and provide meaningful error messages
-6. **Test path skipping** logic with your specific route patterns
-7. **Use TypeScript strict types** for configuration interfaces
+### 1. Configuration Design
 
-## Performance Considerations
+```typescript
+// ✅ Good: Immutable, specific interfaces
+interface AuthConfig extends HttpMiddlewareConfig {
+  readonly tokenSecret: string;
+  readonly allowedRoles?: readonly string[];
+}
 
-- Middleware execution is optimized for minimal overhead
-- Path skipping is performed early to avoid unnecessary processing
-- Metrics recording includes error handling to prevent middleware failures
-- Request ID generation is cached to avoid repeated UUID generation
-- IP extraction checks multiple headers in order of preference
+// ❌ Bad: Mutable, generic config
+interface AuthConfig {
+  tokenSecret: string;
+  allowedRoles: string[];
+  [key: string]: any;
+}
+```
 
-## Migration from Legacy Middleware
+### 2. Error Handling
 
-If you have existing middleware, follow these steps:
+```typescript
+// ✅ Good: Specific errors with context
+protected async execute(context: MiddlewareContext, next: () => Promise<void>) {
+  try {
+    await this.validateToken(context);
+    await next();
+  } catch (error) {
+    if (error instanceof TokenExpiredError) {
+      context.set.status = 401;
+      throw new Error("Token expired");
+    }
+    throw error; // Re-throw unknown errors
+  }
+}
 
-1. Extract configuration into a type extending `MiddlewareOptions`
-2. Move core logic to the `execute()` method
-3. Replace direct Elysia integration with `elysia()` or `plugin()` methods
-4. Add proper error handling and metrics recording
-5. Implement `createInstance()` for config isolation
+// ❌ Bad: Generic error handling
+protected async execute(context: MiddlewareContext, next: () => Promise<void>) {
+  try {
+    await next();
+  } catch (error) {
+    context.set.status = 500;
+    // Swallowing specific error information
+  }
+}
+```
 
-The enhanced BaseMiddleware is backward compatible and provides a clear migration path for existing middleware implementations.
+### 3. Resource Management
+
+```typescript
+// ✅ Good: Clean resource management
+class DatabaseMiddleware extends BaseMiddleware<DatabaseConfig> {
+  private connectionPool: ConnectionPool;
+
+  constructor(metrics: IMetricsCollector, config: DatabaseConfig) {
+    super(metrics, config, "database");
+    this.connectionPool = new ConnectionPool(config.database);
+  }
+
+  protected async execute(
+    context: MiddlewareContext,
+    next: () => Promise<void>
+  ) {
+    const connection = await this.connectionPool.acquire();
+    try {
+      context.db = connection;
+      await next();
+    } finally {
+      this.connectionPool.release(connection);
+    }
+  }
+}
+```
+
+### 4. Testing
+
+```typescript
+// ✅ Easy testing with direct instantiation
+describe("SecurityMiddleware", () => {
+  let middleware: SecurityMiddleware;
+  let mockMetrics: jest.Mocked<IMetricsCollector>;
+
+  beforeEach(() => {
+    mockMetrics = createMockMetrics();
+    middleware = new SecurityMiddleware(mockMetrics, {
+      name: "security",
+      enabled: true,
+      strictMode: true,
+    });
+  });
+
+  it("should add security headers", async () => {
+    const context = createMockContext();
+    const next = jest.fn();
+
+    await middleware.middleware()(context, next);
+
+    expect(context.set.headers["X-Frame-Options"]).toBe("DENY");
+    expect(next).toHaveBeenCalled();
+  });
+});
+```
+
+## Migration Guide
+
+### From Legacy Middleware
+
+1. **Remove DI decorators**: No more `@injectable()` or `@inject()`
+2. **Extend appropriate base**: `BaseMiddleware` for HTTP, `BaseWebSocketMiddleware` for WebSocket
+3. **Update constructor**: Accept dependencies directly
+4. **Implement execute method**: Move logic from old middleware function
+5. **Update configuration**: Use immutable config interfaces
+
+### From Old Chain Systems
+
+1. **Replace custom chains**: Use `MiddlewareChain` or `WebSocketMiddlewareChain`
+2. **Update registration**: Use new chain APIs
+3. **Migrate priorities**: Use numeric priority system
+4. **Add monitoring**: Leverage built-in metrics
+
+## Performance Characteristics
+
+- **Minimal Overhead**: Direct function calls, no reflection
+- **Memory Efficient**: Immutable configs prevent leaks
+- **Scalable**: Chain execution optimized for high throughput
+- **Observable**: Comprehensive metrics with minimal impact
+- **Maintainable**: Clear separation of concerns
+
+The enhanced middleware architecture provides a robust foundation for building scalable, maintainable middleware systems with excellent developer experience and production-grade monitoring.

@@ -1,53 +1,62 @@
-import { type ILogger, type IMetricsCollector } from "@libs/monitoring";
-import type {
-  WebSocketContext,
-  WebSocketMiddlewareFunction,
-  WebSocketMiddlewareOptions,
-} from "../types";
+import { IMetricsCollector } from "@libs/monitoring";
+import type { WebSocketContext, WebSocketMiddlewareFunction } from "../types";
+import {
+  AbstractMiddleware,
+  type BaseMiddlewareConfig,
+} from "./AbstractMiddleware";
+
+/**
+ * WebSocket Middleware configuration interface
+ */
+export interface WebSocketMiddlewareConfig extends BaseMiddlewareConfig {
+  readonly skipMessageTypes?: readonly string[];
+}
 
 /**
  * Base class for WebSocket middleware implementations
- * Provides common functionality for WebSocket-specific middleware
+ * Provides WebSocket-specific functionality while leveraging shared abstractions
+ *
+ * @template TConfig - Configuration type extending WebSocketMiddlewareConfig
+ *
+ * Features:
+ * - Message type filtering
+ * - Safe JSON serialization
+ * - Connection context management
+ * - WebSocket-specific error handling
+ * - Immutable configuration management
+ *
+ * Usage:
+ * ```typescript
+ * class AuthMiddleware extends BaseWebSocketMiddleware<AuthConfig> {
+ *   protected async execute(context: WebSocketContext, next: () => Promise<void>) {
+ *     // Auth logic here
+ *     await next();
+ *   }
+ * }
+ *
+ * // Usage
+ * const middleware = new AuthMiddleware(metrics, config);
+ * const middlewareFunction = middleware.middleware();
+ * ```
  */
 export abstract class BaseWebSocketMiddleware<
-  TConfig extends WebSocketMiddlewareOptions = WebSocketMiddlewareOptions
-> {
-  protected readonly logger: ILogger;
-  protected readonly metrics: IMetricsCollector | undefined;
-  protected readonly config: TConfig;
-  protected readonly name: string;
+  TConfig extends WebSocketMiddlewareConfig = WebSocketMiddlewareConfig
+> extends AbstractMiddleware<TConfig, WebSocketContext> {
+  constructor(metrics: IMetricsCollector, config: TConfig, name?: string) {
+    const wsDefaults = {
+      skipMessageTypes: [] as readonly string[],
+    };
 
-  constructor(
-    name: string,
-    config: TConfig,
-    logger: ILogger,
-    metrics?: IMetricsCollector
-  ) {
-    this.name = name;
-    this.logger = logger.child({ wsMiddleware: name });
-    this.metrics = metrics;
-    this.config = {
-      enabled: true,
-      priority: 0,
-      skipMessageTypes: [],
-      ...config,
-      name,
-    } as TConfig;
-
-    this.logger.debug("WebSocket middleware initialized", {
-      name: this.name,
-      enabled: this.config.enabled,
-      skipMessageTypes: this.config.skipMessageTypes?.length || 0,
-    });
+    super(metrics, { ...wsDefaults, ...config } as TConfig, name);
   }
 
   /**
    * Main execution method - must be implemented by subclasses
    */
-  abstract execute(
+  protected abstract override execute(
     context: WebSocketContext,
     next: () => Promise<void>
-  ): Promise<void | any>;
+  ): Promise<void>;
 
   /**
    * Create middleware function for use in WebSocket handlers
@@ -61,7 +70,7 @@ export abstract class BaseWebSocketMiddleware<
       }
 
       // Check if message type should be skipped
-      if (this.shouldSkipMessage(context)) {
+      if (this.shouldSkip(context)) {
         this.logger.debug("Message type matched skip pattern, skipping", {
           messageType: context.message.type,
           connectionId: context.connectionId,
@@ -69,9 +78,17 @@ export abstract class BaseWebSocketMiddleware<
         return next();
       }
 
-      // Execute middleware with error handling
+      // Execute middleware with error handling and timing
+      const startTime = Date.now();
       try {
-        return await this.execute(context, next);
+        await this.execute(context, next);
+        await this.recordTimer(
+          `${this.config.name}_duration`,
+          Date.now() - startTime,
+          {
+            messageType: context.message.type,
+          }
+        );
       } catch (error) {
         await this.handleError(error as Error, context);
         throw error;
@@ -82,64 +99,24 @@ export abstract class BaseWebSocketMiddleware<
   /**
    * Check if the current message should skip this middleware
    */
-  protected shouldSkipMessage(context: WebSocketContext): boolean {
+  protected override shouldSkip(context: WebSocketContext): boolean {
     const messageType = context.message.type;
-
     return this.config.skipMessageTypes?.includes(messageType) || false;
   }
 
   /**
-   * Handle errors that occur during middleware execution
+   * Extract relevant information from WebSocket context for logging
    */
-  protected async handleError(
-    error: Error,
+  protected override extractContextInfo(
     context: WebSocketContext
-  ): Promise<void> {
-    this.logger.error(`${this.name} WebSocket middleware error`, error, {
+  ): Record<string, any> {
+    return {
       messageType: context.message.type,
       connectionId: context.connectionId,
       userId: context.userId,
-    });
-
-    await this.recordMetric(`${this.name}_ws_error`, 1, {
-      messageType: context.message.type,
-      authenticated: context.authenticated ? "true" : "false",
-      realm: "websocket",
-    });
-  }
-
-  /**
-   * Record a metric counter
-   */
-  protected async recordMetric(
-    name: string,
-    value: number = 1,
-    tags?: Record<string, string>
-  ): Promise<void> {
-    if (this.metrics) {
-      await this.metrics.recordCounter(name, value, {
-        middleware: this.name,
-        type: "websocket",
-        ...tags,
-      });
-    }
-  }
-
-  /**
-   * Record a timing metric
-   */
-  protected async recordTimer(
-    name: string,
-    duration: number,
-    tags?: Record<string, string>
-  ): Promise<void> {
-    if (this.metrics) {
-      await this.metrics.recordTimer(name, duration, {
-        middleware: this.name,
-        type: "websocket",
-        ...tags,
-      });
-    }
+      authenticated: context.authenticated,
+      clientIp: this.getClientIp(context),
+    };
   }
 
   /**
@@ -171,21 +148,85 @@ export abstract class BaseWebSocketMiddleware<
   }
 
   /**
-   * Send response message through WebSocket
+   * Send response message through WebSocket with safe serialization
+   * @param context - WebSocket context
+   * @param message - Message to send
+   * @param options - Send options
    */
-  protected sendResponse(context: WebSocketContext, message: any): void {
+  protected sendResponse(
+    context: WebSocketContext,
+    message: any,
+    options: {
+      addTimestamp?: boolean;
+      maxRetries?: number;
+    } = {}
+  ): boolean {
+    const { addTimestamp = true, maxRetries = 1 } = options;
+
+    let attempt = 0;
+    while (attempt < maxRetries) {
+      try {
+        const payload = addTimestamp
+          ? { ...message, timestamp: new Date().toISOString() }
+          : message;
+
+        const serialized = this.safeJsonStringify(payload);
+        if (!serialized) {
+          this.logger.error("Failed to serialize WebSocket message", {
+            connectionId: context.connectionId,
+            messageType: message.type,
+            attempt: attempt + 1,
+          });
+          return false;
+        }
+
+        context.ws.send(serialized);
+        return true;
+      } catch (error) {
+        attempt++;
+        this.logger.error("Failed to send WebSocket response", error as Error, {
+          connectionId: context.connectionId,
+          messageType: message.type,
+          attempt,
+          willRetry: attempt < maxRetries,
+        });
+
+        if (attempt >= maxRetries) {
+          this.recordMetric(`${this.config.name}_send_failed`, 1, {
+            connectionId: context.connectionId,
+            messageType: message.type,
+          });
+          return false;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Safe JSON stringification with circular reference handling
+   * @param obj - Object to stringify
+   */
+  private safeJsonStringify(obj: any): string | null {
+    const seen = new Set();
+
     try {
-      context.ws.send(
-        JSON.stringify({
-          ...message,
-          timestamp: new Date().toISOString(),
-        })
-      );
-    } catch (error) {
-      this.logger.error("Failed to send WebSocket response", error as Error, {
-        connectionId: context.connectionId,
-        messageType: message.type,
+      return JSON.stringify(obj, (_key, value) => {
+        // Handle circular references
+        if (typeof value === "object" && value !== null) {
+          if (seen.has(value)) {
+            return "[Circular]";
+          }
+          seen.add(value);
+        }
+        return value;
       });
+    } catch (error) {
+      this.logger.warn("JSON stringification failed", {
+        error: (error as Error).message,
+      });
+      return null;
     }
   }
 }

@@ -4,10 +4,10 @@
  */
 
 import {
-  CacheService,
   CacheOperationLockManager,
+  CacheService,
   CacheConfigValidator,
-} from "@libs/cache";
+} from "@libs/database";
 import { createLogger } from "@libs/utils";
 
 /**
@@ -121,7 +121,7 @@ export class RateLimitingCacheAdapter {
   ) {
     this.config = { ...DEFAULT_RATE_LIMITING_ADAPTER_CONFIG, ...config };
 
-    this.lockManager = new CacheOperationLockManager(this.logger);
+    this.lockManager = new CacheOperationLockManager();
 
     // Initialize statistics
     this.stats = {

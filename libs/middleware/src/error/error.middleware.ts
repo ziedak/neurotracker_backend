@@ -1,10 +1,15 @@
-import { Logger, type ILogger } from "@libs/monitoring";
+import { type IMetricsCollector } from "@libs/monitoring";
+import {
+  BaseMiddleware,
+  type HttpMiddlewareConfig,
+} from "../base/BaseMiddleware";
+import { type MiddlewareContext } from "../types";
 
-export interface ErrorConfig {
-  includeStackTrace?: boolean;
-  logErrors?: boolean;
-  customErrorMessages?: Record<string, string>;
-  sensitiveFields?: string[];
+export interface ErrorMiddlewareConfig extends HttpMiddlewareConfig {
+  readonly includeStackTrace?: boolean;
+  readonly logErrors?: boolean;
+  readonly customErrorMessages?: Record<string, string>;
+  readonly sensitiveFields?: readonly string[];
 }
 
 export interface ErrorResponse {
@@ -25,101 +30,121 @@ export interface CustomError extends Error {
 }
 
 /**
- * Unified Error Middleware
+ * Unified Error Middleware following AbstractMiddleware architecture
  * Provides comprehensive error handling with logging and response formatting
  * Framework-agnostic implementation for consistent error handling across all services
+ *
+ * Features:
+ * - Extends BaseMiddleware for HTTP contexts
+ * - Framework-agnostic error handling
+ * - Immutable configuration with withConfig()
+ * - Comprehensive error logging and metrics
+ * - Security-aware error sanitization
+ * - Production-ready error responses
+ *
+ * Note: For WebSocket error handling, use WebSocketErrorMiddleware
  */
-export class ErrorMiddleware {
-  private readonly logger: ILogger;
-  private readonly defaultConfig: ErrorConfig = {
-    includeStackTrace: false,
-    logErrors: true,
-    customErrorMessages: {
-      ValidationError: "Invalid request data",
-      AuthenticationError: "Authentication failed",
-      AuthorizationError: "Access denied",
-      NotFoundError: "Resource not found",
-      RateLimitError: "Too many requests",
-      DatabaseError: "Database operation failed",
-      NetworkError: "Network connection failed",
-    },
-    sensitiveFields: ["password", "token", "secret", "key", "auth"],
-  };
+export class ErrorMiddleware extends BaseMiddleware<ErrorMiddlewareConfig> {
+  constructor(metrics: IMetricsCollector, config: ErrorMiddlewareConfig) {
+    const mergedConfig = {
+      ...config,
+      ...{ includeStackTrace: false, logErrors: true, ...config },
+    } as ErrorMiddlewareConfig;
 
-  constructor(logger: ILogger) {
-    this.logger = logger;
+    super(metrics, mergedConfig, config.name || "error-handler");
   }
 
   /**
-   * Create Elysia middleware for error handling
+   * Execute error middleware - handles errors from downstream middleware
+   * Note: This middleware should typically be registered early in the chain
    */
-  elysia(config?: Partial<ErrorConfig>) {
-    const finalConfig = { ...this.defaultConfig, ...config };
-
-    return (app: any) => {
-      return app.onError(async (context: any) => {
-        const { error, set, request } = context;
-        const errorResponse = await this.handleError(
-          error,
-          request,
-          finalConfig
-        );
-
-        set.status = errorResponse.statusCode || 500;
-        return errorResponse;
-      });
-    };
+  protected async execute(
+    context: MiddlewareContext,
+    next: () => Promise<void>
+  ): Promise<void> {
+    try {
+      await next();
+    } catch (error) {
+      await this.handleMiddlewareError(error as Error, context);
+    }
   }
 
   /**
-   * Handle error and return formatted response
+   * Handle middleware error and set response
    */
-  async handleError(
+  private async handleMiddlewareError(
+    error: Error,
+    context: MiddlewareContext
+  ): Promise<void> {
+    const errorResponse = await this.createErrorResponse(error, context);
+
+    // Set status code
+    context.set.status = errorResponse.statusCode || 500;
+
+    // Set error response - note: actual response setting depends on framework
+    if (context.set) {
+      // This approach works with frameworks that support set.body
+      (context.set as any).body = errorResponse;
+    }
+
+    // Record error metrics
+    await this.recordMetric("error_handled", 1, {
+      errorType: this.getErrorType(error),
+      statusCode: String(errorResponse.statusCode || 500),
+    });
+
+    // Log error if configured
+    if (this.config.logErrors) {
+      await this.logError(error, context);
+    }
+  }
+
+  /**
+   * Create formatted error response
+   */
+  public async createErrorResponse(
     error: Error | CustomError,
-    request?: any,
-    config?: Partial<ErrorConfig>
+    context?: MiddlewareContext
   ): Promise<ErrorResponse> {
     try {
-      const finalConfig = { ...this.defaultConfig, ...config };
-      const requestId = request?.requestId || "unknown";
+      const requestId =
+        context?.requestId ||
+        (context ? this.getRequestId(context) : "unknown");
 
-      // Log error if configured
-      if (finalConfig.logErrors) {
-        this.logError(error, request, requestId);
-      }
-
-      // Create error response
       const errorResponse: ErrorResponse = {
         success: false,
         error: this.getErrorType(error),
-        message: this.getErrorMessage(error, finalConfig),
+        message: this.getErrorMessage(error),
         timestamp: new Date().toISOString(),
         requestId,
         statusCode: this.getStatusCode(error),
       };
 
       // Add details if available
-      const details = this.getErrorDetails(error, finalConfig);
+      const details = this.getErrorDetails(error);
       if (details) {
         errorResponse.details = details;
       }
 
       // Add stack trace if configured
-      if (finalConfig.includeStackTrace && error.stack) {
+      if (this.config.includeStackTrace && error.stack) {
         errorResponse.stackTrace = error.stack;
       }
 
       return errorResponse;
     } catch (handlingError) {
       // Fallback error handling
-      this.logger.error("Error in error handling", handlingError as Error);
+      this.logger.error(
+        "Error in error response creation",
+        handlingError as Error
+      );
 
       return {
         success: false,
         error: "InternalError",
         message: "An internal error occurred",
         timestamp: new Date().toISOString(),
-        requestId: request?.requestId || "unknown",
+        requestId: context?.requestId || "unknown",
         statusCode: 500,
       };
     }
@@ -128,61 +153,54 @@ export class ErrorMiddleware {
   /**
    * Handle async errors with promise rejection
    */
-  async handleAsyncError(
+  public async handleAsyncError(
     errorPromise: Promise<any>,
-    request?: any,
-    config?: Partial<ErrorConfig>
+    context?: MiddlewareContext
   ): Promise<any> {
     try {
       return await errorPromise;
     } catch (error) {
-      return this.handleError(error as Error, request, config);
+      return this.createErrorResponse(error as Error, context);
     }
   }
 
   /**
    * Wrap function with error handling
    */
-  wrapWithErrorHandling<T extends any[], R>(
-    fn: (...args: T) => Promise<R>,
-    config?: Partial<ErrorConfig>
+  public wrapWithErrorHandling<T extends any[], R>(
+    fn: (...args: T) => Promise<R>
   ): (...args: T) => Promise<R | ErrorResponse> {
     return async (...args: T) => {
       try {
         return await fn(...args);
       } catch (error) {
-        return this.handleError(error as Error, undefined, config);
+        return this.createErrorResponse(error as Error);
       }
     };
   }
 
   /**
-   * Log error with context
+   * Log error with comprehensive context
    */
-  private logError(
+  private async logError(
     error: Error | CustomError,
-    request?: any,
-    requestId?: string
-  ): void {
-    const errorContext: any = {
-      requestId,
+    context: MiddlewareContext
+  ): Promise<void> {
+    const errorContext: Record<string, any> = {
+      requestId: context.requestId,
       errorType: this.getErrorType(error),
       errorMessage: error.message,
       statusCode: this.getStatusCode(error),
       timestamp: new Date().toISOString(),
+      method: context.request.method,
+      url: context.request.url,
+      userAgent: context.request.headers?.["user-agent"],
+      ip: this.getClientIp(context),
     };
-
-    // Add request context if available
-    if (request) {
-      errorContext.method = request.method;
-      errorContext.url = request.url || request.path;
-      errorContext.userAgent = request.headers?.["user-agent"];
-      errorContext.ip = this.extractIP(request);
-    }
 
     // Add error details if available
     if ("details" in error && error.details) {
-      errorContext.details = this.sanitizeErrorDetails(error.details);
+      errorContext["details"] = this.sanitizeErrorDetails(error.details);
     }
 
     // Log with appropriate level based on status code
@@ -210,15 +228,12 @@ export class ErrorMiddleware {
   /**
    * Get user-friendly error message
    */
-  private getErrorMessage(
-    error: Error | CustomError,
-    config: ErrorConfig
-  ): string {
+  private getErrorMessage(error: Error | CustomError): string {
     const errorType = this.getErrorType(error);
 
     // Check for custom message
-    if (config.customErrorMessages?.[errorType]) {
-      return config.customErrorMessages[errorType];
+    if (this.config.customErrorMessages?.[errorType]) {
+      return this.config.customErrorMessages[errorType];
     }
 
     // Return sanitized original message
@@ -253,18 +268,12 @@ export class ErrorMiddleware {
   /**
    * Get error details
    */
-  private getErrorDetails(
-    error: Error | CustomError,
-    config: ErrorConfig
-  ): any {
+  private getErrorDetails(error: Error | CustomError): any {
     if (!("details" in error) || !error.details) {
       return undefined;
     }
 
-    return this.sanitizeErrorDetails(
-      error.details,
-      config.sensitiveFields || []
-    );
+    return this.sanitizeErrorDetails(error.details);
   }
 
   /**
@@ -293,52 +302,9 @@ export class ErrorMiddleware {
   /**
    * Sanitize error details to remove sensitive information
    */
-  private sanitizeErrorDetails(
-    details: any,
-    sensitiveFields: string[] = []
-  ): any {
-    if (typeof details !== "object" || details === null) {
-      return details;
-    }
-
-    if (Array.isArray(details)) {
-      return details.map((item) =>
-        this.sanitizeErrorDetails(item, sensitiveFields)
-      );
-    }
-
-    const sanitized: any = {};
-
-    for (const [key, value] of Object.entries(details)) {
-      const lowerKey = key.toLowerCase();
-
-      if (
-        sensitiveFields.some((field) => lowerKey.includes(field.toLowerCase()))
-      ) {
-        sanitized[key] = "[REDACTED]";
-      } else {
-        sanitized[key] = this.sanitizeErrorDetails(value, sensitiveFields);
-      }
-    }
-
-    return sanitized;
-  }
-
-  /**
-   * Extract IP address from request
-   */
-  private extractIP(request: any): string {
-    const forwardedFor = request.headers?.["x-forwarded-for"];
-    if (forwardedFor) {
-      return forwardedFor.split(",")[0].trim();
-    }
-
-    const realIP = request.headers?.["x-real-ip"];
-    if (realIP) {
-      return realIP;
-    }
-
-    return request.ip || request.connection?.remoteAddress || "127.0.0.1";
+  private sanitizeErrorDetails(details: any): any {
+    const sensitiveFields = this.config.sensitiveFields || [];
+    return this.sanitizeObject(details, [...sensitiveFields]);
   }
 
   /**
@@ -391,7 +357,7 @@ export class ErrorMiddleware {
   /**
    * Create preset configurations for different environments
    */
-  static createDevelopmentConfig(): ErrorConfig {
+  static createDevelopmentConfig(): Partial<ErrorMiddlewareConfig> {
     return {
       includeStackTrace: true,
       logErrors: true,
@@ -399,7 +365,7 @@ export class ErrorMiddleware {
     };
   }
 
-  static createProductionConfig(): ErrorConfig {
+  static createProductionConfig(): Partial<ErrorMiddlewareConfig> {
     return {
       includeStackTrace: false,
       logErrors: true,
@@ -415,7 +381,7 @@ export class ErrorMiddleware {
     };
   }
 
-  static createMinimalConfig(): ErrorConfig {
+  static createMinimalConfig(): Partial<ErrorMiddlewareConfig> {
     return {
       includeStackTrace: false,
       logErrors: false,
@@ -429,7 +395,7 @@ export class ErrorMiddleware {
     };
   }
 
-  static createAuditConfig(): ErrorConfig {
+  static createAuditConfig(): Partial<ErrorMiddlewareConfig> {
     return {
       includeStackTrace: true,
       logErrors: true,
@@ -449,8 +415,18 @@ export class ErrorMiddleware {
 /**
  * Factory function for easy middleware creation
  */
-export function createErrorMiddleware(config?: Partial<ErrorConfig>) {
-  const logger = new Logger({ service: "Shared Error Middleware" });
-  const middleware = new ErrorMiddleware(logger);
-  return middleware.elysia(config);
+export function createErrorMiddleware(
+  metrics: IMetricsCollector,
+  config?: Partial<ErrorMiddlewareConfig>
+): ErrorMiddleware {
+  const defaultConfig: ErrorMiddlewareConfig = {
+    name: "error-handler",
+    enabled: true,
+    priority: 1000, // High priority to catch errors early
+    includeStackTrace: false,
+    logErrors: true,
+    ...config,
+  };
+
+  return new ErrorMiddleware(metrics, defaultConfig);
 }

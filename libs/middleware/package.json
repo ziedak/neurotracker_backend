@@ -16,7 +16,9 @@
     "@libs/messaging": "workspace:*",
     "@libs/monitoring": "workspace:*",
     "@libs/ratelimit": "workspace:*",
-    "@libs/utils": "workspace:*"
+    "@libs/utils": "workspace:*",
+    "reflect-metadata": "^0.2.2",
+    "tsyringe": "^4.10.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",

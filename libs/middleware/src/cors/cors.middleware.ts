@@ -1,214 +1,384 @@
-import { type ILogger, type IMetricsCollector } from "@libs/monitoring";
-import { BaseMiddleware } from "../base";
-import type { MiddlewareContext, MiddlewareOptions } from "../types";
+import { type IMetricsCollector } from "@libs/monitoring";
+import { BaseMiddleware, type HttpMiddlewareConfig } from "../base";
+import type { MiddlewareContext } from "../types";
 
-export interface CorsConfig extends MiddlewareOptions {
-  origin?: string | string[] | boolean | ((origin: string) => boolean);
-  methods?: string[];
-  allowedHeaders?: string[];
-  exposedHeaders?: string[];
-  credentials?: boolean;
-  maxAge?: number;
-  preflightContinue?: boolean;
-  optionsSuccessStatus?: number;
+/**
+ * CORS middleware configuration interface
+ * Extends HttpMiddlewareConfig with CORS-specific options
+ */
+export interface CorsMiddlewareConfig extends HttpMiddlewareConfig {
+  readonly origin?:
+    | string
+    | readonly string[]
+    | boolean
+    | ((origin: string) => boolean);
+  readonly methods?: readonly string[];
+  readonly allowedHeaders?: readonly string[];
+  readonly exposedHeaders?: readonly string[];
+  readonly credentials?: boolean;
+  readonly maxAge?: number;
+  readonly preflightContinue?: boolean;
+  readonly optionsSuccessStatus?: number;
 }
 
 /**
- * CORS Middleware
- * Cross-Origin Resource Sharing configuration for secure cross-domain requests
- * Production-ready implementation with comprehensive security options and monitoring
+ * Default CORS configuration constants
  */
-export class CorsMiddleware extends BaseMiddleware<CorsConfig> {
-  private readonly corsConfig: CorsConfig;
+const DEFAULT_CORS_OPTIONS = {
+  ORIGIN: "*" as const,
+  METHODS: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"] as const,
+  ALLOWED_HEADERS: [
+    "Content-Type",
+    "Authorization",
+    "X-Requested-With",
+    "X-API-Key",
+  ] as const,
+  EXPOSED_HEADERS: ["X-Total-Count", "X-Rate-Limit-Remaining"] as const,
+  CREDENTIALS: true,
+  MAX_AGE: 86400, // 24 hours
+  OPTIONS_SUCCESS_STATUS: 204,
+  PRIORITY: 100, // High priority for CORS
+} as const;
 
+/**
+ * CORS origin validation result
+ */
+interface OriginValidationResult {
+  readonly allowed: boolean;
+  readonly matchedOrigin?: string | undefined;
+  readonly reason?: string;
+}
+
+/**
+ * Production-grade CORS Middleware
+ * Implements Cross-Origin Resource Sharing with comprehensive security controls
+ *
+ * Features:
+ * - Strict type safety with readonly configurations
+ * - Comprehensive origin validation with detailed logging
+ * - Performance-optimized header setting
+ * - Built-in security best practices
+ * - Extensive monitoring and metrics
+ *
+ * @template CorsMiddlewareConfig - CORS-specific configuration
+ */
+export class CorsMiddleware extends BaseMiddleware<CorsMiddlewareConfig> {
   constructor(
-    logger: ILogger,
     metrics: IMetricsCollector,
-    config: CorsConfig,
-    name: string = "cors"
+    config: Partial<CorsMiddlewareConfig> = {}
   ) {
-    const defaultConfig: Partial<CorsConfig> = {
-      origin: "*",
-      methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-      allowedHeaders: [
-        "Content-Type",
-        "Authorization",
-        "X-Requested-With",
-        "X-API-Key",
+    // Create complete configuration with validated defaults
+    const completeConfig: CorsMiddlewareConfig = {
+      name: config.name || "cors",
+      enabled: config.enabled ?? true,
+      priority: config.priority ?? DEFAULT_CORS_OPTIONS.PRIORITY,
+      skipPaths: config.skipPaths || [],
+      origin: config.origin ?? DEFAULT_CORS_OPTIONS.ORIGIN,
+      methods: config.methods ?? [...DEFAULT_CORS_OPTIONS.METHODS],
+      allowedHeaders: config.allowedHeaders ?? [
+        ...DEFAULT_CORS_OPTIONS.ALLOWED_HEADERS,
       ],
-      exposedHeaders: ["X-Total-Count", "X-Rate-Limit-Remaining"],
-      credentials: true,
-      maxAge: 86400, // 24 hours
-      optionsSuccessStatus: 204,
-      enabled: true,
-      priority: 0,
-      skipPaths: [],
+      exposedHeaders: config.exposedHeaders ?? [
+        ...DEFAULT_CORS_OPTIONS.EXPOSED_HEADERS,
+      ],
+      credentials: config.credentials ?? DEFAULT_CORS_OPTIONS.CREDENTIALS,
+      maxAge: config.maxAge ?? DEFAULT_CORS_OPTIONS.MAX_AGE,
+      preflightContinue: config.preflightContinue ?? false,
+      optionsSuccessStatus:
+        config.optionsSuccessStatus ??
+        DEFAULT_CORS_OPTIONS.OPTIONS_SUCCESS_STATUS,
     };
 
-    // Merge configs and pass to parent
-    const finalConfig = { ...defaultConfig, ...config } as CorsConfig;
-    super(logger, metrics, finalConfig, name);
+    super(metrics, completeConfig, completeConfig.name);
 
-    // Store merged config for CORS-specific operations
-    this.corsConfig = finalConfig;
+    this.validateConfiguration();
   }
 
   /**
    * Core CORS middleware execution logic
+   * Handles both preflight and actual requests with comprehensive validation
    */
   protected async execute(
     context: MiddlewareContext,
     next: () => Promise<void>
   ): Promise<void> {
+    const startTime = performance.now();
+    const origin = this.extractOrigin(context);
+    const method = context.request.method.toUpperCase();
+
+    try {
+      this.logger.debug("Processing CORS request", {
+        origin: origin || "null",
+        method,
+        path: context.request.url,
+        requestId: this.getRequestId(context),
+      });
+
+      // Validate and set CORS headers
+      const validationResult = this.validateOrigin(origin);
+      this.setCorsHeaders(context, origin, validationResult);
+
+      // Handle preflight requests
+      if (method === "OPTIONS") {
+        await this.handlePreflightRequest(context, origin, validationResult);
+        return; // Early return for preflight
+      }
+
+      // Record successful CORS processing
+      await this.recordCorsMetrics("request_processed", validationResult, {
+        method,
+        origin: origin || "null",
+      });
+
+      // Continue to next middleware
+      await next();
+    } catch (error) {
+      await this.handleCorsError(error, context, origin);
+      throw error; // Re-throw to maintain error chain
+    } finally {
+      const executionTime = performance.now() - startTime;
+      await this.recordMetric("cors_execution_time", executionTime, {
+        method,
+        origin: origin || "null",
+      });
+    }
+  }
+
+  /**
+   * Handle CORS preflight requests with detailed validation
+   */
+  private async handlePreflightRequest(
+    context: MiddlewareContext,
+    origin: string | null,
+    validationResult: OriginValidationResult
+  ): Promise<void> {
+    this.logger.debug("Handling CORS preflight request", {
+      origin: origin || "null",
+      allowed: validationResult.allowed,
+      requestId: this.getRequestId(context),
+    });
+
+    // Set preflight-specific headers
+    this.setPreflightHeaders(context);
+
+    // Set response status
+    context.set.status = this.config.optionsSuccessStatus;
+
+    await this.recordCorsMetrics("preflight_handled", validationResult, {
+      origin: origin || "null",
+    });
+  }
+
+  /**
+   * Set CORS headers with type-safe mutations
+   */
+  private setCorsHeaders(
+    context: MiddlewareContext,
+    origin: string | null,
+    validationResult: OriginValidationResult
+  ): void {
+    // Ensure headers object exists
+    if (!context.set.headers) {
+      context.set.headers = {};
+    }
+
+    const headers = context.set.headers;
+
+    // Set origin header
+    if (validationResult.allowed && origin) {
+      headers["Access-Control-Allow-Origin"] =
+        validationResult.matchedOrigin || origin;
+    }
+
+    // Set credentials
+    if (this.config.credentials) {
+      headers["Access-Control-Allow-Credentials"] = "true";
+    }
+
+    // Set allowed methods
+    if (this.config.methods && this.config.methods.length > 0) {
+      headers["Access-Control-Allow-Methods"] = this.config.methods.join(", ");
+    }
+
+    // Set allowed headers
+    if (this.config.allowedHeaders && this.config.allowedHeaders.length > 0) {
+      headers["Access-Control-Allow-Headers"] =
+        this.config.allowedHeaders.join(", ");
+    }
+
+    // Set exposed headers
+    if (this.config.exposedHeaders && this.config.exposedHeaders.length > 0) {
+      headers["Access-Control-Expose-Headers"] =
+        this.config.exposedHeaders.join(", ");
+    }
+  }
+
+  /**
+   * Set preflight-specific headers
+   */
+  private setPreflightHeaders(context: MiddlewareContext): void {
+    if (!context.set.headers) {
+      context.set.headers = {};
+    }
+
+    const headers = context.set.headers;
+
+    // Set max age for preflight cache
+    if (this.config.maxAge !== undefined) {
+      headers["Access-Control-Max-Age"] = this.config.maxAge.toString();
+    }
+
+    // Add Vary header for proper caching
+    headers["Vary"] =
+      "Origin, Access-Control-Request-Method, Access-Control-Request-Headers";
+  }
+
+  /**
+   * Extract origin from request with proper null handling
+   */
+  private extractOrigin(context: MiddlewareContext): string | null {
     const origin = context.request.headers["origin"];
-    const method = context.request.method;
+    return typeof origin === "string" ? origin : null;
+  }
 
-    this.logger.debug("Processing CORS request", {
-      origin,
-      method,
+  /**
+   * Validate origin against configuration with detailed result
+   */
+  private validateOrigin(origin: string | null): OriginValidationResult {
+    if (!origin) {
+      return {
+        allowed: this.config.origin === "*" || this.config.origin === true,
+        reason: "no_origin_header",
+      };
+    }
+
+    try {
+      const { origin: allowedOrigin } = this.config;
+
+      if (allowedOrigin === true || allowedOrigin === "*") {
+        return { allowed: true, matchedOrigin: "*" };
+      }
+
+      if (typeof allowedOrigin === "string") {
+        const allowed = origin === allowedOrigin;
+        return {
+          allowed,
+          matchedOrigin: allowed ? allowedOrigin : undefined,
+          reason: allowed ? "exact_match" : "no_match",
+        };
+      }
+
+      if (Array.isArray(allowedOrigin)) {
+        const matchedOrigin = allowedOrigin.find(
+          (allowed) => allowed === origin
+        );
+        return {
+          allowed: !!matchedOrigin,
+          matchedOrigin,
+          reason: matchedOrigin ? "array_match" : "not_in_array",
+        };
+      }
+
+      if (typeof allowedOrigin === "function") {
+        const allowed = allowedOrigin(origin);
+        return {
+          allowed,
+          matchedOrigin: allowed ? origin : undefined,
+          reason: allowed ? "function_approved" : "function_rejected",
+        };
+      }
+
+      return { allowed: false, reason: "invalid_config" };
+    } catch (error) {
+      this.logger.error("Origin validation error", { origin, error });
+      return { allowed: false, reason: "validation_error" };
+    }
+  }
+
+  /**
+   * Handle CORS-related errors
+   */
+  private async handleCorsError(
+    error: unknown,
+    context: MiddlewareContext,
+    origin: string | null
+  ): Promise<void> {
+    this.logger.error("CORS middleware error", {
+      error: error instanceof Error ? error.message : "Unknown error",
+      origin: origin || "null",
       path: context.request.url,
-      requestId: context.requestId,
+      requestId: this.getRequestId(context),
     });
 
-    // Set CORS headers
-    this.setCorsHeaders(context, origin);
-
-    // Handle preflight requests
-    if (method === "OPTIONS") {
-      this.logger.debug("Handling CORS preflight request", {
-        origin,
-        requestId: context.requestId,
-      });
-
-      context.set.status = this.corsConfig.optionsSuccessStatus || 204;
-
-      await this.recordMetric("cors_preflight_handled", 1, {
-        origin: origin || "unknown",
-        allowed: this.isOriginAllowed(
-          origin || "",
-          this.corsConfig.origin
-        ).toString(),
-      });
-
-      // Don't call next() for preflight - return early
-      return;
-    }
-
-    // Record CORS metrics
-    await this.recordMetric("cors_request_processed", 1, {
-      origin: origin || "unknown",
-      method,
-      allowed: this.isOriginAllowed(
-        origin || "",
-        this.corsConfig.origin
-      ).toString(),
+    await this.recordMetric("cors_error", 1, {
+      error_type: error instanceof Error ? error.constructor.name : "unknown",
+      origin: origin || "null",
     });
-
-    // Continue to next middleware/handler
-    await next();
   }
 
   /**
-   * Create new instance with different configuration
+   * Record CORS-specific metrics
    */
-  protected override createInstance(config: CorsConfig): CorsMiddleware {
-    return new CorsMiddleware(this.metrics, config, this.name);
+  private async recordCorsMetrics(
+    action: string,
+    validationResult: OriginValidationResult,
+    additionalTags: Record<string, string> = {}
+  ): Promise<void> {
+    await this.recordMetric(`cors_${action}`, 1, {
+      allowed: validationResult.allowed.toString(),
+      reason: validationResult.reason || "unknown",
+      ...additionalTags,
+    });
   }
 
   /**
-   * Set CORS headers based on configuration
+   * Validate configuration on instantiation
    */
-  private setCorsHeaders(context: MiddlewareContext, origin?: string): void {
-    // Handle origin
-    if (this.isOriginAllowed(origin || "", this.corsConfig.origin)) {
-      context.set.headers = context.set.headers || {};
-      context.set.headers["Access-Control-Allow-Origin"] = origin || "*";
+  private validateConfiguration(): void {
+    const { methods, allowedHeaders, exposedHeaders, maxAge } = this.config;
+
+    if (methods && methods.length === 0) {
+      throw new Error("CORS methods array cannot be empty");
     }
 
-    // Allow credentials
-    if (this.corsConfig.credentials) {
-      context.set.headers = context.set.headers || {};
-      context.set.headers["Access-Control-Allow-Credentials"] = "true";
+    if (allowedHeaders && allowedHeaders.some((header) => !header.trim())) {
+      throw new Error("CORS allowed headers cannot contain empty strings");
     }
 
-    // Allow methods
-    if (this.corsConfig.methods && this.corsConfig.methods.length > 0) {
-      context.set.headers = context.set.headers || {};
-      context.set.headers["Access-Control-Allow-Methods"] =
-        this.corsConfig.methods.join(", ");
+    if (exposedHeaders && exposedHeaders.some((header) => !header.trim())) {
+      throw new Error("CORS exposed headers cannot contain empty strings");
     }
 
-    // Allow headers
-    if (
-      this.corsConfig.allowedHeaders &&
-      this.corsConfig.allowedHeaders.length > 0
-    ) {
-      context.set.headers = context.set.headers || {};
-      context.set.headers["Access-Control-Allow-Headers"] =
-        this.corsConfig.allowedHeaders.join(", ");
-    }
-
-    // Expose headers
-    if (
-      this.corsConfig.exposedHeaders &&
-      this.corsConfig.exposedHeaders.length > 0
-    ) {
-      context.set.headers = context.set.headers || {};
-      context.set.headers["Access-Control-Expose-Headers"] =
-        this.corsConfig.exposedHeaders.join(", ");
-    }
-
-    // Max age for preflight
-    if (this.corsConfig.maxAge) {
-      context.set.headers = context.set.headers || {};
-      context.set.headers["Access-Control-Max-Age"] =
-        this.corsConfig.maxAge.toString();
+    if (maxAge !== undefined && (maxAge < 0 || !Number.isInteger(maxAge))) {
+      throw new Error("CORS maxAge must be a non-negative integer");
     }
   }
 
   /**
-   * Check if origin is allowed
+   * Create development configuration preset
    */
-  private isOriginAllowed(
-    origin: string,
-    allowedOrigin: CorsConfig["origin"]
-  ): boolean {
-    if (!origin || !allowedOrigin) return false;
-
-    if (allowedOrigin === true || allowedOrigin === "*") {
-      return true;
-    }
-
-    if (typeof allowedOrigin === "string") {
-      return origin === allowedOrigin;
-    }
-
-    if (Array.isArray(allowedOrigin)) {
-      return allowedOrigin.includes(origin);
-    }
-
-    if (typeof allowedOrigin === "function") {
-      return allowedOrigin(origin);
-    }
-
-    return false;
-  }
-
-  /**
-   * Create preset configurations
-   */
-  static createDevelopmentConfig(): CorsConfig {
+  static createDevelopmentConfig(): Partial<CorsMiddlewareConfig> {
     return {
+      name: "cors-dev",
       origin: "*",
       credentials: true,
       methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
       allowedHeaders: ["*"],
+      maxAge: 0, // Disable preflight caching in development
+      enabled: true,
+      priority: DEFAULT_CORS_OPTIONS.PRIORITY,
     };
   }
 
-  static createProductionConfig(allowedOrigins: string[]): CorsConfig {
+  /**
+   * Create production configuration preset
+   */
+  static createProductionConfig(
+    allowedOrigins: readonly string[]
+  ): Partial<CorsMiddlewareConfig> {
     return {
-      origin: allowedOrigins,
+      name: "cors-prod",
+      origin: [...allowedOrigins],
       credentials: true,
       methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
       allowedHeaders: [
@@ -218,97 +388,88 @@ export class CorsMiddleware extends BaseMiddleware<CorsConfig> {
         "X-API-Key",
       ],
       exposedHeaders: ["X-Total-Count", "X-Rate-Limit-Remaining"],
-      maxAge: 86400,
+      maxAge: DEFAULT_CORS_OPTIONS.MAX_AGE,
+      enabled: true,
+      priority: DEFAULT_CORS_OPTIONS.PRIORITY,
     };
   }
 
-  static createApiConfig(): CorsConfig {
+  /**
+   * Create API-specific configuration preset
+   */
+  static createApiConfig(): Partial<CorsMiddlewareConfig> {
     return {
+      name: "cors-api",
       origin: true,
       credentials: false,
       methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
       allowedHeaders: ["Content-Type", "X-API-Key"],
-      maxAge: 86400,
+      maxAge: DEFAULT_CORS_OPTIONS.MAX_AGE,
+      enabled: true,
+      priority: DEFAULT_CORS_OPTIONS.PRIORITY,
     };
   }
 
-  static createStrictConfig(allowedOrigins: string[]): CorsConfig {
+  /**
+   * Create strict security configuration preset
+   */
+  static createStrictConfig(
+    allowedOrigins: readonly string[]
+  ): Partial<CorsMiddlewareConfig> {
     return {
-      origin: allowedOrigins,
+      name: "cors-strict",
+      origin: [...allowedOrigins],
       credentials: true,
-      methods: ["GET", "POST"],
+      methods: ["GET", "POST"], // Minimal methods
       allowedHeaders: ["Content-Type", "Authorization"],
-      maxAge: 3600, // 1 hour
+      maxAge: 3600, // 1 hour cache
+      enabled: true,
+      priority: DEFAULT_CORS_OPTIONS.PRIORITY,
     };
   }
 }
 
 /**
- * Factory function for easy middleware creation
+ * Factory function for CORS middleware creation
+ * Provides type-safe instantiation with optional configuration
  */
-export function createCorsMiddleware(config: CorsConfig = {}) {
-  const { Logger, MetricsCollector } = require("@libs/monitoring");
-  const logger = Logger.getInstance("CorsMiddleware");
-  const metrics = MetricsCollector.getInstance();
-
-  const middleware = new CorsMiddleware(logger, metrics, config);
-  return middleware.elysia();
+export function createCorsMiddleware(
+  metrics: IMetricsCollector,
+  config?: Partial<CorsMiddlewareConfig>
+): CorsMiddleware {
+  return new CorsMiddleware(metrics, config);
 }
 
 /**
- * Alternative factory function that returns the middleware instance
- * Useful when you need access to the middleware methods
+ * Preset configurations for common CORS scenarios
+ * Immutable configuration objects for different environments
  */
-export function createCorsMiddlewareInstance(config: CorsConfig = {}) {
-  const { Logger, MetricsCollector } = require("@libs/monitoring");
-  const logger = Logger.getInstance("CorsMiddleware");
-  const metrics = MetricsCollector.getInstance();
+export const CORS_PRESETS = {
+  development: (): Partial<CorsMiddlewareConfig> =>
+    CorsMiddleware.createDevelopmentConfig(),
 
-  return new CorsMiddleware(logger, metrics, config);
-}
+  production: (origins: readonly string[]): Partial<CorsMiddlewareConfig> =>
+    CorsMiddleware.createProductionConfig(origins),
 
-/**
- * Preset configurations for common use cases
- */
-export const corsPresets = {
-  /**
-   * Development configuration - permissive settings for local development
-   */
-  development: (): CorsConfig => CorsMiddleware.createDevelopmentConfig(),
+  api: (): Partial<CorsMiddlewareConfig> => CorsMiddleware.createApiConfig(),
 
-  /**
-   * Production configuration - secure settings for production environments
-   */
-  production: (allowedOrigins: string[]): CorsConfig =>
-    CorsMiddleware.createProductionConfig(allowedOrigins),
+  strict: (origins: readonly string[]): Partial<CorsMiddlewareConfig> =>
+    CorsMiddleware.createStrictConfig(origins),
 
-  /**
-   * API configuration - settings optimized for REST APIs
-   */
-  api: (): CorsConfig => CorsMiddleware.createApiConfig(),
-
-  /**
-   * Strict configuration - highly restrictive settings for sensitive applications
-   */
-  strict: (allowedOrigins: string[]): CorsConfig =>
-    CorsMiddleware.createStrictConfig(allowedOrigins),
-
-  /**
-   * WebSocket configuration - settings for WebSocket applications
-   */
-  websocket: (allowedOrigins: string[]): CorsConfig => ({
-    origin: allowedOrigins,
+  websocket: (origins: readonly string[]): Partial<CorsMiddlewareConfig> => ({
+    name: "cors-websocket",
+    origin: [...origins],
     credentials: true,
     methods: ["GET"],
     allowedHeaders: ["Content-Type", "Authorization", "Upgrade", "Connection"],
-    maxAge: 86400,
+    maxAge: DEFAULT_CORS_OPTIONS.MAX_AGE,
+    enabled: true,
+    priority: DEFAULT_CORS_OPTIONS.PRIORITY,
   }),
 
-  /**
-   * GraphQL configuration - settings optimized for GraphQL endpoints
-   */
-  graphql: (allowedOrigins: string[]): CorsConfig => ({
-    origin: allowedOrigins,
+  graphql: (origins: readonly string[]): Partial<CorsMiddlewareConfig> => ({
+    name: "cors-graphql",
+    origin: [...origins],
     credentials: true,
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: [
@@ -318,92 +479,8 @@ export const corsPresets = {
       "Apollo-Require-Preflight",
     ],
     exposedHeaders: ["X-Total-Count"],
-    maxAge: 86400,
+    maxAge: DEFAULT_CORS_OPTIONS.MAX_AGE,
+    enabled: true,
+    priority: DEFAULT_CORS_OPTIONS.PRIORITY,
   }),
-};
-
-/**
- * Usage examples for the CORS middleware
- */
-export const corsExamples = {
-  /**
-   * Basic usage with Elysia
-   */
-  basic: `
-import { Elysia } from 'elysia';
-import { createCorsMiddleware } from '@libs/middleware';
-
-const app = new Elysia()
-  .use(createCorsMiddleware({
-    origin: ["https://myapp.com", "https://admin.myapp.com"],
-    credentials: true
-  }))
-  .get('/', () => 'Hello World');
-  `,
-
-  /**
-   * Using presets for different environments
-   */
-  presets: `
-import { Elysia } from 'elysia';
-import { createCorsMiddlewareInstance, corsPresets } from '@libs/middleware';
-
-// Development
-const devCors = createCorsMiddlewareInstance(corsPresets.development());
-app.use(devCors.elysia());
-
-// Production
-const prodCors = createCorsMiddlewareInstance(
-  corsPresets.production(["https://myapp.com"])
-);
-app.use(prodCors.elysia());
-
-// API-specific
-const apiCors = createCorsMiddlewareInstance(corsPresets.api());
-app.use(apiCors.elysia());
-  `,
-
-  /**
-   * Advanced usage with custom origin validation
-   */
-  advanced: `
-import { Elysia } from 'elysia';
-import { createCorsMiddlewareInstance } from '@libs/middleware';
-
-const cors = createCorsMiddlewareInstance({
-  origin: (origin) => {
-    // Custom origin validation logic
-    const allowedDomains = ['.mycompany.com', '.myapp.io'];
-    return allowedDomains.some(domain => origin.endsWith(domain));
-  },
-  credentials: true,
-  skipPaths: ['/health', '/metrics'],
-  exposedHeaders: ['X-Rate-Limit-Remaining', 'X-Total-Count']
-});
-
-const app = new Elysia()
-  .use(cors.plugin()) // Use advanced plugin with decorators
-  .get('/', ({ cors }) => {
-    return {
-      message: 'Hello World',
-      corsConfig: cors.config
-    };
-  });
-  `,
-
-  /**
-   * Framework-agnostic usage
-   */
-  frameworkAgnostic: `
-import { createCorsMiddlewareInstance } from '@libs/middleware';
-
-const cors = createCorsMiddlewareInstance({
-  origin: "*",
-  methods: ["GET", "POST"]
-});
-
-const middlewareFunction = cors.middleware();
-// Use with any framework that supports standard middleware functions
-export { middlewareFunction };
-  `,
-};
+} as const;

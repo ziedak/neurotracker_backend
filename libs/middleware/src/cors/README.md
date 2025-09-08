@@ -1,53 +1,326 @@
-# CORS Middleware - Enhanced Implementation
+# CORS Middleware Module
 
-A production-grade CORS (Cross-Origin Resource Sharing) middleware built on the enhanced BaseMiddleware foundation, providing comprehensive security, monitoring, and flexible configuration options.
+Production-grade Cross-Origin Resource Sharing (CORS) middleware for both HTTP and WebSocket connections.
 
 ## Features
 
-- **Production-Ready**: Built on the enhanced BaseMiddleware with full error handling and metrics
-- **Flexible Origin Control**: Supports strings, arrays, functions, and boolean origin validation
-- **Preflight Handling**: Automatic OPTIONS request handling with proper status codes
-- **Security-First**: Configurable headers, credentials, and methods with sensible defaults
-- **Monitoring Integration**: Built-in metrics for CORS requests and preflight handling
-- **Multiple Usage Patterns**: Simple plugins, advanced plugins, and framework-agnostic functions
-- **Preset Configurations**: Ready-to-use configurations for common scenarios
+- **Dual Protocol Support**: HTTP and WebSocket CORS validation
+- **Comprehensive Origin Validation**: String, array, boolean, and function-based validation
+- **Protocol & Extension Validation**: WebSocket-specific security controls
+- **Environment Presets**: Development, production, and application-specific configurations
+- **Performance Optimized**: Caching and efficient validation algorithms
+- **Production Hardened**: Extensive error handling and security best practices
+- **Comprehensive Monitoring**: Detailed metrics and logging
 
 ## Quick Start
 
-### Basic Usage
+### HTTP CORS Middleware
 
 ```typescript
-import { Elysia } from "elysia";
-import { createCorsMiddleware } from "@libs/middleware";
+import { createCorsMiddleware, CORS_PRESETS } from "@libs/middleware/cors";
 
-const app = new Elysia()
-  .use(
-    createCorsMiddleware({
-      origin: ["https://myapp.com", "https://admin.myapp.com"],
-      credentials: true,
-    })
-  )
-  .get("/", () => "Hello World");
+// Basic HTTP CORS
+const httpCorsMiddleware = createCorsMiddleware(metrics, {
+  origin: ["https://myapp.com"],
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE"],
+});
+
+// Use with HTTP middleware chain
+app.use(httpCorsMiddleware.middleware());
 ```
 
-### Using Presets
+### WebSocket CORS Middleware
 
 ```typescript
-import { createCorsMiddlewareInstance, corsPresets } from "@libs/middleware";
+import {
+  createWebSocketCorsMiddleware,
+  WEBSOCKET_CORS_PRESETS,
+} from "@libs/middleware/cors";
 
-// Development - permissive settings
-const devCors = createCorsMiddlewareInstance(corsPresets.development());
+// Basic WebSocket CORS
+const wsCorsMiddleware = createWebSocketCorsMiddleware(metrics, {
+  origin: ["https://myapp.com"],
+  allowedProtocols: ["wss"],
+  validateUpgrade: true,
+});
 
-// Production - secure settings
-const prodCors = createCorsMiddlewareInstance(
-  corsPresets.production(["https://myapp.com"])
+// Use with WebSocket handler
+websocketHandler.use(wsCorsMiddleware.middleware());
+```
+
+## HTTP CORS Configuration
+
+### Interface
+
+```typescript
+interface CorsMiddlewareConfig extends HttpMiddlewareConfig {
+  readonly origin?:
+    | string
+    | readonly string[]
+    | boolean
+    | ((origin: string) => boolean);
+  readonly methods?: readonly string[];
+  readonly allowedHeaders?: readonly string[];
+  readonly exposedHeaders?: readonly string[];
+  readonly credentials?: boolean;
+  readonly maxAge?: number;
+  readonly preflightContinue?: boolean;
+  readonly optionsSuccessStatus?: number;
+}
+```
+
+### Environment Presets
+
+```typescript
+// Development - permissive configuration
+const devConfig = CORS_PRESETS.development();
+
+// Production - strict origin validation
+const prodConfig = CORS_PRESETS.production(["https://myapp.com"]);
+
+// API-specific - optimized for API endpoints
+const apiConfig = CORS_PRESETS.api();
+
+// Strict - maximum security
+const strictConfig = CORS_PRESETS.strict(["https://secure-app.com"]);
+```
+
+## WebSocket CORS Configuration
+
+### Interface
+
+```typescript
+interface WebSocketCorsMiddlewareConfig extends WebSocketMiddlewareConfig {
+  readonly origin?:
+    | string
+    | readonly string[]
+    | boolean
+    | ((origin: string) => boolean);
+  readonly allowedProtocols?: readonly string[];
+  readonly allowedExtensions?: readonly string[];
+  readonly credentials?: boolean;
+  readonly maxAge?: number;
+  readonly validateUpgrade?: boolean;
+  readonly allowOriginless?: boolean;
+}
+```
+
+### Environment Presets
+
+```typescript
+// Development - permissive WebSocket configuration
+const devWsConfig = WEBSOCKET_CORS_PRESETS.development();
+
+// Production - secure WebSocket configuration
+const prodWsConfig = WEBSOCKET_CORS_PRESETS.production(["https://myapp.com"]);
+
+// Application-specific presets
+const gamingConfig = WEBSOCKET_CORS_PRESETS.gaming([
+  "https://game.example.com",
+]);
+const chatConfig = WEBSOCKET_CORS_PRESETS.chat(["https://chat.example.com"]);
+const streamingConfig = WEBSOCKET_CORS_PRESETS.streaming([
+  "https://stream.example.com",
+]);
+```
+
+## Advanced Configuration
+
+### Custom Origin Validation
+
+```typescript
+// Function-based origin validation
+const customOriginValidation = (origin: string) => {
+  return (
+    origin.endsWith(".mycompany.com") || origin === "https://localhost:3000"
+  );
+};
+
+const corsMiddleware = createCorsMiddleware(metrics, {
+  origin: customOriginValidation,
+  credentials: true,
+});
+```
+
+### Environment-Based Configuration
+
+```typescript
+const corsConfig =
+  process.env.NODE_ENV === "production"
+    ? CORS_PRESETS.production(process.env.ALLOWED_ORIGINS?.split(",") || [])
+    : CORS_PRESETS.development();
+
+const corsMiddleware = createCorsMiddleware(metrics, {
+  ...corsConfig,
+  name: `cors-${process.env.NODE_ENV}`,
+});
+```
+
+## WebSocket-Specific Features
+
+### Connection Upgrade Validation
+
+```typescript
+const wsCorsMiddleware = createWebSocketCorsMiddleware(metrics, {
+  origin: ["https://trusted-app.com"],
+  validateUpgrade: true, // Validate during WebSocket handshake
+  allowedProtocols: ["wss"],
+  allowedExtensions: ["permessage-deflate"],
+});
+```
+
+### Protocol and Extension Security
+
+```typescript
+const secureWsConfig = {
+  allowedProtocols: ["wss"], // Only secure WebSocket
+  allowedExtensions: ["permessage-deflate"], // Only compression
+  allowOriginless: false, // Require origin header
+  validateUpgrade: true, // Strict handshake validation
+};
+```
+
+## Integration Examples
+
+### HTTP with Express/Elysia
+
+```typescript
+import { createCorsMiddleware } from "@libs/middleware/cors";
+
+const app = new Elysia();
+const corsMiddleware = createCorsMiddleware(metrics, {
+  origin: ["https://myapp.com"],
+  credentials: true,
+});
+
+app.use(corsMiddleware.middleware());
+```
+
+### WebSocket with Socket.IO/ws
+
+```typescript
+import { createWebSocketCorsMiddleware } from "@libs/middleware/cors";
+
+const wsCorsMiddleware = createWebSocketCorsMiddleware(metrics, {
+  origin: ["https://myapp.com"],
+  validateUpgrade: true,
+});
+
+websocketServer.on("connection", async (ws, request) => {
+  const context = {
+    ws,
+    connectionId: generateId(),
+    message: { type: "connection" },
+    metadata: extractMetadata(request),
+    authenticated: false,
+    upgradeHeaders: request.headers,
+  };
+
+  try {
+    await wsCorsMiddleware.middleware()(context, async () => {
+      console.log("WebSocket connection validated");
+    });
+  } catch (error) {
+    ws.close(1008, "CORS validation failed");
+  }
+});
+```
+
+### Middleware Chain Integration
+
+```typescript
+import { MiddlewareChain, WebSocketMiddlewareChain } from "@libs/middleware";
+
+// HTTP Chain
+const httpChain = new MiddlewareChain(metrics, "http-chain");
+httpChain.register(
+  { name: "cors", priority: 1000, enabled: true },
+  corsMiddleware.middleware()
 );
 
-// API-specific settings
-const apiCors = createCorsMiddlewareInstance(corsPresets.api());
+// WebSocket Chain
+const wsChain = new WebSocketMiddlewareChain(metrics, "ws-chain");
+wsChain.register(
+  { name: "websocket-cors", priority: 1000, enabled: true },
+  wsCorsMiddleware.middleware()
+);
 ```
 
-## Configuration Options
+## Error Handling
+
+### HTTP CORS Errors
+
+HTTP CORS middleware handles errors automatically:
+
+- **Preflight failures**: Returns appropriate HTTP status codes
+- **Origin validation failures**: Blocks requests with proper error responses
+- **Configuration errors**: Throws during initialization
+
+### WebSocket CORS Errors
+
+WebSocket CORS middleware provides comprehensive error handling:
+
+- **Connection upgrade failures**: Prevents WebSocket connection establishment
+- **Origin validation failures**: Sends error message and optionally closes connection
+- **Protocol/extension violations**: Immediate connection termination
+
+```typescript
+// WebSocket error response format
+{
+  "type": "error",
+  "error": "CORS_VALIDATION_FAILED",
+  "message": "WebSocket CORS validation failed",
+  "timestamp": "2025-09-07T10:30:00.000Z"
+}
+```
+
+## Monitoring and Metrics
+
+Both HTTP and WebSocket CORS middleware provide comprehensive metrics:
+
+### HTTP CORS Metrics
+
+- `cors_request_processed` - Total requests processed
+- `cors_preflight_handled` - Preflight requests handled
+- `cors_execution_time` - Middleware execution time
+- `cors_error` - CORS validation errors
+
+### WebSocket CORS Metrics
+
+- `websocket_cors_validation_success` - Successful validations
+- `websocket_cors_upgrade_validated` - Successful upgrade validations
+- `websocket_cors_execution_time` - Middleware execution time
+- `websocket_cors_error` - CORS validation errors
+
+## Security Best Practices
+
+1. **Use Specific Origins**: Avoid wildcard (`*`) origins in production
+2. **Secure Protocols**: Use `https://` and `wss://` in production
+3. **Limit Methods**: Only allow necessary HTTP methods
+4. **Restrict Headers**: Specify exact allowed headers
+5. **Validate Extensions**: Limit WebSocket extensions for security
+6. **Monitor Failures**: Set up alerts for unusual CORS failure patterns
+
+## Configuration Examples
+
+See [websocket-cors-examples.md](./websocket-cors-examples.md) for comprehensive WebSocket CORS examples.
+
+## Architecture
+
+Both HTTP and WebSocket CORS middleware follow the AbstractMiddleware pattern:
+
+- **Immutable Configuration**: Thread-safe, readonly configurations
+- **Metrics Integration**: Built-in monitoring and performance tracking
+- **Error Boundaries**: Comprehensive error handling and recovery
+- **Type Safety**: Full TypeScript support with strict typing
+- **Production Ready**: Optimized for high-performance production environments
+
+## Dependencies
+
+- `@libs/monitoring` - Metrics collection and logging
+- `@libs/middleware/base` - Base middleware abstractions
+- `@libs/middleware/types` - Type definitions and interfaces
 
 ### CorsConfig Interface
 

@@ -1,11 +1,50 @@
 // Export all types
 export * from "./types";
 
-// Export base classes
-export * from "./base";
+// Export base classes (specific exports to avoid conflicts)
+export {
+  AbstractMiddleware,
+  type BaseMiddlewareConfig,
+} from "./base/AbstractMiddleware";
+export {
+  BaseMiddleware,
+  type HttpMiddlewareConfig,
+} from "./base/BaseMiddleware";
+export {
+  BaseWebSocketMiddleware,
+  type WebSocketMiddlewareConfig,
+} from "./base/BaseWebSocketMiddleware";
+
+// Export chain management
+export { MiddlewareChain } from "./base/MiddlewareChain";
+export { WebSocketMiddlewareChain } from "./base/WebSocketMiddlewareChain";
+
+// Export adapters
+export { ElysiaMiddlewareAdapter } from "./adapters/ElysiaMiddlewareAdapter";
+
+// Export factories
+export * from "./factories/ChainFactory";
 
 // Export rate limiting middleware
 export * from "./rateLimit";
+
+// Export error middleware (specific exports to avoid conflicts)
+export {
+  ErrorMiddleware,
+  createErrorMiddleware,
+  type ErrorMiddlewareConfig,
+  type ErrorResponse,
+  type CustomError,
+} from "./error/error.middleware";
+
+// Export WebSocket error middleware
+export {
+  WebSocketErrorMiddleware,
+  createWebSocketErrorMiddleware,
+  type WebSocketErrorMiddlewareConfig,
+  type WebSocketErrorResponse,
+  type WebSocketCustomError,
+} from "./error/websocket-error.middleware";
 
 // import { Logger, MetricsCollector } from "@libs/monitoring";
 // import { RedisClient, ClickHouseClient } from "@libs/database";

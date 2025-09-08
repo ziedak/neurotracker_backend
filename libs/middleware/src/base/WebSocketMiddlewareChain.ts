@@ -1,4 +1,5 @@
-import { MetricsCollector, type ILogger } from "@libs/monitoring";
+import { type IMetricsCollector } from "@libs/monitoring";
+import { createLogger, type ILogger } from "@libs/utils";
 import { WebSocketContext, WebSocketMiddlewareFunction } from "../types";
 
 /**
@@ -157,16 +158,36 @@ interface RegisteredMiddleware {
 /**
  * Production-grade WebSocket Middleware Chain with advanced composition capabilities
  * Provides ordered execution, dependency resolution, circuit breakers, and error isolation
+ *
+ * Features:
+ * - Direct instantiation (no DI)
+ * - Dependency resolution
+ * - Circuit breaker pattern
+ * - Retry logic with exponential backoff
+ * - Comprehensive execution metrics
+ * - Error isolation
+ *
+ * Usage:
+ * ```typescript
+ * const chain = new WebSocketMiddlewareChain(metrics, "ws-chain");
+ * chain.register(authConfig, authMiddleware);
+ * chain.register(rateLimitConfig, rateLimitMiddleware);
+ *
+ * const executor = chain.createExecutor();
+ * wsHandler.use(executor);
+ * ```
  */
 export class WebSocketMiddlewareChain {
   private readonly middleware: Map<string, RegisteredMiddleware> = new Map();
   private readonly logger: ILogger;
-  private readonly metrics: MetricsCollector | undefined;
+  private readonly metrics: IMetricsCollector | undefined;
+  private readonly chainName: string;
   private executionOrder: string[] = [];
 
-  constructor(logger: ILogger, metrics?: MetricsCollector) {
-    this.logger = createLogger( "WebSocketMiddlewareChain" });
+  constructor(metrics?: IMetricsCollector, chainName = "WebSocketChain") {
     this.metrics = metrics;
+    this.chainName = chainName;
+    this.logger = createLogger(`WebSocketMiddlewareChain:${chainName}`);
   }
 
   /**
@@ -259,6 +280,7 @@ export class WebSocketMiddlewareChain {
     const executionId = this.generateExecutionId();
 
     this.logger.debug("Starting middleware chain execution", {
+      chainName: this.chainName,
       executionId,
       middlewareCount: this.executionOrder.length,
       connectionId: context.connectionId,
@@ -271,6 +293,7 @@ export class WebSocketMiddlewareChain {
       await this.recordChainMetrics("success", totalTime, executionId);
 
       this.logger.debug("Middleware chain execution completed successfully", {
+        chainName: this.chainName,
         executionId,
         totalTime: `${totalTime.toFixed(2)}ms`,
         connectionId: context.connectionId,
@@ -280,6 +303,7 @@ export class WebSocketMiddlewareChain {
       await this.recordChainMetrics("failure", totalTime, executionId);
 
       this.logger.error("Middleware chain execution failed", error as Error, {
+        chainName: this.chainName,
         executionId,
         totalTime: `${totalTime.toFixed(2)}ms`,
         connectionId: context.connectionId,
@@ -545,6 +569,7 @@ export class WebSocketMiddlewareChain {
 
     await Promise.all([
       this.metrics.recordCounter(`websocket_middleware_chain_${result}`, 1, {
+        chainName: this.chainName,
         executionId,
         middlewareCount: this.executionOrder.length.toString(),
       }),
@@ -552,6 +577,7 @@ export class WebSocketMiddlewareChain {
         "websocket_middleware_chain_duration",
         totalTime,
         {
+          chainName: this.chainName,
           result,
           middlewareCount: this.executionOrder.length.toString(),
         }
@@ -574,6 +600,7 @@ export class WebSocketMiddlewareChain {
         `websocket_middleware_execution_${result}`,
         1,
         {
+          chainName: this.chainName,
           middleware: middlewareName,
         }
       ),
@@ -581,6 +608,7 @@ export class WebSocketMiddlewareChain {
         "websocket_middleware_execution_duration",
         executionTime,
         {
+          chainName: this.chainName,
           middleware: middlewareName,
           result,
         }
