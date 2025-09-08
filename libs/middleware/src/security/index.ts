@@ -1,0 +1,711 @@
+/**
+ * Security Middleware Module
+ * Production-grade HTTP security middleware following established patterns
+ *
+ * Features:
+ * - OWASP-compliant security headers
+ * - Environment-specific configurations
+ * - Framework-agnostic design
+ * - Content Security Policy management
+ * - HSTS enforcement
+ * - Permission policy controls
+ */
+
+import { type IMetricsCollector } from "@libs/monitoring";
+import { SecurityMiddleware, type SecurityConfig } from "./security.middleware";
+import {
+  SecurityWebSocketMiddleware,
+  type SecurityWebSocketConfig,
+} from "./SecurityWebSocketMiddleware";
+
+// Re-export everything for convenience
+export * from "./security.middleware";
+export * from "./SecurityWebSocketMiddleware";
+
+// Export specific examples to avoid conflicts
+export {
+  basicHttpSecurityExample,
+  environmentHttpSecurityExample,
+  presetHttpSecurityExample,
+  basicWebSocketSecurityExample,
+  chatWebSocketSecurityExample,
+  gamingWebSocketSecurityExample,
+  environmentWebSocketSecurityExample,
+  developmentWebSocketSecurityExample,
+  fullStackSecurityExample,
+  multiEnvironmentHttpExample,
+  apiGatewayWebSocketExample,
+  financialWebSocketExample,
+  testHttpSecurityExample,
+  testWebSocketSecurityExample,
+  customWebSocketValidationExample,
+  microserviceHttpExample,
+  loadBalancerWebSocketExample,
+  expressIntegrationExample,
+  socketIOIntegrationExample,
+} from "./examples";
+
+/**
+ * Factory Functions for Different Environments - HTTP Security
+ */
+
+/**
+ * Create SecurityMiddleware for development environment
+ * - Relaxed CSP for dev tools
+ * - No HSTS enforcement
+ * - Allows same-origin embedding
+ */
+export function createDevelopmentSecurity(
+  metrics: IMetricsCollector,
+  config?: Partial<SecurityConfig>
+): SecurityMiddleware {
+  return SecurityMiddleware.createDevelopment(metrics, config);
+}
+
+/**
+ * Create SecurityMiddleware for production environment
+ * - Strict CSP policy
+ * - Full HSTS with preload
+ * - Complete frame protection
+ * - Enhanced permission policies
+ */
+export function createProductionSecurity(
+  metrics: IMetricsCollector,
+  config?: Partial<SecurityConfig>
+): SecurityMiddleware {
+  return SecurityMiddleware.createProduction(metrics, config);
+}
+
+/**
+ * Create SecurityMiddleware for API services
+ * - API-focused security headers
+ * - No CSP (not needed for APIs)
+ * - Cache control headers
+ * - Frame protection
+ */
+export function createApiSecurity(
+  metrics: IMetricsCollector,
+  config?: Partial<SecurityConfig>
+): SecurityMiddleware {
+  return SecurityMiddleware.createApi(metrics, config);
+}
+
+/**
+ * Create SecurityMiddleware with strict security
+ * - Zero-trust CSP policy
+ * - Extended HSTS duration
+ * - Maximum permission restrictions
+ * - Comprehensive header protection
+ */
+export function createStrictSecurity(
+  metrics: IMetricsCollector,
+  config?: Partial<SecurityConfig>
+): SecurityMiddleware {
+  return SecurityMiddleware.createStrict(metrics, config);
+}
+
+/**
+ * Create custom SecurityMiddleware
+ * Base factory for custom configurations
+ */
+export function createCustomSecurity(
+  metrics: IMetricsCollector,
+  config: Partial<SecurityConfig>
+): SecurityMiddleware {
+  return new SecurityMiddleware(metrics, config);
+}
+
+/**
+ * Factory Functions for Different Environments - WebSocket Security
+ */
+
+/**
+ * Create SecurityWebSocketMiddleware for development environment
+ * - Relaxed origin validation
+ * - Higher connection limits
+ * - Insecure connections allowed
+ */
+export function createDevelopmentWebSocketSecurity(
+  metrics: IMetricsCollector,
+  config?: Partial<SecurityWebSocketConfig>
+): SecurityWebSocketMiddleware {
+  return SecurityWebSocketMiddleware.createDevelopment(metrics, config);
+}
+
+/**
+ * Create SecurityWebSocketMiddleware for production environment
+ * - Strict origin validation
+ * - Connection limits enforced
+ * - Secure connections required
+ * - Message type restrictions
+ */
+export function createProductionWebSocketSecurity(
+  metrics: IMetricsCollector,
+  config?: Partial<SecurityWebSocketConfig>
+): SecurityWebSocketMiddleware {
+  return SecurityWebSocketMiddleware.createProduction(metrics, config);
+}
+
+/**
+ * Create SecurityWebSocketMiddleware with high security
+ * - Very strict connection limits
+ * - Message type whitelist
+ * - Maximum security enforcement
+ */
+export function createHighSecurityWebSocketSecurity(
+  metrics: IMetricsCollector,
+  config?: Partial<SecurityWebSocketConfig>
+): SecurityWebSocketMiddleware {
+  return SecurityWebSocketMiddleware.createHighSecurity(metrics, config);
+}
+
+/**
+ * Create SecurityWebSocketMiddleware for API gateway
+ * - Balanced security and performance
+ * - API-focused message handling
+ * - Metric endpoint skipping
+ */
+export function createApiGatewayWebSocketSecurity(
+  metrics: IMetricsCollector,
+  config?: Partial<SecurityWebSocketConfig>
+): SecurityWebSocketMiddleware {
+  return SecurityWebSocketMiddleware.createApiGateway(metrics, config);
+}
+
+/**
+ * Create custom SecurityWebSocketMiddleware
+ * Base factory for custom WebSocket configurations
+ */
+export function createCustomWebSocketSecurity(
+  metrics: IMetricsCollector,
+  config: Partial<SecurityWebSocketConfig>
+): SecurityWebSocketMiddleware {
+  return new SecurityWebSocketMiddleware(metrics, config);
+}
+
+/**
+ * Preset Configurations
+ * Ready-to-use security configurations for common scenarios
+ */
+
+/**
+ * Development preset - relaxed security for development
+ */
+export const DevelopmentSecurityPreset: Partial<SecurityConfig> = {
+  name: "security-dev",
+  enabled: true,
+  priority: 0,
+  contentSecurityPolicy: {
+    enabled: false, // Allow dev tools and hot reload
+  },
+  hsts: {
+    enabled: false, // HTTPS not always available in dev
+  },
+  frameOptions: "SAMEORIGIN", // Allow embedding for dev tools
+  noSniff: true,
+  xssFilter: true,
+  referrerPolicy: "no-referrer-when-downgrade",
+};
+
+/**
+ * Production preset - comprehensive security for production
+ */
+export const ProductionSecurityPreset: Partial<SecurityConfig> = {
+  name: "security-prod",
+  enabled: true,
+  priority: 0,
+  contentSecurityPolicy: {
+    enabled: true,
+    directives: {
+      "default-src": ["'self'"],
+      "script-src": ["'self'"],
+      "style-src": ["'self'", "'unsafe-inline'"],
+      "img-src": ["'self'", "data:", "https:"],
+      "font-src": ["'self'"],
+      "connect-src": ["'self'"],
+      "frame-ancestors": ["'none'"],
+      "base-uri": ["'self'"],
+      "form-action": ["'self'"],
+      "upgrade-insecure-requests": [],
+    },
+  },
+  hsts: {
+    enabled: true,
+    maxAge: 31536000, // 1 year
+    includeSubDomains: true,
+    preload: true,
+  },
+  frameOptions: "DENY",
+  noSniff: true,
+  xssFilter: { mode: "block" },
+  referrerPolicy: "strict-origin-when-cross-origin",
+  permissionsPolicy: {
+    camera: ["'none'"],
+    microphone: ["'none'"],
+    geolocation: ["'none'"],
+    payment: ["'none'"],
+    "display-capture": ["'none'"],
+  },
+};
+
+/**
+ * API preset - security optimized for APIs
+ */
+export const ApiSecurityPreset: Partial<SecurityConfig> = {
+  name: "security-api",
+  enabled: true,
+  priority: 0,
+  contentSecurityPolicy: {
+    enabled: false, // CSP not relevant for APIs
+  },
+  hsts: {
+    enabled: true,
+    maxAge: 31536000,
+    includeSubDomains: true,
+  },
+  frameOptions: "DENY",
+  noSniff: true,
+  xssFilter: false, // XSS protection not needed for APIs
+  referrerPolicy: "no-referrer",
+  customHeaders: {
+    "Cache-Control": "no-store, no-cache, must-revalidate",
+    Pragma: "no-cache",
+  },
+};
+
+/**
+ * High-security preset - maximum protection
+ */
+export const HighSecurityPreset: Partial<SecurityConfig> = {
+  name: "security-strict",
+  enabled: true,
+  priority: 0,
+  contentSecurityPolicy: {
+    enabled: true,
+    directives: {
+      "default-src": ["'none'"], // Zero-trust policy
+      "script-src": ["'self'"],
+      "style-src": ["'self'"],
+      "img-src": ["'self'"],
+      "font-src": ["'self'"],
+      "connect-src": ["'self'"],
+      "frame-ancestors": ["'none'"],
+      "base-uri": ["'none'"],
+      "form-action": ["'none'"],
+      "upgrade-insecure-requests": [],
+    },
+  },
+  hsts: {
+    enabled: true,
+    maxAge: 63072000, // 2 years
+    includeSubDomains: true,
+    preload: true,
+  },
+  frameOptions: "DENY",
+  noSniff: true,
+  xssFilter: { mode: "block" },
+  referrerPolicy: "no-referrer",
+  permissionsPolicy: {
+    camera: ["'none'"],
+    microphone: ["'none'"],
+    geolocation: ["'none'"],
+    payment: ["'none'"],
+    "display-capture": ["'none'"],
+    "web-share": ["'none'"],
+    "clipboard-read": ["'none'"],
+    "clipboard-write": ["'none'"],
+  },
+};
+
+/**
+ * Microservice preset - security for internal services
+ */
+export const MicroserviceSecurityPreset: Partial<SecurityConfig> = {
+  name: "security-microservice",
+  enabled: true,
+  priority: 0,
+  skipPaths: ["/health", "/metrics", "/ready"],
+  contentSecurityPolicy: {
+    enabled: false, // Not needed for service-to-service
+  },
+  hsts: {
+    enabled: true,
+    maxAge: 31536000,
+    includeSubDomains: true,
+  },
+  frameOptions: "DENY",
+  noSniff: true,
+  xssFilter: false,
+  referrerPolicy: "no-referrer",
+  customHeaders: {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+  },
+};
+
+/**
+ * Debug preset - minimal security for debugging
+ */
+export const DebugSecurityPreset: Partial<SecurityConfig> = {
+  name: "security-debug",
+  enabled: true,
+  priority: 0,
+  skipPaths: ["/debug", "/health", "/metrics"],
+  contentSecurityPolicy: {
+    enabled: false,
+  },
+  hsts: {
+    enabled: false,
+  },
+  frameOptions: false, // Allow embedding for debug tools
+  noSniff: false,
+  xssFilter: false,
+  referrerPolicy: "unsafe-url", // Full referrer for debugging
+};
+
+/**
+ * WebSocket Preset Configurations
+ * Ready-to-use security configurations for WebSocket scenarios
+ */
+
+/**
+ * Development WebSocket preset - relaxed security for development
+ */
+export const DevelopmentWebSocketSecurityPreset: Partial<SecurityWebSocketConfig> =
+  {
+    name: "security-websocket-dev",
+    enabled: true,
+    priority: 100,
+    allowedOrigins: ["*"],
+    maxConnectionsPerIP: 50,
+    requireSecureConnection: false,
+    blockSuspiciousConnections: false,
+    rateLimitPerConnection: {
+      messagesPerMinute: 120,
+      messagesPerHour: 5000,
+      bytesPerMinute: 2 * 1024 * 1024, // 2MB
+    },
+    validateHeaders: false,
+    sanitizePayload: false,
+  };
+
+/**
+ * Production WebSocket preset - comprehensive security for production
+ */
+export const ProductionWebSocketSecurityPreset: Partial<SecurityWebSocketConfig> =
+  {
+    name: "security-websocket-prod",
+    enabled: true,
+    priority: 100,
+    allowedOrigins: [], // Must be explicitly configured
+    maxConnectionsPerIP: 5,
+    requireSecureConnection: true,
+    blockSuspiciousConnections: true,
+    messageTypeBlacklist: [
+      "eval",
+      "script",
+      "admin",
+      "system",
+      "debug",
+      "test",
+    ],
+    rateLimitPerConnection: {
+      messagesPerMinute: 30,
+      messagesPerHour: 500,
+      bytesPerMinute: 512 * 1024, // 512KB
+    },
+    validateHeaders: true,
+    sanitizePayload: true,
+    connectionTimeout: 15000,
+  };
+
+/**
+ * High-security WebSocket preset - maximum protection
+ */
+export const HighSecurityWebSocketPreset: Partial<SecurityWebSocketConfig> = {
+  name: "security-websocket-strict",
+  enabled: true,
+  priority: 100,
+  allowedOrigins: [], // Must be explicitly configured
+  maxConnectionsPerIP: 2,
+  requireSecureConnection: true,
+  blockSuspiciousConnections: true,
+  messageTypeWhitelist: ["chat", "heartbeat", "auth"],
+  rateLimitPerConnection: {
+    messagesPerMinute: 10,
+    messagesPerHour: 100,
+    bytesPerMinute: 128 * 1024, // 128KB
+  },
+  validateHeaders: true,
+  sanitizePayload: true,
+  connectionTimeout: 10000,
+  heartbeatInterval: 5000,
+  maxMessageSize: 512 * 1024,
+};
+
+/**
+ * API Gateway WebSocket preset - balanced security and performance
+ */
+export const ApiGatewayWebSocketSecurityPreset: Partial<SecurityWebSocketConfig> =
+  {
+    name: "security-websocket-api",
+    enabled: true,
+    priority: 100,
+    allowedOrigins: ["*"], // Usually configured at load balancer
+    maxConnectionsPerIP: 20,
+    requireSecureConnection: true,
+    messageTypeBlacklist: ["admin", "system", "debug"],
+    rateLimitPerConnection: {
+      messagesPerMinute: 60,
+      messagesPerHour: 2000,
+      bytesPerMinute: 1024 * 1024, // 1MB
+    },
+    validateHeaders: true,
+    sanitizePayload: true,
+    skipMessageTypes: ["ping", "pong", "heartbeat", "metrics"],
+  };
+
+/**
+ * Chat Application WebSocket preset - optimized for real-time messaging
+ */
+export const ChatWebSocketSecurityPreset: Partial<SecurityWebSocketConfig> = {
+  name: "security-websocket-chat",
+  enabled: true,
+  priority: 100,
+  allowedOrigins: [], // Must be configured for chat domains
+  maxConnectionsPerIP: 10,
+  requireSecureConnection: true,
+  messageTypeWhitelist: ["message", "typing", "join", "leave", "heartbeat"],
+  rateLimitPerConnection: {
+    messagesPerMinute: 60, // Allow frequent messaging
+    messagesPerHour: 2000,
+    bytesPerMinute: 1024 * 1024, // 1MB for media sharing
+  },
+  validateHeaders: true,
+  sanitizePayload: true,
+  maxMessageSize: 2 * 1024 * 1024, // 2MB for file sharing
+};
+
+/**
+ * Gaming WebSocket preset - optimized for real-time gaming
+ */
+export const GamingWebSocketSecurityPreset: Partial<SecurityWebSocketConfig> = {
+  name: "security-websocket-gaming",
+  enabled: true,
+  priority: 100,
+  allowedOrigins: [], // Must be configured for gaming domains
+  maxConnectionsPerIP: 5, // Stricter for gaming
+  requireSecureConnection: true,
+  messageTypeWhitelist: ["move", "action", "state", "ping", "heartbeat"],
+  rateLimitPerConnection: {
+    messagesPerMinute: 300, // High frequency for real-time gaming
+    messagesPerHour: 10000,
+    bytesPerMinute: 512 * 1024, // Smaller messages for gaming
+  },
+  validateHeaders: true,
+  sanitizePayload: true,
+  maxMessageSize: 64 * 1024, // Small messages for gaming efficiency
+  heartbeatInterval: 5000, // Frequent heartbeat for gaming
+};
+
+/**
+ * Testing Utilities
+ */
+
+/**
+ * Create mock SecurityMiddleware for testing
+ */
+export function createMockSecurity(
+  metrics: IMetricsCollector = {} as IMetricsCollector
+): SecurityMiddleware {
+  return new SecurityMiddleware(metrics, {
+    name: "security-mock",
+    enabled: false, // Disabled for testing
+    priority: 0,
+  });
+}
+
+/**
+ * Create SecurityMiddleware with test configuration
+ */
+export function createTestSecurity(
+  metrics: IMetricsCollector,
+  overrides?: Partial<SecurityConfig>
+): SecurityMiddleware {
+  const testConfig = {
+    name: "security-test",
+    enabled: true,
+    priority: 0,
+    skipPaths: ["/test", "/mock"],
+    contentSecurityPolicy: {
+      enabled: false,
+    },
+    hsts: {
+      enabled: false,
+    },
+    frameOptions: "SAMEORIGIN",
+    noSniff: true,
+    xssFilter: false,
+    ...overrides,
+  };
+
+  return new SecurityMiddleware(metrics, testConfig);
+}
+
+/**
+ * Create mock SecurityWebSocketMiddleware for testing
+ */
+export function createMockWebSocketSecurity(
+  metrics: IMetricsCollector = {} as IMetricsCollector
+): SecurityWebSocketMiddleware {
+  return new SecurityWebSocketMiddleware(metrics, {
+    name: "security-websocket-mock",
+    enabled: false, // Disabled for testing
+    priority: 100,
+  });
+}
+
+/**
+ * Create SecurityWebSocketMiddleware with test configuration
+ */
+export function createTestWebSocketSecurity(
+  metrics: IMetricsCollector,
+  overrides?: Partial<SecurityWebSocketConfig>
+): SecurityWebSocketMiddleware {
+  const testConfig = {
+    name: "security-websocket-test",
+    enabled: true,
+    priority: 100,
+    allowedOrigins: ["*"],
+    maxConnectionsPerIP: 100,
+    requireSecureConnection: false,
+    blockSuspiciousConnections: false,
+    validateHeaders: false,
+    sanitizePayload: false,
+    skipMessageTypes: ["test", "mock", "debug"],
+    ...overrides,
+  };
+
+  return new SecurityWebSocketMiddleware(metrics, testConfig);
+}
+
+/**
+ * Helper Functions
+ */
+
+/**
+ * Create framework-agnostic HTTP middleware function
+ */
+export function createSecurityMiddleware(
+  metrics: IMetricsCollector,
+  config?: Partial<SecurityConfig>
+) {
+  const middleware = new SecurityMiddleware(metrics, config || {});
+  return middleware.middleware();
+}
+
+/**
+ * Create framework-agnostic WebSocket middleware function
+ */
+export function createSecurityWebSocketMiddleware(
+  metrics: IMetricsCollector,
+  config?: Partial<SecurityWebSocketConfig>
+) {
+  const middleware = new SecurityWebSocketMiddleware(metrics, config || {});
+  return middleware.middleware();
+}
+
+/**
+ * Create HTTP middleware for specific environment
+ */
+export function createSecurityForEnvironment(
+  environment: "development" | "production" | "api" | "strict",
+  metrics: IMetricsCollector,
+  config?: Partial<SecurityConfig>
+): SecurityMiddleware {
+  switch (environment) {
+    case "development":
+      return createDevelopmentSecurity(metrics, config);
+    case "production":
+      return createProductionSecurity(metrics, config);
+    case "api":
+      return createApiSecurity(metrics, config);
+    case "strict":
+      return createStrictSecurity(metrics, config);
+    default:
+      throw new Error(`Unknown environment: ${environment}`);
+  }
+}
+
+/**
+ * Create WebSocket middleware for specific environment
+ */
+export function createWebSocketSecurityForEnvironment(
+  environment:
+    | "development"
+    | "production"
+    | "high-security"
+    | "api-gateway"
+    | "chat"
+    | "gaming",
+  metrics: IMetricsCollector,
+  config?: Partial<SecurityWebSocketConfig>
+): SecurityWebSocketMiddleware {
+  switch (environment) {
+    case "development":
+      return createDevelopmentWebSocketSecurity(metrics, config);
+    case "production":
+      return createProductionWebSocketSecurity(metrics, config);
+    case "high-security":
+      return createHighSecurityWebSocketSecurity(metrics, config);
+    case "api-gateway":
+      return createApiGatewayWebSocketSecurity(metrics, config);
+    case "chat":
+      return new SecurityWebSocketMiddleware(metrics, {
+        ...ChatWebSocketSecurityPreset,
+        ...config,
+      });
+    case "gaming":
+      return new SecurityWebSocketMiddleware(metrics, {
+        ...GamingWebSocketSecurityPreset,
+        ...config,
+      });
+    default:
+      throw new Error(`Unknown WebSocket environment: ${environment}`);
+  }
+}
+
+/**
+ * Create combined HTTP and WebSocket security middleware
+ */
+export function createFullStackSecurity(
+  environment: "development" | "production" | "api" | "strict",
+  metrics: IMetricsCollector,
+  httpConfig?: Partial<SecurityConfig>,
+  wsConfig?: Partial<SecurityWebSocketConfig>
+) {
+  const httpMiddleware = createSecurityForEnvironment(
+    environment,
+    metrics,
+    httpConfig
+  );
+
+  const wsEnvironmentMap = {
+    development: "development" as const,
+    production: "production" as const,
+    api: "api-gateway" as const,
+    strict: "high-security" as const,
+  };
+
+  const wsMiddleware = createWebSocketSecurityForEnvironment(
+    wsEnvironmentMap[environment],
+    metrics,
+    wsConfig
+  );
+
+  return {
+    http: httpMiddleware,
+    websocket: wsMiddleware,
+    httpFunction: httpMiddleware.middleware(),
+    websocketFunction: wsMiddleware.middleware(),
+  };
+}

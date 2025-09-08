@@ -1,9 +1,11 @@
-import { BaseMiddleware } from "../base";
-import { MiddlewareContext, MiddlewareOptions } from "../types";
-import { type ILogger, type IMetricsCollector } from "@libs/monitoring";
-import { inject } from "@libs/utils";
+import {
+  BaseMiddleware,
+  type HttpMiddlewareConfig,
+} from "../base/BaseMiddleware";
+import { MiddlewareContext } from "../types";
+import { type IMetricsCollector } from "@libs/monitoring";
 
-export interface SecurityConfig extends MiddlewareOptions {
+export interface SecurityConfig extends HttpMiddlewareConfig {
   // Content Security Policy
   contentSecurityPolicy?: {
     enabled?: boolean;
@@ -38,7 +40,7 @@ export interface SecurityConfig extends MiddlewareOptions {
 export class SecurityMiddleware extends BaseMiddleware<SecurityConfig> {
   private readonly defaultConfig: Omit<
     SecurityConfig,
-    keyof MiddlewareOptions
+    keyof HttpMiddlewareConfig
   > = {
     contentSecurityPolicy: {
       enabled: true,
@@ -72,11 +74,16 @@ export class SecurityMiddleware extends BaseMiddleware<SecurityConfig> {
     },
   };
 
-  constructor(
-    @inject("IMetricsCollector") metrics: IMetricsCollector,
-    config: SecurityConfig
-  ) {
-    super(logger, metrics, config, "security");
+  constructor(metrics: IMetricsCollector, config: Partial<SecurityConfig>) {
+    const defaultConfig: SecurityConfig = {
+      name: config.name || "security",
+      enabled: config.enabled ?? true,
+      priority: config.priority ?? 0,
+      skipPaths: config.skipPaths || [],
+      ...config,
+    };
+
+    super(metrics, defaultConfig);
   }
 
   /**
@@ -114,15 +121,6 @@ export class SecurityMiddleware extends BaseMiddleware<SecurityConfig> {
         performance.now() - startTime
       );
     }
-  }
-
-  /**
-   * Create new instance of this middleware with different config
-   */
-  protected override createInstance(
-    config: SecurityConfig
-  ): SecurityMiddleware {
-    return new SecurityMiddleware(this.metrics, config);
   }
 
   /**
@@ -285,7 +283,7 @@ export class SecurityMiddleware extends BaseMiddleware<SecurityConfig> {
   /**
    * Create preset configurations
    */
-  static createDevelopmentConfig(): SecurityConfig {
+  static createDevelopmentConfig(): Partial<SecurityConfig> {
     return {
       contentSecurityPolicy: {
         enabled: false, // Disable for development flexibility
@@ -300,7 +298,7 @@ export class SecurityMiddleware extends BaseMiddleware<SecurityConfig> {
     };
   }
 
-  static createProductionConfig(): SecurityConfig {
+  static createProductionConfig(): Partial<SecurityConfig> {
     return {
       contentSecurityPolicy: {
         enabled: true,
@@ -337,7 +335,7 @@ export class SecurityMiddleware extends BaseMiddleware<SecurityConfig> {
     };
   }
 
-  static createApiConfig(): SecurityConfig {
+  static createApiConfig(): Partial<SecurityConfig> {
     return {
       contentSecurityPolicy: {
         enabled: false, // APIs don't need CSP
@@ -358,7 +356,7 @@ export class SecurityMiddleware extends BaseMiddleware<SecurityConfig> {
     };
   }
 
-  static createStrictConfig(): SecurityConfig {
+  static createStrictConfig(): Partial<SecurityConfig> {
     return {
       contentSecurityPolicy: {
         enabled: true,
@@ -401,72 +399,72 @@ export class SecurityMiddleware extends BaseMiddleware<SecurityConfig> {
    * Factory method for creating SecurityMiddleware with development config
    */
   static createDevelopment(
-    logger: ILogger,
     metrics: IMetricsCollector,
     additionalConfig?: Partial<SecurityConfig>
   ): SecurityMiddleware {
     const devConfig = SecurityMiddleware.createDevelopmentConfig();
-    const config: SecurityConfig = {
+    const config = {
       ...devConfig,
       ...additionalConfig,
       enabled: true,
       name: "security-dev",
+      priority: 0,
     };
-    return new SecurityMiddleware(logger, metrics, config);
+    return new SecurityMiddleware(metrics, config);
   }
 
   /**
    * Factory method for creating SecurityMiddleware with production config
    */
   static createProduction(
-    logger: ILogger,
     metrics: IMetricsCollector,
     additionalConfig?: Partial<SecurityConfig>
   ): SecurityMiddleware {
     const prodConfig = SecurityMiddleware.createProductionConfig();
-    const config: SecurityConfig = {
+    const config = {
       ...prodConfig,
       ...additionalConfig,
       enabled: true,
       name: "security-prod",
+      priority: 0,
     };
-    return new SecurityMiddleware(logger, metrics, config);
+    return new SecurityMiddleware(metrics, config);
   }
 
   /**
    * Factory method for creating SecurityMiddleware with API config
    */
   static createApi(
-    logger: ILogger,
     metrics: IMetricsCollector,
     additionalConfig?: Partial<SecurityConfig>
   ): SecurityMiddleware {
     const apiConfig = SecurityMiddleware.createApiConfig();
-    const config: SecurityConfig = {
+    const config = {
       ...apiConfig,
       ...additionalConfig,
       enabled: true,
       name: "security-api",
+      priority: 0,
     };
-    return new SecurityMiddleware(logger, metrics, config);
+    return new SecurityMiddleware(metrics, config);
   }
 
   /**
    * Factory method for creating SecurityMiddleware with strict config
    */
   static createStrict(
-    logger: ILogger,
     metrics: IMetricsCollector,
     additionalConfig?: Partial<SecurityConfig>
   ): SecurityMiddleware {
     const strictConfig = SecurityMiddleware.createStrictConfig();
-    const config: SecurityConfig = {
+    const config = {
       ...strictConfig,
       ...additionalConfig,
       enabled: true,
       name: "security-strict",
+      priority: 0,
     };
-    return new SecurityMiddleware(logger, metrics, config);
+    return new SecurityMiddleware(metrics, config);
   }
 }
 
@@ -475,15 +473,14 @@ export class SecurityMiddleware extends BaseMiddleware<SecurityConfig> {
  * @deprecated Use SecurityMiddleware.createDevelopment, createProduction, createApi, or createStrict instead
  */
 export function createSecurityMiddleware(
-  logger: ILogger,
   metrics: IMetricsCollector,
-  config?: SecurityConfig
-) {
-  const finalConfig: SecurityConfig = {
+  config?: Partial<SecurityConfig>
+): SecurityMiddleware {
+  const finalConfig = {
     enabled: true,
     name: "security",
+    priority: 0,
     ...config,
   };
-  const middleware = new SecurityMiddleware(logger, metrics, finalConfig);
-  return middleware.elysia();
+  return new SecurityMiddleware(metrics, finalConfig);
 }
