@@ -3,7 +3,7 @@
  * Fixes Issue #2: Race Condition in Cache Operations
  */
 
-import { createLogger } from "libs/utils/src/Logger";
+import { createLogger } from "@libs/utils";
 
 export interface LockOptions {
   timeout?: number; // Max wait time in ms

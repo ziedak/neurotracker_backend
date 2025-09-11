@@ -1,0 +1,14 @@
+{
+  "overall": 0,
+  "phases": {
+    "analysis": 0,
+    "implementation": 0,
+    "validation": 0
+  },
+  "milestones": [],
+  "blockers": [],
+  "time": {
+    "est": "8h",
+    "actual": "0h"
+  }
+}

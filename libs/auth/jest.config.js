@@ -7,6 +7,11 @@ module.exports = {
   testPathIgnorePatterns: ["/node_modules/", "/dist/"],
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/src/$1",
+    "^jose$": "<rootDir>/tests/mocks/jose.ts",
+    "^@keycloak/keycloak-admin-client$":
+      "<rootDir>/tests/mocks/keycloak-admin-client.ts",
+    "^@libs/config$": "<rootDir>/tests/mocks/libs-config.ts",
+    "^@libs/utils$": "<rootDir>/tests/mocks/libs-utils.ts",
   },
   collectCoverageFrom: [
     "src/**/*.{ts,tsx}",

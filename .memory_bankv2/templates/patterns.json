@@ -1,0 +1,55 @@
+{
+  "patterns": {
+    "feature": {
+      "sections": ["objective", "requirements", "constraints", "acceptance"],
+      "gates": ["const", "sec"],
+      "articles": ["variable"],
+      "uncertainty_points": ["requirements", "constraints"]
+    },
+    "implementation": {
+      "sections": ["approach", "architecture", "testing", "deployment"],
+      "gates": ["const", "arch", "test"],
+      "articles": ["I", "II", "III", "IV", "V"],
+      "uncertainty_points": ["architecture", "testing"]
+    },
+    "security": {
+      "sections": ["threat_model", "controls", "validation", "monitoring"],
+      "gates": ["sec", "test"],
+      "articles": ["IV", "V", "VIII", "IX"],
+      "uncertainty_points": ["threat_model", "controls"]
+    }
+  },
+  "generators": {
+    "task_breakdown": {
+      "input": ["objective", "constraints", "timeline"],
+      "output": ["phases", "tasks", "dependencies", "gates"],
+      "rules": [
+        "max_phase_duration_8h",
+        "gate_per_phase",
+        "dependency_validation"
+      ]
+    },
+    "progress_validation": {
+      "input": ["current_status", "gates", "quality_metrics"],
+      "output": ["validation_result", "next_steps", "blockers"],
+      "rules": [
+        "gate_criteria_check",
+        "quality_threshold",
+        "blocker_identification"
+      ]
+    }
+  },
+  "compression_rules": {
+    "max_section_length": 500,
+    "use_references": true,
+    "abbreviate_common_terms": true,
+    "numerical_priorities": true,
+    "status_codes": true
+  },
+  "template_selection": {
+    "service_development": "task-patterns.service_development",
+    "performance": "task-patterns.performance",
+    "infrastructure": "task-patterns.infrastructure",
+    "bugfix": "task-patterns.bugfix"
+  }
+}

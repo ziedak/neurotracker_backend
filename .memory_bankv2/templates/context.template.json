@@ -1,0 +1,34 @@
+{
+  "dependencies": {
+    "external": [],
+    "internal": []
+  },
+  "target_architecture": {
+    "before": {},
+    "after": {}
+  },
+  "risk_assessment": {
+    "breaking_changes": {
+      "level": "L",
+      "mitigation": "{mitigation strategy}"
+    },
+    "performance_impact": {
+      "level": "L",
+      "mitigation": "{performance strategy}"
+    }
+  },
+  "validation_strategy": {
+    "phase_gates": {
+      "sec": [],
+      "arch": [],
+      "test": [],
+      "perf": []
+    }
+  },
+  "rollback_plan": {
+    "backup_files": "{backup strategy}",
+    "feature_flags": "{flag strategy}",
+    "monitoring": "{monitoring strategy}",
+    "triggers": []
+  }
+}

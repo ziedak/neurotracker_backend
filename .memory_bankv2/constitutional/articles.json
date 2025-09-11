@@ -1,0 +1,143 @@
+{
+  "articles": {
+    "I": {
+      "name": "Code Quality",
+      "requirements": ["readable_code", "consistent_style", "clear_naming"],
+      "validation": ["code_review", "linting_passed", "documentation_current"]
+    },
+    "II": {
+      "name": "Testing Standards",
+      "requirements": [
+        "test_coverage",
+        "automated_testing",
+        "test_first_approach"
+      ],
+      "validation": [
+        "tests_passing",
+        "coverage_threshold",
+        "test_maintainability"
+      ]
+    },
+    "III": {
+      "name": "Error Handling",
+      "requirements": [
+        "structured_errors",
+        "proper_logging",
+        "graceful_failures"
+      ],
+      "validation": [
+        "no_silent_failures",
+        "error_recovery",
+        "user_friendly_messages"
+      ]
+    },
+    "IV": {
+      "name": "Performance Standards",
+      "requirements": ["response_times", "resource_usage", "scalability"],
+      "validation": [
+        "benchmark_compliance",
+        "memory_efficiency",
+        "load_testing"
+      ]
+    },
+    "V": {
+      "name": "Security Practices",
+      "requirements": ["secure_coding", "input_validation", "access_control"],
+      "validation": [
+        "vulnerability_scan",
+        "security_review",
+        "compliance_check"
+      ]
+    },
+    "VI": {
+      "name": "Documentation",
+      "requirements": ["api_documentation", "code_comments", "user_guides"],
+      "validation": ["docs_current", "examples_working", "completeness_check"]
+    },
+    "VII": {
+      "name": "Maintainability",
+      "requirements": ["modular_design", "low_coupling", "high_cohesion"],
+      "validation": [
+        "complexity_metrics",
+        "dependency_analysis",
+        "refactoring_ease"
+      ]
+    },
+    "VIII": {
+      "name": "Configuration Management",
+      "requirements": [
+        "environment_specific",
+        "centralized_config",
+        "secret_handling"
+      ],
+      "validation": [
+        "no_hardcoded_values",
+        "config_validation",
+        "secure_storage"
+      ]
+    },
+    "IX": {
+      "name": "Deployment Standards",
+      "requirements": [
+        "automated_deployment",
+        "rollback_capability",
+        "environment_parity"
+      ],
+      "validation": [
+        "deployment_tested",
+        "monitoring_enabled",
+        "backup_verified"
+      ]
+    }
+  },
+  "compliance_patterns": {
+    "minimal": ["I", "II", "III"],
+    "standard": ["I", "II", "III", "IV", "V", "VI"],
+    "enterprise": ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"],
+    "security_focused": ["I", "II", "III", "V", "VI", "VIII"],
+    "performance_focused": ["I", "II", "III", "IV", "VII"],
+    "documentation_heavy": ["I", "II", "III", "VI", "VII"]
+  },
+  "validation_gates": {
+    "quality": {
+      "name": "Code Quality Gate",
+      "criteria": [
+        "code_review_approved",
+        "style_guidelines_followed",
+        "complexity_acceptable"
+      ]
+    },
+    "testing": {
+      "name": "Testing Gate",
+      "criteria": [
+        "all_tests_passing",
+        "coverage_threshold_met",
+        "integration_tests_passed"
+      ]
+    },
+    "security": {
+      "name": "Security Gate",
+      "criteria": [
+        "vulnerability_scan_clean",
+        "security_review_passed",
+        "access_controls_verified"
+      ]
+    },
+    "performance": {
+      "name": "Performance Gate",
+      "criteria": [
+        "response_time_acceptable",
+        "resource_usage_within_limits",
+        "load_test_passed"
+      ]
+    },
+    "deployment": {
+      "name": "Deployment Gate",
+      "criteria": [
+        "deployment_tested",
+        "rollback_plan_ready",
+        "monitoring_configured"
+      ]
+    }
+  }
+}

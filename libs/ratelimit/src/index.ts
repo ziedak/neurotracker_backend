@@ -4,7 +4,6 @@ export * from "./types";
 // ===== ENTERPRISE CACHE ADAPTER (NEW SYSTEM) =====
 export {
   RateLimitingCacheAdapter,
-  type RateLimitResult as NewRateLimitResult,
   type RateLimitAlgorithm,
   type RateLimitRequest,
   type BatchRateLimitResult,

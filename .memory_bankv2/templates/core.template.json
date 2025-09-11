@@ -1,0 +1,37 @@
+{
+  "id": "TEMPLATE-{date}-{task-name}",
+  "name": "{Task Name}",
+  "desc": "{Brief description max 200 chars}",
+  "status": 0,
+  "priority": 2,
+  "created": "{YYYY-MM-DD}",
+  "target": "{YYYY-MM-DD}",
+  "articles": ["{constitutional articles array}"],
+  "phases": [
+    {
+      "id": "{phase-type}",
+      "name": "{Phase Name}",
+      "status": 0,
+      "duration": "{estimate}",
+      "deps": [],
+      "gates": ["{gate-types}"],
+      "tasks": [
+        {
+          "id": "{task-id}",
+          "desc": "{description max 100 chars}",
+          "status": 0,
+          "risk": "{L|M|H|C}",
+          "effort": "{estimate}"
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "progress": 0,
+    "quality": 0,
+    "risk": "{L|M|H|C}",
+    "complexity": 5
+  },
+  "blockers": [],
+  "notes": []
+}

@@ -1,0 +1,87 @@
+{
+  "phase_gates": {
+    "sec": {
+      "name": "Security Validation",
+      "criteria": [
+        "vulnerability_scan_pass",
+        "auth_bypass_check",
+        "input_validation_complete"
+      ],
+      "blocking": true,
+      "timeout": "24h"
+    },
+    "arch": {
+      "name": "Architecture Review",
+      "criteria": [
+        "constitutional_compliance",
+        "design_review_approved",
+        "integration_validated"
+      ],
+      "blocking": true,
+      "timeout": "48h"
+    },
+    "test": {
+      "name": "Testing Complete",
+      "criteria": [
+        "unit_tests_pass",
+        "integration_tests_pass",
+        "coverage_90_percent"
+      ],
+      "blocking": true,
+      "timeout": "12h"
+    },
+    "perf": {
+      "name": "Performance Validation",
+      "criteria": [
+        "latency_acceptable",
+        "memory_usage_ok",
+        "throughput_maintained"
+      ],
+      "blocking": false,
+      "timeout": "6h"
+    },
+    "docs": {
+      "name": "Documentation Complete",
+      "criteria": [
+        "api_docs_updated",
+        "readme_current",
+        "migration_guide_present"
+      ],
+      "blocking": false,
+      "timeout": "4h"
+    }
+  },
+  "automation_rules": {
+    "gate_validation": {
+      "triggers": ["phase_completion", "manual_request"],
+      "actions": [
+        "run_criteria_checks",
+        "update_status",
+        "notify_stakeholders"
+      ],
+      "failure_actions": [
+        "block_progress",
+        "escalate_to_expert",
+        "create_blocker"
+      ]
+    },
+    "progress_tracking": {
+      "update_frequency": "real_time",
+      "metrics": ["completion_percentage", "velocity", "quality_score"],
+      "alerts": ["gate_failure", "timeline_risk", "quality_degradation"]
+    }
+  },
+  "escalation_procedures": {
+    "gate_failure": {
+      "immediate": ["block_progress", "notify_team"],
+      "15_min": ["escalate_to_lead"],
+      "1_hour": ["escalate_to_architect"],
+      "4_hours": ["executive_notification"]
+    },
+    "constitutional_violation": {
+      "immediate": ["block_deployment", "expert_consultation"],
+      "30_min": ["remediation_plan_required"],
+      "2_hours": ["architecture_review_board"]
+    }
+  }
+}

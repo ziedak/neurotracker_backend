@@ -1,0 +1,27 @@
+{
+  "tokenLimits": {
+    "task-summary.json": 150,
+    "core.json": 400,
+    "progress.json": 200,
+    "context.json": 800,
+    "total": 1200
+  },
+  "mandatoryChecks": {
+    "contextBudgetValidation": true,
+    "constitutionalCompliance": true,
+    "compressionRules": true,
+    "aiRefsUsage": true
+  },
+  "qualityGates": {
+    "tokenEfficiency": ">80%",
+    "constitutionalArticles": ">=1",
+    "phaseGates": ">=1",
+    "clarity": "human.md generated"
+  },
+  "errorPrevention": {
+    "taskNameLength": 100,
+    "descriptionLength": 200,
+    "phaseTaskLength": 100,
+    "riskAssessment": "required"
+  }
+}

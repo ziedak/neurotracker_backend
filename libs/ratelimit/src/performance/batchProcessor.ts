@@ -1,6 +1,6 @@
 import { RedisClient } from "@libs/database";
 import { SharedScriptManager } from "./scriptManager";
-import { RateLimitResult } from "../types";
+import { RateLimitResult, RateLimitAlgorithm } from "../types";
 import { createLogger } from "@libs/utils";
 
 /**
@@ -80,15 +80,15 @@ export class BatchRateLimitProcessor {
     const startTime = Date.now();
     const config = { ...this.defaultConfig, ...this.config };
 
-    this.logger.debug("Starting batch processing", {
-      requestCount: requests.length,
-      algorithm,
-      config,
-    });
-
     try {
-      // Validate inputs
+      // Validate inputs first
       this.validateBatchRequests(requests);
+
+      this.logger.debug("Starting batch processing", {
+        requestCount: requests.length,
+        algorithm,
+        config,
+      });
 
       // Sort by priority (high first)
       const sortedRequests = this.sortByPriority(requests);
@@ -123,7 +123,7 @@ export class BatchRateLimitProcessor {
     } catch (error) {
       const duration = Date.now() - startTime;
       this.logger.error("Batch processing failed", {
-        requestCount: requests.length,
+        requestCount: requests?.length || 0,
         duration,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -229,14 +229,17 @@ export class BatchRateLimitProcessor {
             allowed: allowed === 1,
             totalHits: totalRequests || 0,
             remaining: Math.max(0, remaining || 0),
-            resetTime: new Date(resetTime || now + windowMs),
+            resetTime: resetTime || now + windowMs,
             retryAfter:
               allowed === 0
                 ? Math.ceil(((resetTime || now + windowMs) - now) / 1000)
-                : undefined,
-            algorithm: "sliding-window",
-            windowStart: new Date(windowStart),
-            windowEnd: new Date(now + windowMs),
+                : 0,
+            algorithm: "sliding-window" as RateLimitAlgorithm,
+            windowStart: windowStart,
+            windowEnd: now + windowMs,
+            limit: request.maxRequests,
+            cached: false,
+            responseTime: Date.now() - now,
           },
           executionTime: Date.now() - now,
         };
@@ -296,6 +299,7 @@ export class BatchRateLimitProcessor {
           key: request.key,
           result: this.createErrorResult(request, algorithm),
           executionTime,
+          cacheHit: false,
         };
       }
 
@@ -309,6 +313,7 @@ export class BatchRateLimitProcessor {
           key: request.key,
           result: this.createErrorResult(request, algorithm),
           executionTime,
+          cacheHit: false,
         };
       }
 
@@ -322,6 +327,7 @@ export class BatchRateLimitProcessor {
           key: request.key,
           result: this.createErrorResult(request, algorithm),
           executionTime,
+          cacheHit: false,
         };
       }
 
@@ -334,16 +340,20 @@ export class BatchRateLimitProcessor {
           allowed: allowed === 1,
           totalHits: totalRequests || 0,
           remaining: Math.max(0, remaining || 0),
-          resetTime: new Date(resetTime || now + request.windowMs),
+          resetTime: resetTime || now + request.windowMs,
           retryAfter:
             allowed === 0
               ? Math.ceil(((resetTime || now + request.windowMs) - now) / 1000)
-              : undefined,
-          algorithm,
-          windowStart: new Date(windowStart),
-          windowEnd: new Date(now + request.windowMs),
+              : 0,
+          algorithm: algorithm as RateLimitAlgorithm,
+          windowStart: windowStart,
+          windowEnd: now + request.windowMs,
+          limit: request.maxRequests,
+          cached: false,
+          responseTime: executionTime,
         },
         executionTime,
+        cacheHit: false,
       };
     });
   }
@@ -533,11 +543,14 @@ export class BatchRateLimitProcessor {
       allowed: false,
       totalHits: -1, // Indicates error
       remaining: 0,
-      resetTime: new Date(now + request.windowMs),
+      resetTime: now + request.windowMs,
       retryAfter: Math.ceil(request.windowMs / 1000),
-      algorithm,
-      windowStart: new Date(now - request.windowMs),
-      windowEnd: new Date(now + request.windowMs),
+      algorithm: algorithm as RateLimitAlgorithm,
+      windowStart: now - request.windowMs,
+      windowEnd: now + request.windowMs,
+      limit: request.maxRequests,
+      cached: false,
+      responseTime: 0,
     };
   }
 }

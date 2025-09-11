@@ -641,14 +641,18 @@ export class RateLimitingCacheAdapter {
    */
   private validateConfiguration(): void {
     const validation = this.configValidator.validateCacheConfig({
-      defaultAlgorithm: this.config.defaultAlgorithm,
-      enableBatchProcessing: this.config.enableBatchProcessing,
-      maxBatchSize: this.config.maxBatchSize,
-      compressionThreshold: this.config.compressionThreshold,
-      lockTimeoutMs: this.config.lockTimeoutMs,
+      defaultTTL: 3600,
+      enable: true,
+      maxMemoryCacheSize: 10000,
     });
 
     if (!validation.valid) {
+      this.logger.error(
+        "Rate limiting adapter configuration validation failed",
+        {
+          errors: validation.errors,
+        }
+      );
       throw new Error(
         `Invalid rate limiting adapter configuration: ${validation.errors.join(
           ", "

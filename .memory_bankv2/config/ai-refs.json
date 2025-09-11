@@ -1,0 +1,51 @@
+{
+  "version": "2.1.0-generic",
+  "lookup": {
+    "status": ["pending", "active", "blocked", "review", "done"],
+    "priority": ["critical", "high", "medium", "low"],
+    "risk": ["low", "medium", "high", "critical"],
+    "articles": [
+      "Code Quality",
+      "Testing Standards",
+      "Error Handling",
+      "Performance Standards",
+      "Security Practices",
+      "Documentation",
+      "Maintainability",
+      "Configuration Management",
+      "Deployment Standards"
+    ],
+    "gates": ["quality", "testing", "security", "performance", "deployment"]
+  },
+  "ai_shortcuts": {
+    "common_patterns": {
+      "basic_project": { "articles": [0, 1, 2], "gates": [0, 1] },
+      "web_application": {
+        "articles": [0, 1, 2, 3, 4, 5],
+        "gates": [0, 1, 2, 3]
+      },
+      "enterprise_system": {
+        "articles": [0, 1, 2, 3, 4, 5, 6, 7, 8],
+        "gates": [0, 1, 2, 3, 4]
+      },
+      "security_critical": {
+        "articles": [0, 1, 2, 4, 5, 7],
+        "gates": [0, 1, 2]
+      },
+      "performance_critical": {
+        "articles": [0, 1, 2, 3, 6],
+        "gates": [0, 1, 3]
+      },
+      "library_development": { "articles": [0, 1, 2, 5, 6], "gates": [0, 1] }
+    }
+  },
+  "context_hints": {
+    "load_order": ["status", "progress", "blocker", "next_action"],
+    "skip_when_minimal": [
+      "detailed_history",
+      "architecture_notes",
+      "technical_specifications",
+      "implementation_details"
+    ]
+  }
+}

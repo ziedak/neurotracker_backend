@@ -1,0 +1,9 @@
+{
+  "id": "perf-clickhouse-batch-monitoring",
+  "s": 1,
+  "p": 1,
+  "prog": 0,
+  "art": [0, 2, 4, 5, 7],
+  "gates": [2, 4],
+  "r": 1
+}

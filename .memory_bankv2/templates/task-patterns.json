@@ -1,0 +1,78 @@
+{
+  "service_development": {
+    "articles": ["I", "II", "III", "IV", "V"],
+    "phases": [
+      {
+        "id": "arch",
+        "name": "Architecture & Design",
+        "gates": ["arch", "const"],
+        "common_tasks": [
+          { "id": "design-api", "desc": "API design and specification" },
+          { "id": "data-modeling", "desc": "Data model design" },
+          { "id": "service-boundaries", "desc": "Define service boundaries" }
+        ]
+      },
+      {
+        "id": "impl",
+        "name": "Implementation",
+        "gates": ["test", "sec"],
+        "common_tasks": [
+          { "id": "core-logic", "desc": "Implement core business logic" },
+          { "id": "api-endpoints", "desc": "Create API endpoints" },
+          { "id": "error-handling", "desc": "Error handling implementation" }
+        ]
+      }
+    ]
+  },
+  "performance": {
+    "articles": ["I", "V", "VI", "VII", "IX"],
+    "phases": [
+      {
+        "id": "perf",
+        "name": "Performance Optimization",
+        "gates": ["perf", "test"],
+        "common_tasks": [
+          {
+            "id": "bottleneck-analysis",
+            "desc": "Identify performance bottlenecks"
+          },
+          {
+            "id": "optimization",
+            "desc": "Implement performance improvements"
+          },
+          { "id": "benchmarking", "desc": "Performance validation and testing" }
+        ]
+      }
+    ]
+  },
+  "infrastructure": {
+    "articles": ["I", "II", "III", "V", "IX"],
+    "phases": [
+      {
+        "id": "setup",
+        "name": "Infrastructure Setup",
+        "gates": ["arch", "test"],
+        "common_tasks": [
+          { "id": "tooling-setup", "desc": "Setup development tooling" },
+          { "id": "config-mgmt", "desc": "Configuration management" },
+          { "id": "monitoring", "desc": "Monitoring and alerting setup" }
+        ]
+      }
+    ]
+  },
+  "bugfix": {
+    "articles": ["IV", "V", "IX"],
+    "phases": [
+      {
+        "id": "debug",
+        "name": "Bug Investigation",
+        "gates": ["test"],
+        "common_tasks": [
+          { "id": "reproduce", "desc": "Reproduce and isolate bug" },
+          { "id": "root-cause", "desc": "Root cause analysis" },
+          { "id": "fix-implement", "desc": "Implement and test fix" }
+        ]
+      }
+    ]
+  }
+}

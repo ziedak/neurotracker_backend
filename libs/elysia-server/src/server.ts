@@ -13,14 +13,14 @@ class SimpleLogger {
 import { Elysia, t } from "elysia";
 import { ServerConfig, DEFAULT_SERVER_CONFIG } from "./config";
 import { setupCorePlugins } from "./plugins";
-import { setupMiddleware } from "./middleware";
-import { setupErrorHandling } from "./error-handling";
+import { setupMiddleware } from "./middlewareSimple";
+import { setupErrorHandling } from "./error-handlingSimple";
 
 export interface RouteSetup {
   (app: Elysia): Elysia;
 }
 
-export interface WebSocketMessage {
+export interface WebSocketMessageSimple {
   type: string;
   payload: any;
   timestamp?: string;
@@ -30,7 +30,7 @@ export interface WebSocketMessage {
 
 export interface WebSocketHandler {
   open?: (ws: any) => void;
-  message?: (ws: any, message: WebSocketMessage) => void;
+  message?: (ws: any, message: WebSocketMessageSimple) => void;
   close?: (ws: any, code: number, reason: string) => void;
   drain?: (ws: any) => void;
 }
@@ -78,7 +78,10 @@ export class ElysiaServerBuilder {
   /**
    * Send a message to a specific connection
    */
-  sendToConnection(connectionId: string, message: WebSocketMessage): boolean {
+  sendToConnection(
+    connectionId: string,
+    message: WebSocketMessageSimple
+  ): boolean {
     const ws = this.connections.get(connectionId);
     if (!ws) return false;
 
@@ -96,7 +99,7 @@ export class ElysiaServerBuilder {
     }
   }
 
-  sendToUser(userId: string, message: WebSocketMessage): number {
+  sendToUser(userId: string, message: WebSocketMessageSimple): number {
     const userConns = this.userConnections.get(userId);
     if (!userConns) return 0;
 
@@ -109,7 +112,7 @@ export class ElysiaServerBuilder {
     return sent;
   }
 
-  sendToRoom(room: string, message: WebSocketMessage): number {
+  sendToRoom(room: string, message: WebSocketMessageSimple): number {
     const roomMembers = this.rooms.get(room);
     if (!roomMembers) return 0;
 
@@ -122,7 +125,7 @@ export class ElysiaServerBuilder {
     return sent;
   }
 
-  broadcast(message: WebSocketMessage): number {
+  broadcast(message: WebSocketMessageSimple): number {
     let sent = 0;
     for (const [connectionId] of this.connections) {
       if (this.sendToConnection(connectionId, message)) {
@@ -140,9 +143,9 @@ export class ElysiaServerBuilder {
     };
   }
 
-  private handleWebSocketMessage(
+  private handleWebSocketMessageSimple(
     ws: any,
-    message: WebSocketMessage,
+    message: WebSocketMessageSimple,
     connectionId: string
   ): void {
     if (!this.config.websocket?.enabled) {
@@ -293,7 +296,7 @@ export class ElysiaServerBuilder {
         },
         message: (ws, message) => {
           const connectionId = (ws.data as any).connectionId;
-          this.handleWebSocketMessage(ws, message, connectionId);
+          this.handleWebSocketMessageSimple(ws, message, connectionId);
         },
         close: (ws, code, reason) => {
           const connectionId = (ws.data as any).connectionId;

@@ -1,0 +1,18 @@
+{
+  "id": "{task-id}",
+  "status": "{status-code}",
+  "progress": "{percentage}",
+  "next": "{next-action}",
+  "blocker": "{blocker-or-null}",
+  "risk": "{risk-level}",
+  "due": "{target-date}",
+  "files": ["{file1}", "{file2}", "{file3}"],
+  "tests": "{passed}/{total} passing",
+  "gates": ["{gate1}:{status}", "{gate2}:{status}"],
+  "context_level": "minimal",
+  "expand": {
+    "full": "@load:core.json",
+    "progress": "@load:progress.json",
+    "requirements": "@load:context.json"
+  }
+}

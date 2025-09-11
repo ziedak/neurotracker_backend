@@ -1,0 +1,41 @@
+{
+  "context_budget": {
+    "total_available": 8000,
+    "reserved_for_task": 6000,
+    "memory_bank_allocation": {
+      "maximum": 1200,
+      "preferred": 800,
+      "minimal": 400
+    }
+  },
+  "loading_profiles": {
+    "quick_status": {
+      "tokens": 150,
+      "files": ["task-summary.json"],
+      "use_case": "status_check"
+    },
+    "work_session": {
+      "tokens": 600,
+      "files": ["core.json", "progress.json", "refs-minimal.json"],
+      "use_case": "active_development"
+    },
+    "deep_analysis": {
+      "tokens": 1200,
+      "files": [
+        "core.json",
+        "progress.json",
+        "context.json",
+        "constitutional.json"
+      ],
+      "use_case": "architectural_decisions"
+    }
+  },
+  "adaptive_loading": {
+    "context_remaining": {
+      ">6000": "deep_analysis",
+      "3000-6000": "work_session",
+      "1000-3000": "quick_status",
+      "<1000": "emergency_minimal"
+    }
+  }
+}

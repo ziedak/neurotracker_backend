@@ -6,6 +6,7 @@ import { createLogger } from "@libs/utils";
  * Prevents redundant script loading across multiple instances
  */
 export class SharedScriptManager {
+  private static instance: SharedScriptManager;
   private readonly scriptShas = new Map<string, string>();
   private scriptsInitialized = false;
   private initPromise: Promise<void> | undefined;
@@ -156,6 +157,17 @@ export class SharedScriptManager {
   } as const;
 
   logger = createLogger("SharedScriptManager");
+
+  /**
+   * Get singleton instance
+   */
+  static getInstance(): SharedScriptManager {
+    if (!SharedScriptManager.instance) {
+      SharedScriptManager.instance = new SharedScriptManager();
+    }
+    return SharedScriptManager.instance;
+  }
+
   /**
    * Initialize scripts with Redis client
    */

@@ -1,0 +1,95 @@
+{
+  "version": "2.1.0-template",
+  "description": "Generic Memory Bank v2 configuration template",
+
+  "project_info": {
+    "name": "{PROJECT_NAME}",
+    "type": "{web|mobile|api|cli|library|desktop}",
+    "compliance_level": "{minimal|standard|enterprise|custom}",
+    "language": "{PROGRAMMING_LANGUAGE}",
+    "framework": "{FRAMEWORK_NAME}"
+  },
+
+  "constitutional_articles": {
+    "I": "Code Quality",
+    "II": "Testing Standards",
+    "III": "Error Handling",
+    "IV": "Performance Standards",
+    "V": "Security Practices",
+    "VI": "Documentation",
+    "VII": "Maintainability",
+    "VIII": "Configuration Management",
+    "IX": "Deployment Standards"
+  },
+
+  "priority_levels": {
+    "1": "critical",
+    "2": "high",
+    "3": "medium",
+    "4": "low"
+  },
+
+  "status_codes": {
+    "0": "pending",
+    "1": "active",
+    "2": "blocked",
+    "3": "review",
+    "4": "completed",
+    "5": "archived"
+  },
+
+  "phase_types": {
+    "plan": "planning",
+    "design": "design",
+    "impl": "implementation",
+    "test": "testing",
+    "review": "review",
+    "deploy": "deployment",
+    "docs": "documentation"
+  },
+
+  "project_types": {
+    "web": "Web Application",
+    "mobile": "Mobile Application",
+    "api": "API Service",
+    "cli": "Command Line Tool",
+    "lib": "Library/Package",
+    "desktop": "Desktop Application"
+  },
+
+  "risk_levels": {
+    "L": "low",
+    "M": "medium",
+    "H": "high",
+    "C": "critical"
+  },
+
+  "gate_types": {
+    "quality": "code_quality_check",
+    "testing": "testing_validation",
+    "security": "security_review",
+    "performance": "performance_validation",
+    "deployment": "deployment_readiness"
+  },
+
+  "uncertainty_markers": {
+    "U": "uncertain",
+    "A": "assumption",
+    "R": "needs_review",
+    "K": "known_risk",
+    "D": "dependency_unclear"
+  },
+
+  "customization": {
+    "additional_articles": {
+      "X": "{CUSTOM_ARTICLE_NAME}",
+      "XI": "{ADDITIONAL_CUSTOM_ARTICLE}"
+    },
+    "project_specific_phases": {
+      "{custom_phase}": "{Custom Phase Description}"
+    },
+    "technology_specific": {
+      "{tech_category}": "{Technology Specific Configuration}"
+    }
+  }
+}

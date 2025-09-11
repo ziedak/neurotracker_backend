@@ -6,7 +6,6 @@ import { FeatureService } from "./services/feature.service";
 import { CacheService } from "./services/cache.service";
 
 // Import shared middleware instead of service-specific implementations
-import { servicePresets } from "@libs/middleware";
 
 // Cache service instances to reduce DI resolution overhead
 class ServiceCache {

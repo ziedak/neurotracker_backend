@@ -1,0 +1,78 @@
+{
+  "articles": {
+    "I": {
+      "name": "{ARTICLE_1_NAME}",
+      "requirements": ["{requirement_1}", "{requirement_2}", "{requirement_3}"],
+      "validation": ["{validation_1}", "{validation_2}", "{validation_3}"]
+    },
+    "II": {
+      "name": "{ARTICLE_2_NAME}",
+      "requirements": ["{requirement_1}", "{requirement_2}", "{requirement_3}"],
+      "validation": ["{validation_1}", "{validation_2}", "{validation_3}"]
+    },
+    "III": {
+      "name": "{ARTICLE_3_NAME}",
+      "requirements": ["{requirement_list}"],
+      "validation": ["{validation_list}"]
+    },
+    "IV": {
+      "name": "{ARTICLE_4_NAME}",
+      "requirements": ["{requirement_list}"],
+      "validation": ["{validation_list}"]
+    },
+    "V": {
+      "name": "{ARTICLE_5_NAME}",
+      "requirements": ["{requirement_list}"],
+      "validation": ["{validation_list}"]
+    },
+    "VI": {
+      "name": "{ARTICLE_6_NAME}",
+      "requirements": ["{requirement_list}"],
+      "validation": ["{validation_list}"]
+    },
+    "VII": {
+      "name": "{ARTICLE_7_NAME}",
+      "requirements": ["{requirement_list}"],
+      "validation": ["{validation_list}"]
+    },
+    "VIII": {
+      "name": "{ARTICLE_8_NAME}",
+      "requirements": ["{requirement_list}"],
+      "validation": ["{validation_list}"]
+    },
+    "IX": {
+      "name": "{ARTICLE_9_NAME}",
+      "requirements": ["{requirement_list}"],
+      "validation": ["{validation_list}"]
+    }
+  },
+  "compliance_patterns": {
+    "minimal": ["{article_list_for_small_projects}"],
+    "standard": ["{article_list_for_typical_projects}"],
+    "enterprise": ["{article_list_for_large_projects}"],
+    "custom_pattern_1": ["{custom_article_combination}"],
+    "custom_pattern_2": ["{custom_article_combination}"]
+  },
+  "validation_gates": {
+    "gate_1": {
+      "name": "{Gate 1 Name}",
+      "criteria": ["{criteria_1}", "{criteria_2}", "{criteria_3}"]
+    },
+    "gate_2": {
+      "name": "{Gate 2 Name}",
+      "criteria": ["{criteria_list}"]
+    },
+    "gate_3": {
+      "name": "{Gate 3 Name}",
+      "criteria": ["{criteria_list}"]
+    },
+    "gate_4": {
+      "name": "{Gate 4 Name}",
+      "criteria": ["{criteria_list}"]
+    },
+    "gate_5": {
+      "name": "{Gate 5 Name}",
+      "criteria": ["{criteria_list}"]
+    }
+  }
+}

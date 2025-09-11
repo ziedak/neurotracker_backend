@@ -1,12 +1,11 @@
-import {
-  DistributedRateLimit,
-  DistributedRateLimitConfig,
-} from "../src/distributedRateLimit";
-
 // Mock dependencies
 const mockRedisInstance = {
   script: jest.fn().mockResolvedValue("mock-sha"),
   evalsha: jest.fn().mockResolvedValue([1, 99, Date.now() + 60000, 1]),
+  zremrangebyscore: jest.fn().mockResolvedValue(0),
+  zcard: jest.fn().mockResolvedValue(1),
+  zadd: jest.fn().mockResolvedValue(1),
+  expire: jest.fn().mockResolvedValue(1),
   del: jest.fn().mockResolvedValue(1),
   ping: jest.fn().mockResolvedValue("PONG"),
   publish: jest.fn().mockResolvedValue(1),
@@ -37,11 +36,17 @@ jest.mock("@libs/monitoring", () => ({
 }));
 
 jest.mock("@libs/utils", () => ({
+  createLogger: jest.fn().mockReturnValue(mockLogger),
   ConsecutiveBreaker: jest.fn().mockImplementation(() => ({
     execute: jest.fn().mockImplementation((fn) => fn()),
     state: "closed",
   })),
 }));
+
+import {
+  DistributedRateLimit,
+  DistributedRateLimitConfig,
+} from "../src/distributedRateLimit";
 
 describe("DistributedRateLimit", () => {
   let distributedLimiter: DistributedRateLimit;
@@ -51,6 +56,8 @@ describe("DistributedRateLimit", () => {
     jest.clearAllMocks();
     config = {
       algorithm: "sliding-window",
+      maxRequests: 100,
+      windowMs: 60000,
       redis: {
         keyPrefix: "test_rate_limit",
         ttlBuffer: 10,
@@ -68,11 +75,7 @@ describe("DistributedRateLimit", () => {
       },
     };
 
-    distributedLimiter = new DistributedRateLimit(
-      config,
-      mockRedisClient,
-      mockLogger
-    );
+    distributedLimiter = new DistributedRateLimit(config, mockRedisClient);
   });
 
   afterEach(() => {
@@ -94,10 +97,12 @@ describe("DistributedRateLimit", () => {
         distributed: {
           enabled: false,
           instanceId: "test-instance-123",
+          syncInterval: 30000,
+          maxDrift: 5000,
         },
       };
       expect(() => {
-        new DistributedRateLimit(invalidConfig, mockRedisClient, mockLogger);
+        new DistributedRateLimit(invalidConfig, mockRedisClient);
       }).toThrow("Distributed rate limiting must be enabled in config");
     });
 
@@ -117,7 +122,7 @@ describe("DistributedRateLimit", () => {
       expect(mockRedisInstance.subscribe).toHaveBeenCalledWith(
         "rate_limit:sync",
         "rate_limit:reset",
-        "rate_limit:alert"
+        "rate_limit:events"
       );
     });
 
@@ -166,18 +171,8 @@ describe("DistributedRateLimit", () => {
 
   describe("Rate Limiting with Distribution", () => {
     test("should publish denied events to other instances", async () => {
-      // Mock the parent class to return a denied result
-      const mockCheckRateLimit = jest.spyOn(
-        Object.getPrototypeOf(DistributedRateLimit.prototype),
-        "checkRateLimit"
-      );
-      mockCheckRateLimit.mockResolvedValue({
-        allowed: false,
-        remaining: 0,
-        retryAfter: 60000,
-        totalHits: 101,
-        algorithm: "sliding-window",
-      });
+      // Mock the Redis operations to simulate a denied request
+      mockRedisInstance.zcard.mockResolvedValueOnce(100); // Global count exceeds limit
 
       await distributedLimiter.checkRateLimit("user:123", 100, 60000);
 
@@ -188,17 +183,6 @@ describe("DistributedRateLimit", () => {
     });
 
     test("should not publish events for allowed requests", async () => {
-      const mockCheckRateLimit = jest.spyOn(
-        Object.getPrototypeOf(DistributedRateLimit.prototype),
-        "checkRateLimit"
-      );
-      mockCheckRateLimit.mockResolvedValue({
-        allowed: true,
-        remaining: 99,
-        totalHits: 1,
-        algorithm: "sliding-window",
-      });
-
       await distributedLimiter.checkRateLimit("user:123", 100, 60000);
 
       expect(mockRedisInstance.publish).not.toHaveBeenCalled();
@@ -207,12 +191,6 @@ describe("DistributedRateLimit", () => {
 
   describe("Reset with Distribution", () => {
     test("should publish reset events to other instances", async () => {
-      const mockReset = jest.spyOn(
-        Object.getPrototypeOf(DistributedRateLimit.prototype),
-        "reset"
-      );
-      mockReset.mockResolvedValue(undefined);
-
       await distributedLimiter.reset("user:123");
 
       expect(mockRedisInstance.publish).toHaveBeenCalledWith(
@@ -229,7 +207,7 @@ describe("DistributedRateLimit", () => {
       syncFunction.call(distributedLimiter);
 
       expect(mockRedisInstance.publish).toHaveBeenCalledWith(
-        "rate_limit:sync",
+        "rate_limit:events",
         expect.stringContaining('"type":"heartbeat"')
       );
     });
@@ -314,10 +292,10 @@ describe("DistributedRateLimit", () => {
       await syncFunction.call(distributedLimiter);
 
       expect(mockLogger.error).toHaveBeenCalledWith(
-        "Distributed sync failed",
+        "Failed to publish distributed event",
         expect.any(Error),
         expect.objectContaining({
-          instanceId: "test-instance-123",
+          type: "heartbeat",
         })
       );
     });

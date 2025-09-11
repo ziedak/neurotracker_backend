@@ -4,6 +4,9 @@
 
 import type { RateLimitAlgorithm } from "./adapters/RateLimitingCacheAdapter";
 
+// Re-export for convenience
+export type { RateLimitAlgorithm };
+
 /**
  * Rate limit result interface
  */

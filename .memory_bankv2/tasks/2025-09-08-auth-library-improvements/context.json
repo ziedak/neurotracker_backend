@@ -1,0 +1,64 @@
+{
+  "dependencies": {
+    "external": ["zod", "jest"],
+    "internal": ["@libs/middleware", "@libs/monitoring", "@libs/utils"]
+  },
+  "target_architecture": {
+    "before": {
+      "auth-service.ts": 723,
+      "threat-detection-service.ts": 691,
+      "config-validation-service.ts": 587,
+      "keycloak-service.ts": 587
+    },
+    "after": {
+      "authentication/": ["user-auth", "token-mgmt", "user-mgmt"],
+      "threat-detection/": ["login-detector", "device-detector", "ip-detector"],
+      "validation/": [
+        "auth-validator",
+        "security-validator",
+        "integration-validator"
+      ],
+      "keycloak/": ["authenticator", "user-manager", "admin-service"]
+    }
+  },
+  "risk_assessment": {
+    "breaking_auth_flows": {
+      "level": "M",
+      "mitigation": "Incremental changes with backward compatibility"
+    },
+    "performance_impact": {
+      "level": "L",
+      "mitigation": "Efficient Zod schemas, caching validation results"
+    },
+    "complex_di_changes": {
+      "level": "M",
+      "mitigation": "Maintain existing DI patterns, gradual service extraction"
+    },
+    "keycloak_integration": {
+      "level": "L",
+      "mitigation": "Preserve existing Keycloak patterns, no auth flow changes"
+    }
+  },
+  "validation_strategy": {
+    "phase_gates": {
+      "sec": [
+        "password_policy_working",
+        "zod_validation_complete",
+        "security_hardening_done"
+      ],
+      "arch": [
+        "services_split",
+        "backward_compatibility",
+        "performance_maintained"
+      ],
+      "impl": ["utilities_implemented", "eslint_passing", "test_coverage_90"],
+      "integ": ["middleware_integration", "performance_validated"]
+    }
+  },
+  "rollback_plan": {
+    "backup_files": "All original files backed up before refactoring",
+    "feature_flags": "New implementations behind feature flags",
+    "monitoring": "Watch authentication success rates",
+    "triggers": ["auth_failure_rate > 1%", "performance_degradation > 5%"]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "task_id": "{task-id}",
+  "overall": 0,
+  "phases": {},
+  "gates_passed": [],
+  "gates_failed": [],
+  "time_spent": "0h",
+  "time_remaining": "{estimate}",
+  "velocity": 0,
+  "milestones": [
+    {
+      "name": "{milestone-name}",
+      "target": "{YYYY-MM-DD}",
+      "status": 0
+    }
+  ],
+  "quality_metrics": {
+    "loc_before": 0,
+    "loc_current": 0,
+    "loc_target": 0,
+    "test_coverage": 0,
+    "test_coverage_target": 90,
+    "eslint_violations": 0
+  },
+  "security_impact": {
+    "vulnerabilities_addressed": [],
+    "risk_reduction": "L"
+  }
+}

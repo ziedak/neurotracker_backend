@@ -1,0 +1,148 @@
+{
+  "id": "2025-09-08-auth-library-improvements",
+  "name": "Auth Library Security & Architecture Improvements",
+  "desc": "Enhance auth library: password policy, Zod validation, service refactoring, maintain Keycloak-only flow",
+  "status": 1,
+  "priority": 2,
+  "created": "2025-09-08",
+  "target": "2025-09-11",
+  "articles": ["I", "II", "III", "IV", "V", "VIII"],
+  "phases": [
+    {
+      "id": "sec",
+      "name": "Critical Security Implementation",
+      "status": 4,
+      "duration": "3h",
+      "deps": [],
+      "gates": ["sec", "test"],
+      "tasks": [
+        {
+          "id": "pwd-policy",
+          "desc": "Password strength validation with complexity requirements",
+          "status": 4,
+          "risk": "C",
+          "effort": "1h"
+        },
+        {
+          "id": "zod-validation",
+          "desc": "Zod schemas for input validation across all services",
+          "status": 4,
+          "risk": "H",
+          "effort": "1.5h"
+        },
+        {
+          "id": "sec-hardening",
+          "desc": "Secure updateUser/deleteUser methods with validation",
+          "status": 4,
+          "risk": "H",
+          "effort": "0.5h"
+        }
+      ]
+    },
+    {
+      "id": "arch",
+      "name": "Service Refactoring",
+      "status": 0,
+      "duration": "5h",
+      "deps": ["sec"],
+      "gates": ["arch", "test", "perf"],
+      "tasks": [
+        {
+          "id": "auth-split",
+          "desc": "Split auth-service.ts (723 lines) → 3 focused services",
+          "status": 0,
+          "risk": "M",
+          "effort": "2h"
+        },
+        {
+          "id": "threat-split",
+          "desc": "Split threat-detection-service.ts (691 lines) → 3 modules",
+          "status": 0,
+          "risk": "M",
+          "effort": "1.5h"
+        },
+        {
+          "id": "config-split",
+          "desc": "Split config-validation-service.ts (587 lines) → 3 validators",
+          "status": 0,
+          "risk": "L",
+          "effort": "1h"
+        },
+        {
+          "id": "kc-split",
+          "desc": "Split keycloak-service.ts (587 lines) → 3 managers",
+          "status": 0,
+          "risk": "H",
+          "effort": "0.5h"
+        }
+      ]
+    },
+    {
+      "id": "impl",
+      "name": "Missing Implementation & Quality",
+      "status": 0,
+      "duration": "3h",
+      "deps": ["arch"],
+      "gates": ["test", "docs"],
+      "tasks": [
+        {
+          "id": "utils",
+          "desc": "Implement commented-out utility functions in index.ts",
+          "status": 0,
+          "risk": "L",
+          "effort": "1h"
+        },
+        {
+          "id": "eslint",
+          "desc": "Set up comprehensive ESLint configuration",
+          "status": 0,
+          "risk": "L",
+          "effort": "0.5h"
+        },
+        {
+          "id": "tests",
+          "desc": "Implement comprehensive test suite (90%+ coverage)",
+          "status": 0,
+          "risk": "M",
+          "effort": "1.5h"
+        }
+      ]
+    },
+    {
+      "id": "integ",
+      "name": "Integration & Validation",
+      "status": 0,
+      "duration": "1h",
+      "deps": ["impl"],
+      "gates": ["integ", "perf"],
+      "tasks": [
+        {
+          "id": "middleware",
+          "desc": "Integration testing with existing middleware",
+          "status": 0,
+          "risk": "M",
+          "effort": "0.5h"
+        },
+        {
+          "id": "perf-audit",
+          "desc": "Performance impact assessment",
+          "status": 0,
+          "risk": "L",
+          "effort": "0.5h"
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "progress": 25,
+    "quality": 85,
+    "risk": "M",
+    "complexity": 7
+  },
+  "blockers": [],
+  "notes": [
+    "✅ Phase 1 complete: PasswordPolicyService (446 LOC) + Zod schemas (400+ LOC)",
+    "✅ 13/13 integration tests passing, zero TypeScript errors",
+    "🎯 Ready for Phase 2: Service refactoring while maintaining Keycloak-only flow"
+  ]
+}

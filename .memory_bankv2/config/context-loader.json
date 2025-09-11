@@ -1,0 +1,106 @@
+{
+  "context_loader": {
+    "version": "2.1.0",
+    "description": "AI context budget management for Memory Bank v2",
+
+    "loading_strategies": {
+      "emergency": {
+        "max_tokens": 80,
+        "files": ["task-summary.json"],
+        "fields": ["id", "status", "next", "blocker"],
+        "use_case": "critical_status_only"
+      },
+
+      "minimal": {
+        "max_tokens": 150,
+        "files": ["task-summary.json", "ai-refs.json"],
+        "fields": ["id", "status", "progress", "next", "blocker", "risk"],
+        "use_case": "quick_status_check"
+      },
+
+      "standard": {
+        "max_tokens": 600,
+        "files": ["core.json", "progress.json", "ai-refs.json"],
+        "sections": ["basic_info", "current_phase", "gates", "blockers"],
+        "use_case": "active_development"
+      },
+
+      "comprehensive": {
+        "max_tokens": 1200,
+        "files": ["core.json", "progress.json", "context.json", "ai-refs.json"],
+        "sections": ["full_context", "requirements", "architecture", "history"],
+        "use_case": "complex_analysis"
+      }
+    },
+
+    "adaptive_selection": {
+      "context_budget_remaining": {
+        "7000+": "comprehensive",
+        "4000-7000": "standard",
+        "1500-4000": "minimal",
+        "0-1500": "emergency"
+      },
+
+      "task_complexity": {
+        "simple": "minimal",
+        "moderate": "standard",
+        "complex": "comprehensive",
+        "critical": "comprehensive"
+      },
+
+      "operation_type": {
+        "status_check": "minimal",
+        "implementation": "standard",
+        "architecture_review": "comprehensive",
+        "debug": "standard",
+        "emergency": "emergency"
+      }
+    },
+
+    "progressive_loading": {
+      "start_with": "minimal",
+      "expand_triggers": [
+        "constitutional_compliance_needed",
+        "detailed_requirements_needed",
+        "architecture_context_needed",
+        "blocker_analysis_needed"
+      ],
+      "load_on_demand": {
+        "context.json": "@expand:requirements_or_architecture",
+        "constitutional.json": "@expand:compliance_check",
+        "workflows/gates.json": "@expand:gate_validation"
+      }
+    }
+  },
+
+  "ai_hints": {
+    "efficient_parsing": {
+      "numeric_references": "Use ai-refs.json lookup arrays",
+      "status_priority": "Load status, progress, blocker first",
+      "constitutional_lazy": "Load articles only when compliance needed",
+      "context_progressive": "Start minimal, expand with @load: directives"
+    },
+
+    "token_optimization": {
+      "avoid_verbose_text": "Use numeric codes and references",
+      "skip_unused_sections": "Load only sections needed for current operation",
+      "batch_references": "Resolve all references in single lookup",
+      "cache_common_data": "Reuse ai-refs.json across tasks"
+    }
+  },
+
+  "validation": {
+    "context_budget_compliance": {
+      "monitor_token_usage": true,
+      "warn_at_threshold": 0.8,
+      "emergency_fallback": true,
+      "preserve_functionality": true
+    },
+
+    "comprehension_validation": {
+      "required_accuracy": ">=95%",
+      "key_information": ["status", "next_action", "blockers", "compliance"],
+      "fallback_to_full_context": "if_accuracy_drops"
+    }
+  }
+}

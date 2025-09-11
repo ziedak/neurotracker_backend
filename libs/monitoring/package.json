@@ -9,7 +9,6 @@
   "dependencies": {
     "@libs/config": "workspace:*",
     "@libs/utils": "workspace:*",
-    "@libs/elysia-server": "workspace:*",
     "prom-client": "^15.1.3",
     "tsyringe": "^4.10.0"
   }

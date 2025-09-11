@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "task_core": {
+      "type": "object",
+      "required": ["id", "name", "status", "priority", "phases", "articles"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "desc": { "type": "string", "maxLength": 200 },
+        "status": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "priority": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "created": { "type": "string", "format": "date" },
+        "target": { "type": "string", "format": "date" },
+        "articles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"]
+          }
+        },
+        "phases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "name", "status"],
+            "properties": {
+              "id": { "type": "string", "maxLength": 10 },
+              "name": { "type": "string", "maxLength": 50 },
+              "status": { "type": "integer", "minimum": 0, "maximum": 4 },
+              "duration": { "type": "string" },
+              "deps": { "type": "array", "items": { "type": "string" } },
+              "gates": { "type": "array", "items": { "type": "string" } },
+              "tasks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "desc": { "type": "string", "maxLength": 100 },
+                    "status": { "type": "integer" },
+                    "risk": { "type": "string", "enum": ["L", "M", "H", "C"] },
+                    "effort": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "progress": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "quality": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "risk": { "type": "string", "enum": ["L", "M", "H", "C"] },
+            "complexity": { "type": "integer", "minimum": 1, "maximum": 10 }
+          }
+        },
+        "blockers": { "type": "array", "items": { "type": "string" } },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 200 }
+        }
+      }
+    },
+    "progress_tracking": {
+      "type": "object",
+      "properties": {
+        "overall": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "phases": {
+          "type": "object",
+          "patternProperties": {
+            ".*": { "type": "integer", "minimum": 0, "maximum": 100 }
+          }
+        },
+        "gates_passed": { "type": "array", "items": { "type": "string" } },
+        "gates_failed": { "type": "array", "items": { "type": "string" } },
+        "time_spent": { "type": "string" },
+        "time_remaining": { "type": "string" },
+        "velocity": { "type": "number" }
+      }
+    }
+  }
+}

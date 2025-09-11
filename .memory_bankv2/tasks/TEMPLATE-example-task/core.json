@@ -1,0 +1,37 @@
+{
+  "id": "TEMPLATE-{date}-{task-name}",
+  "name": "{Task Name}",
+  "desc": "{Brief description max 200 chars}",
+  "status": 0,
+  "priority": 2,
+  "created": "{YYYY-MM-DD}",
+  "target": "{YYYY-MM-DD}",
+  "articles": ["{article-ids}"],
+  "phases": [
+    {
+      "id": "{phase-type}",
+      "name": "{Phase Name}",
+      "status": 0,
+      "duration": "{estimate}",
+      "deps": [],
+      "gates": ["{gate-types}"],
+      "tasks": [
+        {
+          "id": "{task-id}",
+          "desc": "{description max 100 chars}",
+          "status": 0,
+          "risk": "{risk-level}",
+          "effort": "{estimate}"
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "progress": 0,
+    "quality": 0,
+    "risk": "{risk-level}",
+    "complexity": "{1-10}"
+  },
+  "blockers": [],
+  "notes": ["{note1}", "{note2}"]
+}

@@ -1,5 +1,4 @@
 import { Elysia } from "elysia";
-import { cors } from "@elysiajs/cors";
 import { swagger } from "@elysiajs/swagger";
 import { ServerConfig } from "./config";
 
@@ -18,11 +17,6 @@ export function setupCorePlugins(app: Elysia, config: ServerConfig) {
         },
       })
     );
-  }
-
-  // CORS
-  if (config.cors) {
-    app.use(cors(config.cors));
   }
 
   return app;

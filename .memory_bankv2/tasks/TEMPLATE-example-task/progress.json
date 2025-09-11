@@ -1,0 +1,20 @@
+{
+  "task_id": "{task-id}",
+  "overall": "{percentage}",
+  "phases": {
+    "{phase1}": "{percentage}",
+    "{phase2}": "{percentage}"
+  },
+  "gates_passed": ["{gate-list}"],
+  "gates_failed": [],
+  "time_spent": "{hours}h",
+  "time_remaining": "{estimate}",
+  "velocity": "{completion-rate}",
+  "milestones": [
+    {
+      "name": "{milestone-name}",
+      "date": "{target-date}",
+      "status": "{status}"
+    }
+  ]
+}

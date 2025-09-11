@@ -3,7 +3,7 @@
  * Fixes Issue #5: Cache Coherency Gaps
  */
 
-import { createLogger, generateUUId } from "libs/utils";
+import { createLogger, generateUUId } from "@libs/utils";
 import type { RedisClient } from "@libs/database";
 
 export interface CoherencyEvent {

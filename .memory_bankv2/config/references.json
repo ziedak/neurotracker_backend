@@ -1,0 +1,73 @@
+{
+  "version": "2.1.0-generic",
+  "constitutional_articles": {
+    "I": "Code Quality",
+    "II": "Testing Standards",
+    "III": "Error Handling",
+    "IV": "Performance Standards",
+    "V": "Security Practices",
+    "VI": "Documentation",
+    "VII": "Maintainability",
+    "VIII": "Configuration Management",
+    "IX": "Deployment Standards"
+  },
+  "priority_levels": {
+    "1": "critical",
+    "2": "high",
+    "3": "medium",
+    "4": "low"
+  },
+  "status_codes": {
+    "0": "pending",
+    "1": "active",
+    "2": "blocked",
+    "3": "review",
+    "4": "completed",
+    "5": "archived"
+  },
+  "phase_types": {
+    "plan": "planning",
+    "design": "design",
+    "impl": "implementation",
+    "test": "testing",
+    "review": "review",
+    "deploy": "deployment",
+    "docs": "documentation"
+  },
+  "project_types": {
+    "web": "Web Application",
+    "mobile": "Mobile Application",
+    "api": "API Service",
+    "cli": "Command Line Tool",
+    "lib": "Library/Package",
+    "desktop": "Desktop Application"
+  },
+  "technology_categories": {
+    "frontend": "Frontend Framework",
+    "backend": "Backend Framework",
+    "database": "Database System",
+    "testing": "Testing Framework",
+    "deployment": "Deployment Platform",
+    "monitoring": "Monitoring Tool"
+  },
+  "risk_levels": {
+    "L": "low",
+    "M": "medium",
+    "H": "high",
+    "C": "critical"
+  },
+  "gate_types": {
+    "quality": "code_quality_check",
+    "testing": "testing_validation",
+    "security": "security_review",
+    "performance": "performance_validation",
+    "deployment": "deployment_readiness"
+  },
+  "uncertainty_markers": {
+    "U": "uncertain",
+    "A": "assumption",
+    "R": "needs_review",
+    "K": "known_risk",
+    "D": "dependency_unclear"
+  }
+}
