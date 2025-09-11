@@ -22,6 +22,10 @@ import type {
 } from "./interfaces/ICache";
 import { CacheWarmingManager } from "./warming/CacheWarmingManager";
 import { AuthDataProvider } from "./warming/AuthDataProvider";
+import { MemoryCache } from "./strategies/MemoryCache";
+import { RedisCache } from "./strategies/RedisCache";
+import { inject, injectable, singleton } from "tsyringe";
+import type { RedisClient } from "../redis/redisClient";
 
 const DEFAULT_CACHE_CONFIG: CacheConfig = {
   enable: true,
@@ -40,6 +44,8 @@ const DEFAULT_CACHE_CONFIG: CacheConfig = {
 /**
  * High-performance caching service
  */
+@injectable()
+@singleton()
 export class CacheService implements ICache {
   private readonly config: CacheConfig;
   private readonly caches: ICache[];
@@ -56,9 +62,16 @@ export class CacheService implements ICache {
     compressions: 0,
   };
   private logger = createLogger("CacheService");
-  constructor(config: Partial<CacheConfig> = {}, caches: ICache[]) {
+  constructor(
+    @inject("RedisClient") private readonly redisClient: RedisClient,
+    config: Partial<CacheConfig> = {},
+    caches?: ICache[]
+  ) {
     this.config = { ...DEFAULT_CACHE_CONFIG, ...config };
-    this.caches = caches;
+    this.caches = caches || [
+      new MemoryCache(),
+      new RedisCache(this.redisClient),
+    ];
 
     // Initialize warming components
     this.dataProvider = new AuthDataProvider();

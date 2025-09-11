@@ -45,6 +45,14 @@ describe("ConnectionManager - Production Readiness Test", () => {
   let LRUCache: any;
 
   beforeAll(async () => {
+    // Setup createLogger mock
+    createLogger = jest.fn(() => ({
+      info: jest.fn(),
+      debug: jest.fn(),
+      error: jest.fn(),
+      warn: jest.fn(),
+    }));
+
     // Mock LRU Cache
     LRUCache = jest.fn().mockImplementation((options) => {
       const cache = new Map();
@@ -82,14 +90,7 @@ describe("ConnectionManager - Production Readiness Test", () => {
     };
 
     const mockObjectPool = {
-      acquire: jest.fn(() => ({
-        rooms: new Set(),
-        subscriptions: new Set(),
-        messageCount: 0,
-        bytesReceived: 0,
-        bytesSent: 0,
-        isAlive: false,
-      })),
+      acquire: jest.fn(() => new Set()), // Return actual Set for stringSet pool
       release: jest.fn(),
       clear: jest.fn(),
       getStats: jest.fn(() => ({
@@ -100,14 +101,18 @@ describe("ConnectionManager - Production Readiness Test", () => {
         totalReleases: 0,
         totalCreations: 0,
       })),
-    };
-
-    // Mock the module
+    }; // Mock the module
     jest.doMock("lru-cache", () => ({ LRUCache }));
     jest.doMock("@libs/utils", () => ({
       createLogger,
       Scheduler: jest.fn(() => mockScheduler),
       ObjectPool: jest.fn(() => mockObjectPool),
+      ObjectPoolFactories: {
+        stringSet: jest.fn(() => new Set()),
+      },
+      ObjectPoolResetters: {
+        set: jest.fn((set: Set<any>) => set.clear()),
+      },
       generateId: jest.fn(
         (prefix) => `${prefix}-${Date.now()}-${Math.random()}`
       ),

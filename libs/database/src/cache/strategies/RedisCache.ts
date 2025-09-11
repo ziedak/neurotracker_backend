@@ -18,8 +18,9 @@ import {
 import {
   type CompressionConfig,
   DEFAULT_COMPRESSION_CONFIG,
+  compress,
+  decompress,
 } from "../utils/CacheCompressor";
-import { compress, decompress } from "../utils/CacheCompressor";
 
 import { BaseCache } from "./BaseCache";
 import type { RedisClient } from "../../redis/redisClient";
@@ -41,13 +42,14 @@ export const DEFAULT_REDIS_CACHE_CONFIG: RedisCacheConfig = {
 /**
  * Redis-based cache implementation
  */
-export class RedisCache extends BaseCache<RedisCacheConfig> {
-  private readonly redisClient: RedisClient;
 
-  constructor(redisClient: RedisClient, config?: Partial<RedisCacheConfig>) {
+export class RedisCache extends BaseCache<RedisCacheConfig> {
+  constructor(
+    private readonly redisClient: RedisClient,
+    config?: Partial<RedisCacheConfig>
+  ) {
     const fullConfig = { ...DEFAULT_REDIS_CACHE_CONFIG, ...config };
     super(fullConfig);
-    this.redisClient = redisClient;
   }
 
   /**
