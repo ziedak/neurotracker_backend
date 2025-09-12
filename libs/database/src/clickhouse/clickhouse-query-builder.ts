@@ -66,16 +66,19 @@ export class ClickHouseQueryBuilder {
     table: string,
     options: {
       select?: string[] | undefined;
-      where?: Record<
-        string, string |
-        number |
-        boolean |
-        Date |
-        null |
-        { operator: string; value: any; }
-      > | undefined;
+      where?:
+        | Record<
+            string,
+            | string
+            | number
+            | boolean
+            | Date
+            | null
+            | { operator: string; value: any }
+          >
+        | undefined;
       groupBy?: string[] | undefined;
-      orderBy?: { field: string; direction: "ASC" | "DESC"; }[] | undefined;
+      orderBy?: { field: string; direction: "ASC" | "DESC" }[] | undefined;
       limit?: number | undefined;
       offset?: number | undefined;
       allowedTables?: readonly string[] | undefined;
@@ -165,23 +168,29 @@ export class ClickHouseQueryBuilder {
       alias?: string;
     }[],
     options: {
-      where?: Record<
-        string, string |
-        number |
-        boolean |
-        Date |
-        null |
-        { operator: string; value: any; }
-      > | undefined;
+      where?:
+        | Record<
+            string,
+            | string
+            | number
+            | boolean
+            | Date
+            | null
+            | { operator: string; value: any }
+          >
+        | undefined;
       groupBy?: string[] | undefined;
-      having?: Record<
-        string, string |
-        number |
-        boolean |
-        Date |
-        null |
-        { operator: string; value: any; }
-      > | undefined;
+      having?:
+        | Record<
+            string,
+            | string
+            | number
+            | boolean
+            | Date
+            | null
+            | { operator: string; value: any }
+          >
+        | undefined;
       allowedTables?: readonly string[] | undefined;
       allowedFields?: readonly string[] | undefined;
     } = {}
@@ -239,14 +248,17 @@ export class ClickHouseQueryBuilder {
     interval: "minute" | "hour" | "day" | "week" | "month",
     options: {
       select?: string[] | undefined;
-      where?: Record<
-        string, string |
-        number |
-        boolean |
-        Date |
-        null |
-        { operator: string; value: any; }
-      > | undefined;
+      where?:
+        | Record<
+            string,
+            | string
+            | number
+            | boolean
+            | Date
+            | null
+            | { operator: string; value: any }
+          >
+        | undefined;
       dateFrom?: string | Date | undefined;
       dateTo?: string | Date | undefined;
       allowedTables?: readonly string[] | undefined;
@@ -381,30 +393,42 @@ export class ClickHouseQueryBuilder {
   // === Private Helper Methods ===
 
   /**
-   * Build SELECT clause
+   * Build SELECT clause - optimized for performance
    */
   private static buildSelectClause(
     select: string[],
     allowedFields: readonly string[]
   ): string {
     if (select.includes("*")) return "*";
-    const validFields = select.filter((field) => {
+
+    const hasAllowedFields = allowedFields && allowedFields.length > 0;
+    const validFields: string[] = [];
+
+    for (const field of select) {
       try {
-        this.validateAllowed(field, allowedFields, "field");
-        return true;
+        if (hasAllowedFields) {
+          this.validateAllowed(field, allowedFields, "field");
+        } else if (!this.isValidIdentifier(field)) {
+          throw new Error(`Invalid field name: ${field}`);
+        }
+        validFields.push(field);
       } catch {
-        return false;
+        // Skip invalid fields silently for performance
+        continue;
       }
-    });
-    if (validFields.length === 0)
+    }
+
+    if (validFields.length === 0) {
       throw new Error(
         "[ClickHouseQueryBuilder] No valid fields specified in SELECT clause"
       );
+    }
+
     return validFields.map((field) => this.escapeIdentifier(field)).join(", ");
   }
 
   /**
-   * Build WHERE clause
+   * Build WHERE clause - optimized for performance
    */
   private static buildWhereClause(
     where: Record<
@@ -417,9 +441,12 @@ export class ClickHouseQueryBuilder {
     const params: Record<string, any> = {};
 
     for (const [key, value] of Object.entries(where)) {
-      if (!this.isValidIdentifier(key))
+      if (!this.isValidIdentifier(key)) {
         throw new Error(`[ClickHouseQueryBuilder] Invalid field name: ${key}`);
+      }
+
       const paramKey = `${paramPrefix}${key}`;
+
       if (Array.isArray(value)) {
         conditions.push(
           `${this.escapeIdentifier(key)} IN {${paramKey}:Array(String)}`
@@ -611,10 +638,13 @@ export class ClickHouseQueryBuilder {
   }
 
   /**
-   * Validate SQL identifier (table/field)
+   * Validate SQL identifier (table/field) - STRICT validation
+   * Only allows alphanumeric characters and underscores, must start with letter or underscore
    */
   private static isValidIdentifier(identifier: string): boolean {
-    return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(identifier);
+    return (
+      /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(identifier) && identifier.length <= 64
+    );
   }
 
   /**
@@ -629,7 +659,7 @@ export class ClickHouseQueryBuilder {
   }
 
   /**
-   * Validate SQL operator
+   * Validate SQL operator - STRICT whitelist
    */
   private static validateOperator(operator: string): string {
     const allowedOperators = [
@@ -642,19 +672,35 @@ export class ClickHouseQueryBuilder {
       "<=",
       "LIKE",
       "NOT LIKE",
+      "ILIKE",
+      "NOT ILIKE",
       "IN",
       "NOT IN",
+      "IS",
+      "IS NOT",
     ] as const;
-    if (!allowedOperators.includes(operator.toUpperCase() as any))
-      throw new Error(`[ClickHouseQueryBuilder] Invalid operator: ${operator}`);
-    return operator;
+
+    const upperOperator = operator.toUpperCase();
+    if (!allowedOperators.includes(upperOperator as any)) {
+      throw new Error(
+        `[ClickHouseQueryBuilder] Invalid operator: ${operator}. Allowed: ${allowedOperators.join(
+          ", "
+        )}`
+      );
+    }
+    return upperOperator;
   }
 
   /**
-   * Sanitize value for SQL query
+   * Sanitize value for SQL query - STRICT validation to prevent injection
+   * Only allows primitive types and simple arrays
    */
-  private static sanitizeValue(value: any): any {
+  private static sanitizeValue(
+    value: any
+  ): string | number | boolean | null | (string | number | boolean | null)[] {
     if (value === null || value === undefined) return null;
+
+    // Only allow primitive types
     if (typeof value === "string") {
       // Remove dangerous patterns, enforce max length, strip control chars
       let sanitized = value.replace(/[\0\b\n\r\t\Z]/g, "");
@@ -662,27 +708,45 @@ export class ClickHouseQueryBuilder {
       if (sanitized.length > 1024) sanitized = sanitized.slice(0, 1024);
       return sanitized;
     }
-    if (typeof value === "number") return isNaN(value) ? 0 : value;
-    if (value instanceof Date) return value.toISOString();
-    if (Array.isArray(value)) return value.map((v) => this.sanitizeValue(v));
-    if (typeof value === "object") {
-      // Only allow plain objects, no functions/classes
-      return JSON.parse(JSON.stringify(value));
+
+    if (typeof value === "number") {
+      if (isNaN(value) || !isFinite(value)) return 0;
+      return value;
     }
-    return value;
-    /**
-     * Build a secure SELECT query for ClickHouse.
-     * @param table - Table name (must be in allowedTables if provided)
-     * @param options - Query options (select, where, groupBy, orderBy, limit, offset, allowedTables, allowedFields)
-     * @returns { query, params } - Parameterized query and parameters object
-     * @throws Error if table or fields are invalid
-     * @example
-     * const { query, params } = ClickHouseQueryBuilder.buildSelectQuery('events', {
-     *   select: ['id', 'timestamp'],
-     *   where: { status: 'active' },
-     *   allowedTables: ['events'],
-     *   allowedFields: ['id', 'timestamp', 'status']
-     * });
-     */
+
+    if (typeof value === "boolean") return value;
+
+    if (value instanceof Date) return value.toISOString();
+
+    // Reject objects and complex types that could contain malicious code
+    if (typeof value === "object") {
+      throw new Error(
+        "[ClickHouseQueryBuilder] Objects and complex types not allowed in queries"
+      );
+    }
+
+    if (Array.isArray(value)) {
+      // Only allow arrays of primitives
+      const sanitizedArray: (string | number | boolean | null)[] = [];
+      for (const v of value) {
+        if (typeof v === "string") {
+          sanitizedArray.push(this.sanitizeValue(v) as string);
+        } else if (typeof v === "number") {
+          sanitizedArray.push(this.sanitizeValue(v) as number);
+        } else if (typeof v === "boolean") {
+          sanitizedArray.push(v);
+        } else if (v === null) {
+          sanitizedArray.push(null);
+        } else {
+          throw new Error(
+            "[ClickHouseQueryBuilder] Arrays can only contain primitives"
+          );
+        }
+      }
+      return sanitizedArray;
+    }
+
+    // Convert everything else to string as last resort
+    return String(value).slice(0, 100);
   }
 }

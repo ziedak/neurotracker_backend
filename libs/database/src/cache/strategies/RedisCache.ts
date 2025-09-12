@@ -220,4 +220,16 @@ export class RedisCache extends BaseCache<RedisCacheConfig> {
 
     return invalidatedCount;
   }
+
+  /**
+   * Dispose of Redis cache resources
+   */
+  async dispose(): Promise<void> {
+    try {
+      // Redis client is managed externally, just log disposal
+      this.logger.info("RedisCache disposed successfully");
+    } catch (error) {
+      this.logger.error("Error during RedisCache disposal", error as Error);
+    }
+  }
 }

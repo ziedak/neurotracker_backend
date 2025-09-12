@@ -316,4 +316,21 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
 
     return invalidatedCount;
   }
+
+  /**
+   * Dispose of memory cache resources
+   */
+  async dispose(): Promise<void> {
+    try {
+      // Clear all entries
+      this.memoryCache.clear();
+
+      // Clear memory tracker
+      this.memoryTracker.clear();
+
+      this.logger.info("MemoryCache disposed successfully");
+    } catch (error) {
+      this.logger.error("Error during MemoryCache disposal", error as Error);
+    }
+  }
 }

@@ -125,6 +125,10 @@ export class ClickHouseError extends Error {
 export class ClickHouseClient implements IClickHouseClient {
   private readonly client: CHClient;
   private isConnected = false;
+  private connectionLock = false; // Prevent concurrent connection operations
+  private cachedVersion?: string;
+  private versionCacheTime = 0;
+  private readonly versionCacheTTL = 300000; // 5 minutes
   private readonly config: IClickHouseConfig;
   private readonly resilienceConfig: ClickHouseResilienceConfig;
   private readonly queryCache: ClickHouseQueryCacheConfig;
@@ -136,7 +140,7 @@ export class ClickHouseClient implements IClickHouseClient {
   private readonly cacheService?: ICache;
   private readonly logger = createLogger("ClickHouseClient");
   constructor(
-    private readonly injectedCacheService?: ICache,
+    cacheService?: ICache,
     private readonly metricsCollector?: IMetricsCollector
   ) {
     this.config = this.createConfigFromEnv();
@@ -145,7 +149,9 @@ export class ClickHouseClient implements IClickHouseClient {
     this.client = createClient(this.config);
 
     // Use injected cache service
-    this.cacheService = injectedCacheService;
+    if (cacheService) {
+      this.cacheService = cacheService;
+    }
 
     this.logger.info("ClickHouse client initialized", {
       url: this.config.url,
@@ -156,7 +162,10 @@ export class ClickHouseClient implements IClickHouseClient {
     });
   }
 
-  static create(cacheService?: ICache, metricsCollector?: IMetricsCollector): ClickHouseClient {
+  static create(
+    cacheService?: ICache,
+    metricsCollector?: IMetricsCollector
+  ): ClickHouseClient {
     return new ClickHouseClient(cacheService, metricsCollector);
   }
   /**
@@ -242,15 +251,22 @@ export class ClickHouseClient implements IClickHouseClient {
     );
   }
 
-  /**
-   * Execute operations with resilience (retry + circuit breaker).
-   * Uses cockatiel for battle-tested resilience patterns.
-   */
-
   async disconnect(): Promise<void> {
-    if (this.isConnected) {
-      await this.client.close();
-      this.isConnected = false;
+    if (this.connectionLock) {
+      this.logger.warn("Connection operation already in progress");
+      return;
+    }
+
+    this.connectionLock = true;
+    try {
+      if (this.isConnected) {
+        await this.client.close();
+        this.isConnected = false;
+        delete this.cachedVersion;
+        this.versionCacheTime = 0;
+      }
+    } finally {
+      this.connectionLock = false;
     }
   }
 
@@ -283,14 +299,40 @@ export class ClickHouseClient implements IClickHouseClient {
       );
 
       if (pingResult.success) {
-        const versionResult = await this.client.query({
-          query: "SELECT version() as version",
-          format: "JSONEachRow",
-        });
-        const versionData: { version: string }[] = await versionResult.json<{
-          version: string;
-        }>();
-        const version = versionData[0]?.version;
+        // Use cached version if available and not expired
+        let version: string | undefined;
+        const now = Date.now();
+
+        if (
+          this.cachedVersion &&
+          now - this.versionCacheTime < this.versionCacheTTL
+        ) {
+          version = this.cachedVersion;
+          await this.metricsCollector?.recordCounter(
+            "clickhouse.version.cache_hit",
+            1
+          );
+        } else {
+          // Fetch version from database
+          const versionResult = await this.client.query({
+            query: "SELECT version() as version",
+            format: "JSONEachRow",
+          });
+          const versionData: { version: string }[] = await versionResult.json<{
+            version: string;
+          }>();
+          version = versionData[0]?.version;
+
+          // Cache the version
+          if (typeof version === "string") {
+            this.cachedVersion = version;
+            this.versionCacheTime = now;
+            await this.metricsCollector?.recordCounter(
+              "clickhouse.version.cache_miss",
+              1
+            );
+          }
+        }
 
         await this.metricsCollector?.recordCounter(
           "clickhouse.healthcheck.success",
@@ -299,7 +341,7 @@ export class ClickHouseClient implements IClickHouseClient {
         return {
           status: HealthStatus.HEALTHY,
           latency,
-          version: typeof version === "string" ? version : undefined,
+          version,
         };
       }
 
@@ -450,15 +492,24 @@ export class ClickHouseClient implements IClickHouseClient {
    * Useful for cache invalidation after data modifications.
    */
   async invalidateCache(pattern?: string): Promise<void> {
+    if (!this.cacheService) {
+      this.logger.warn("Cache service not available for invalidation");
+      return;
+    }
+
     try {
       const searchPattern = pattern || `${this.queryCache.cacheKeyPrefix}*`;
-      // TODO: Re-implement caching with proper DI
-      // await this.cacheService.invalidatePattern(searchPattern);
+      const invalidatedCount = await this.cacheService.invalidatePattern(
+        searchPattern
+      );
       await this.metricsCollector?.recordCounter(
         "clickhouse.cache.invalidated",
-        1
+        invalidatedCount
       );
-      this.logger.info("Cache invalidated", { pattern: searchPattern });
+      this.logger.info("Cache invalidated", {
+        pattern: searchPattern,
+        invalidatedCount,
+      });
     } catch (error) {
       await this.metricsCollector?.recordCounter(
         "clickhouse.cache.invalidation_error",

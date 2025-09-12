@@ -15,9 +15,12 @@ export interface RedisConfig extends Partial<RedisOptions> {
 export class RedisClient {
   private redis: Redis;
   private isConnected = false;
+  private connectionLock = false; // Prevent concurrent connection operations
+  private eventHandlersAttached = false;
   private retryCount = 0;
   private maxRetries = 3;
   private reconnectDelay = 1000;
+  private reconnectTimeout?: NodeJS.Timeout;
   private readonly logger = createLogger("RedisClient");
 
   constructor(
@@ -64,91 +67,165 @@ export class RedisClient {
   }
 
   private setupEventHandlers() {
+    if (this.eventHandlersAttached) {
+      return; // Prevent duplicate event handler attachment
+    }
+
     this.redis.on("connect", () => {
       this.logger.info("Redis connected");
       this.isConnected = true;
       this.retryCount = 0;
       this.metrics?.recordCounter("redis_connection_success");
     });
+
     this.redis.on("ready", () => {
       this.logger.info("Redis ready to accept commands");
       this.metrics?.recordCounter("redis_ready");
     });
+
     this.redis.on("error", (error) => {
       this.logger.error("Redis error", error);
       this.isConnected = false;
       this.metrics?.recordCounter("redis_connection_error");
     });
+
     this.redis.on("close", () => {
       this.logger.info("Redis connection closed");
       this.isConnected = false;
       this.metrics?.recordCounter("redis_connection_closed");
       this.scheduleReconnect();
     });
+
     this.redis.on("reconnecting", () => {
       this.logger.info("Redis reconnecting...");
       this.metrics?.recordCounter("redis_reconnecting");
     });
+
     this.redis.on("end", () => {
       this.logger.warn("Redis connection ended");
       this.isConnected = false;
       this.metrics?.recordCounter("redis_connection_ended");
     });
+
+    this.eventHandlersAttached = true;
   }
 
   /**
    * Schedule reconnection with exponential backoff
    */
   private scheduleReconnect(): void {
+    // Clear any existing timeout
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      delete this.reconnectTimeout;
+    }
+
     if (this.retryCount >= this.maxRetries) {
       this.logger.error(
         `Max reconnection attempts (${this.maxRetries}) reached`
       );
       return;
     }
-    const delay = this.reconnectDelay * Math.pow(2, this.retryCount);
+
+    const delay = Math.min(
+      this.reconnectDelay * Math.pow(2, this.retryCount),
+      30000
+    ); // Cap at 30 seconds
     this.retryCount++;
     this.logger.info(
       `Scheduling Redis reconnection in ${delay}ms (attempt ${this.retryCount})`
     );
-    setTimeout(async () => {
+
+    this.reconnectTimeout = setTimeout(async () => {
       try {
         await this.connect();
       } catch (error) {
         this.logger.error("Scheduled reconnection failed", error);
+      } finally {
+        delete this.reconnectTimeout;
       }
     }, delay);
   }
 
   async connect(): Promise<void> {
+    if (this.connectionLock) {
+      this.logger.debug("Connection operation already in progress, waiting...");
+      return;
+    }
+
     if (
       this.isConnected ||
       (this.redis && this.redis.status === "connecting")
     ) {
       return;
     }
+
+    this.connectionLock = true;
     try {
       await this.redis.connect();
     } catch (error) {
       this.logger.error("Redis connect() failed", error);
       throw error;
+    } finally {
+      this.connectionLock = false;
     }
   }
 
   async disconnect(): Promise<void> {
-    if (this.redis && this.isConnected) {
-      try {
+    if (this.connectionLock) {
+      this.logger.debug("Connection operation already in progress");
+      return;
+    }
+
+    this.connectionLock = true;
+    try {
+      // Clear any pending reconnection
+      if (this.reconnectTimeout) {
+        clearTimeout(this.reconnectTimeout);
+        delete this.reconnectTimeout;
+      }
+
+      if (this.redis && this.isConnected) {
         await this.redis.quit();
         this.isConnected = false;
         this.logger.info("Redis disconnected");
-      } catch (error) {
-        this.logger.error("Redis disconnect() failed", error);
       }
+    } catch (error) {
+      this.logger.error("Redis disconnect() failed", error);
+    } finally {
+      this.connectionLock = false;
     }
   }
 
-  exists(...args: RedisKey[]): Promise<number> {
-    return this.redis.exists(...args);
+  async exists(...args: RedisKey[]): Promise<number> {
+    if (!args.length) {
+      this.logger.warn("No keys provided to exists");
+      return 0;
+    }
+
+    // Validate key count to prevent abuse
+    if (args.length > 100) {
+      this.logger.warn("Too many keys provided to exists", {
+        keyCount: args.length,
+      });
+      return 0;
+    }
+
+    try {
+      return await executeRedisWithRetry(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.exists(...args)),
+        (error) => this.logger.warn("Exists operation failed", error),
+        {
+          operationName: "redis_exists",
+          enableCircuitBreaker: true,
+          enableMetrics: true,
+        }
+      );
+    } catch (error) {
+      this.logger.warn("Exists operation failed", error);
+      return 0;
+    }
   }
   async ping(): Promise<boolean> {
     try {
@@ -161,6 +238,37 @@ export class RedisClient {
   }
 
   async safeSetEx(key: string, ttl: number, value: string): Promise<boolean> {
+    if (!key || typeof key !== "string") {
+      this.logger.warn("Invalid key provided to safeSetEx", { key });
+      return false;
+    }
+
+    if (typeof value !== "string") {
+      this.logger.warn("Invalid value provided to safeSetEx", {
+        valueType: typeof value,
+      });
+      return false;
+    }
+
+    if (!Number.isInteger(ttl) || ttl < 0 || ttl > 365 * 24 * 60 * 60) {
+      this.logger.warn("Invalid TTL provided to safeSetEx", { ttl });
+      return false;
+    }
+
+    // Basic validation
+    if (key.length > 512) {
+      this.logger.warn("Key too long for safeSetEx", { keyLength: key.length });
+      return false;
+    }
+
+    if (value.length > 1024 * 1024) {
+      // 1MB limit
+      this.logger.warn("Value too large for safeSetEx", {
+        valueLength: value.length,
+      });
+      return false;
+    }
+
     try {
       await executeRedisWithRetry(
         this.redis,
@@ -169,7 +277,7 @@ export class RedisClient {
         {
           operationName: "redis_setex",
           maxRetries: 3,
-          enableCircuitBreaker: true, // Enable for command-level protection
+          enableCircuitBreaker: true,
           enableMetrics: true,
         }
       );
@@ -181,6 +289,27 @@ export class RedisClient {
   }
 
   async safeKeys(pattern: string): Promise<string[]> {
+    if (!pattern || typeof pattern !== "string") {
+      this.logger.warn("Invalid pattern provided to safeKeys", { pattern });
+      return [];
+    }
+
+    // Prevent dangerous patterns that could scan all keys
+    if (pattern === "*" || pattern === "*:*" || pattern.length < 2) {
+      this.logger.warn("Dangerous pattern provided to safeKeys, blocking", {
+        pattern,
+      });
+      return [];
+    }
+
+    // Limit pattern length
+    if (pattern.length > 256) {
+      this.logger.warn("Pattern too long for safeKeys", {
+        patternLength: pattern.length,
+      });
+      return [];
+    }
+
     try {
       return await executeRedisWithRetry(
         this.redis,
@@ -189,7 +318,7 @@ export class RedisClient {
           this.logger.warn(`Safe keys failed for pattern ${pattern}`, error),
         {
           operationName: "redis_keys",
-          enableCircuitBreaker: true, // Enable for command-level protection
+          enableCircuitBreaker: true,
           enableMetrics: true,
         }
       );
@@ -200,6 +329,27 @@ export class RedisClient {
   }
 
   async safeDel(...args: RedisKey[]): Promise<number> {
+    if (!args.length) {
+      this.logger.warn("No keys provided to safeDel");
+      return 0;
+    }
+
+    // Validate key count to prevent abuse
+    if (args.length > 1000) {
+      this.logger.warn("Too many keys provided to safeDel", {
+        keyCount: args.length,
+      });
+      return 0;
+    }
+
+    // Validate each key
+    for (const key of args) {
+      if (!key || typeof key !== "string" || key.length > 512) {
+        this.logger.warn("Invalid key provided to safeDel", { key });
+        return 0;
+      }
+    }
+
     return executeRedisWithRetry(
       this.redis,
       (redis: Redis) => Promise.resolve(redis.del(...args)),
@@ -207,7 +357,7 @@ export class RedisClient {
         this.logger.warn(`Safe del failed for keys ${args.join(", ")}`, error),
       {
         operationName: "redis_del",
-        enableCircuitBreaker: true, // Enable for command-level protection
+        enableCircuitBreaker: true,
         enableMetrics: true,
       }
     );
@@ -218,6 +368,27 @@ export class RedisClient {
   }
 
   async safeMget(...args: RedisKey[]): Promise<(string | null)[]> {
+    if (!args.length) {
+      this.logger.warn("No keys provided to safeMget");
+      return [];
+    }
+
+    // Validate key count to prevent abuse
+    if (args.length > 1000) {
+      this.logger.warn("Too many keys provided to safeMget", {
+        keyCount: args.length,
+      });
+      return new Array(args.length).fill(null);
+    }
+
+    // Validate each key
+    for (const key of args) {
+      if (!key || typeof key !== "string" || key.length > 512) {
+        this.logger.warn("Invalid key provided to safeMget", { key });
+        return new Array(args.length).fill(null);
+      }
+    }
+
     try {
       return await executeRedisWithRetry(
         this.redis,
@@ -229,7 +400,7 @@ export class RedisClient {
           ),
         {
           operationName: "redis_mget",
-          enableCircuitBreaker: true, // Enable for command-level protection
+          enableCircuitBreaker: true,
           enableMetrics: true,
         }
       );
@@ -240,13 +411,22 @@ export class RedisClient {
   }
 
   /**
-   * Safe get operation with fallback
+   * Safe get operation with fallback and input validation
    */
   async safeGet(
     key: string,
     defaultValue: string | null = null
   ): Promise<string | null> {
-    if (!key) return defaultValue;
+    if (!key || typeof key !== "string") {
+      this.logger.warn("Invalid key provided to safeGet", { key });
+      return defaultValue;
+    }
+
+    // Basic key validation - prevent extremely long keys
+    if (key.length > 512) {
+      this.logger.warn("Key too long for safeGet", { keyLength: key.length });
+      return defaultValue;
+    }
 
     try {
       const result = await executeRedisWithRetry(
@@ -255,7 +435,7 @@ export class RedisClient {
         (error) => this.logger.warn(`Safe get failed for key ${key}`, error),
         {
           operationName: "redis_get",
-          enableCircuitBreaker: true, // Enable for command-level protection
+          enableCircuitBreaker: true,
           enableMetrics: true,
         }
       );
@@ -267,13 +447,48 @@ export class RedisClient {
   }
 
   /**
-   * Safe set operation with fallback
+   * Safe set operation with fallback and input validation
    */
   async safeSet(
     key: string,
     value: string,
     ttlSeconds?: number
   ): Promise<boolean> {
+    if (!key || typeof key !== "string") {
+      this.logger.warn("Invalid key provided to safeSet", { key });
+      return false;
+    }
+
+    if (typeof value !== "string") {
+      this.logger.warn("Invalid value provided to safeSet", {
+        valueType: typeof value,
+      });
+      return false;
+    }
+
+    // Basic validation
+    if (key.length > 512) {
+      this.logger.warn("Key too long for safeSet", { keyLength: key.length });
+      return false;
+    }
+
+    if (value.length > 1024 * 1024) {
+      // 1MB limit
+      this.logger.warn("Value too large for safeSet", {
+        valueLength: value.length,
+      });
+      return false;
+    }
+
+    if (
+      ttlSeconds !== undefined &&
+      (ttlSeconds < 0 || ttlSeconds > 365 * 24 * 60 * 60)
+    ) {
+      // Max 1 year
+      this.logger.warn("Invalid TTL provided to safeSet", { ttlSeconds });
+      return false;
+    }
+
     try {
       await executeRedisWithRetry(
         this.redis,
@@ -287,7 +502,7 @@ export class RedisClient {
         (error) => this.logger.warn(`Safe set failed for key ${key}`, error),
         {
           operationName: "redis_set",
-          enableCircuitBreaker: true, // Enable for command-level protection
+          enableCircuitBreaker: true,
           enableMetrics: true,
         }
       );
@@ -410,9 +625,37 @@ export class RedisClient {
   }
 
   /**
-   * Publish a message to a Redis channel
+   * Publish a message to a Redis channel with validation
    */
   async safePublish(channel: string, message: string): Promise<number> {
+    if (!channel || typeof channel !== "string") {
+      this.logger.warn("Invalid channel provided to safePublish", { channel });
+      return 0;
+    }
+
+    if (typeof message !== "string") {
+      this.logger.warn("Invalid message provided to safePublish", {
+        messageType: typeof message,
+      });
+      return 0;
+    }
+
+    // Basic validation
+    if (channel.length > 256) {
+      this.logger.warn("Channel name too long for safePublish", {
+        channelLength: channel.length,
+      });
+      return 0;
+    }
+
+    if (message.length > 1024 * 1024) {
+      // 1MB limit
+      this.logger.warn("Message too large for safePublish", {
+        messageLength: message.length,
+      });
+      return 0;
+    }
+
     try {
       const result = await executeRedisWithRetry(
         this.redis,
@@ -454,10 +697,22 @@ export class RedisClient {
   }
 
   /**
-   * Force reconnection
+   * Force reconnection with thread safety
    */
   async forceReconnect(): Promise<void> {
+    if (this.connectionLock) {
+      this.logger.debug("Connection operation already in progress");
+      return;
+    }
+
+    this.connectionLock = true;
     try {
+      // Clear any pending reconnection
+      if (this.reconnectTimeout) {
+        clearTimeout(this.reconnectTimeout);
+        delete this.reconnectTimeout;
+      }
+
       if (this.redis) {
         this.redis.disconnect();
       }
@@ -466,6 +721,8 @@ export class RedisClient {
     } catch (error) {
       this.logger.error("Force reconnection failed", error);
       throw error;
+    } finally {
+      this.connectionLock = false;
     }
   }
 }

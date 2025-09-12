@@ -94,30 +94,61 @@ export class CacheService implements ICache {
     return new CacheService(metrics, caches, config);
   }
   /**
-   * Get data from cache with multi-level fallback
+   * Get data from cache with multi-level fallback and input validation
    */
   async get<T>(key: string): Promise<CacheOperationResult<T>> {
     const startTime = performance.now();
     this.stats.totalRequests++;
 
+    // Input validation
+    if (!key || typeof key !== "string") {
+      this.logger.warn("Invalid cache key provided to get", { key });
+      return {
+        data: null,
+        source: "miss",
+        latency: performance.now() - startTime,
+        compressed: false,
+      };
+    }
+
+    // Basic key validation - prevent extremely long keys
+    if (key.length > 512) {
+      this.logger.warn("Cache key too long", { keyLength: key.length });
+      return {
+        data: null,
+        source: "miss",
+        latency: performance.now() - startTime,
+        compressed: false,
+      };
+    }
+
     for (let idx = 0; idx < this.caches.length; idx++) {
       const cache = this.caches[idx];
       if (!cache || !cache.isEnabled()) continue;
-      const result = await cache.get<T>(key);
-      if (result) {
-        this.updateHitRate();
 
-        // Record access pattern for adaptive learning
-        if (this.config.warmingConfig?.enablePatternLearning) {
-          this.warmingManager.recordAccess(key, result.latency);
+      try {
+        const result = await cache.get<T>(key);
+        if (result && result.data !== null) {
+          this.updateHitRate();
+
+          // Record access pattern for adaptive learning
+          if (this.config.warmingConfig?.enablePatternLearning) {
+            this.warmingManager.recordAccess(key, result.latency);
+          }
+
+          return {
+            data: result.data,
+            source: `l${idx + 1}`,
+            latency: performance.now() - startTime,
+            compressed: result.compressed,
+          };
         }
-
-        return {
-          data: result.data,
-          source: `l${idx + 1}`,
-          latency: performance.now() - startTime,
-          compressed: result.compressed,
-        };
+      } catch (error) {
+        this.logger.error(`Cache get failed for level ${idx + 1}`, {
+          key,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Continue to next cache level on error
       }
     }
 
@@ -139,10 +170,43 @@ export class CacheService implements ICache {
     data: T,
     ttl: number = this.config.defaultTTL
   ): Promise<void> {
+    // Input validation
+    if (!key || typeof key !== "string") {
+      this.logger.warn("Invalid cache key provided to set", { key });
+      return;
+    }
+
+    if (key.length > 512) {
+      this.logger.warn("Cache key too long", { keyLength: key.length });
+      return;
+    }
+
+    // Validate TTL
+    if (ttl < 0 || ttl > 365 * 24 * 60 * 60) {
+      // Max 1 year
+      this.logger.warn("Invalid TTL provided to set", { ttl });
+      ttl = this.config.defaultTTL;
+    }
+
+    // Basic data validation - prevent storing undefined/null as data
+    if (data === undefined) {
+      this.logger.warn("Attempted to cache undefined data", { key });
+      return;
+    }
+
     for (let idx = 0; idx < this.caches.length; idx++) {
       const cache = this.caches[idx];
       if (!cache || !cache.isEnabled()) continue;
-      cache.set<T>(key, data, ttl);
+
+      try {
+        await cache.set<T>(key, data, ttl);
+      } catch (error) {
+        this.logger.error(`Cache set failed for level ${idx + 1}`, {
+          key,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Continue to next cache level even if one fails
+      }
     }
   }
 
@@ -150,13 +214,34 @@ export class CacheService implements ICache {
    * Invalidate cache entry at all levels
    */
   async invalidate(key: string): Promise<void> {
+    // Input validation
+    if (!key || typeof key !== "string") {
+      this.logger.warn("Invalid cache key provided to invalidate", { key });
+      return;
+    }
+
+    if (key.length > 512) {
+      this.logger.warn("Cache key too long for invalidation", {
+        keyLength: key.length,
+      });
+      return;
+    }
+
     this.stats.invalidations++;
 
     for (let idx = 0; idx < this.caches.length; idx++) {
       const cache = this.caches[idx];
       if (!cache || !cache.isEnabled()) continue;
 
-      cache.invalidate(key);
+      try {
+        await cache.invalidate(key);
+      } catch (error) {
+        this.logger.error(`Cache invalidate failed for level ${idx + 1}`, {
+          key,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Continue to next cache level even if one fails
+      }
     }
 
     this.logger.debug("Cache entry invalidated", { key });
@@ -166,13 +251,50 @@ export class CacheService implements ICache {
    * Batch invalidation for performance
    */
   async invalidatePattern(pattern: string): Promise<number> {
+    // Input validation
+    if (!pattern || typeof pattern !== "string") {
+      this.logger.warn("Invalid pattern provided to invalidatePattern", {
+        pattern,
+      });
+      return 0;
+    }
+
+    // Prevent dangerous patterns that could invalidate everything
+    if (pattern === "*" || pattern === "*:*" || pattern.length < 2) {
+      this.logger.warn(
+        "Dangerous pattern provided to invalidatePattern, blocking",
+        { pattern }
+      );
+      return 0;
+    }
+
+    // Limit pattern length
+    if (pattern.length > 256) {
+      this.logger.warn("Pattern too long for invalidatePattern", {
+        patternLength: pattern.length,
+      });
+      return 0;
+    }
+
     let invalidatedCount = 0;
 
     for (let idx = 0; idx < this.caches.length; idx++) {
       const cache = this.caches[idx];
       if (!cache || !cache.isEnabled()) continue;
 
-      invalidatedCount += await cache.invalidatePattern(pattern);
+      try {
+        const count = await cache.invalidatePattern(pattern);
+        invalidatedCount += count;
+      } catch (error) {
+        this.logger.error(
+          `Cache invalidatePattern failed for level ${idx + 1}`,
+          {
+            pattern,
+            error: error instanceof Error ? error.message : String(error),
+          }
+        );
+        // Continue to next cache level even if one fails
+      }
     }
 
     this.stats.invalidations += invalidatedCount;
@@ -314,5 +436,26 @@ export class CacheService implements ICache {
    */
   getRecommendedKeys(): Map<string, string[]> {
     return this.warmingManager.getRecommendedKeys();
+  }
+
+  /**
+   * Dispose of cache resources and cleanup
+   */
+  async dispose(): Promise<void> {
+    try {
+      // Stop background warming
+      this.stopBackgroundWarming();
+
+      // Clear all cache levels
+      for (const cache of this.caches) {
+        if (cache && typeof cache.dispose === "function") {
+          await cache.dispose();
+        }
+      }
+
+      this.logger.info("CacheService disposed successfully");
+    } catch (error) {
+      this.logger.error("Error during CacheService disposal", error as Error);
+    }
   }
 }

@@ -98,4 +98,5 @@ export interface ICache {
   invalidatePattern(pattern: string): Promise<number>;
   getStats(): CacheStats;
   healthCheck(): Promise<CacheHealth>;
+  dispose?(): Promise<void>; // Optional cleanup method
 }

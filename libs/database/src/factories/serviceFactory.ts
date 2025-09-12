@@ -1,6 +1,7 @@
 import { RedisClient, type RedisConfig } from "../redis/redisClient";
 import { ClickHouseClient } from "../clickhouse/clickhouseClient";
 import { type IMetricsCollector } from "@libs/monitoring";
+import { ICache } from "../cache";
 
 /**
  * Service Factory for creating database clients with clean interfaces.
@@ -20,7 +21,10 @@ export class DatabaseFactory {
   /**
    * Create ClickHouse client instance.
    */
-  static createClickHouse(metrics?: IMetricsCollector): ClickHouseClient {
-    return ClickHouseClient.create(metrics);
+  static createClickHouse(
+    cacheService?: ICache,
+    metrics?: IMetricsCollector
+  ): ClickHouseClient {
+    return ClickHouseClient.create(cacheService, metrics);
   }
 }
