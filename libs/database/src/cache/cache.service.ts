@@ -22,10 +22,10 @@ import type {
 } from "./interfaces/ICache";
 import { CacheWarmingManager } from "./warming/CacheWarmingManager";
 import { AuthDataProvider } from "./warming/AuthDataProvider";
+import { RedisClient } from "../redis/redisClient";
 import { MemoryCache } from "./strategies/MemoryCache";
 import { RedisCache } from "./strategies/RedisCache";
-import { inject, injectable, singleton } from "tsyringe";
-import type { RedisClient } from "../redis/redisClient";
+import type { IMetricsCollector } from "@libs/monitoring";
 
 const DEFAULT_CACHE_CONFIG: CacheConfig = {
   enable: true,
@@ -44,8 +44,6 @@ const DEFAULT_CACHE_CONFIG: CacheConfig = {
 /**
  * High-performance caching service
  */
-@injectable()
-@singleton()
 export class CacheService implements ICache {
   private readonly config: CacheConfig;
   private readonly caches: ICache[];
@@ -63,14 +61,15 @@ export class CacheService implements ICache {
   };
   private logger = createLogger("CacheService");
   constructor(
-    @inject("RedisClient") private readonly redisClient: RedisClient,
-    config: Partial<CacheConfig> = {},
-    caches?: ICache[]
+    metrics?: IMetricsCollector,
+    caches?: ICache[],
+    config: Partial<CacheConfig> = {}
   ) {
     this.config = { ...DEFAULT_CACHE_CONFIG, ...config };
     this.caches = caches || [
       new MemoryCache(),
-      new RedisCache(this.redisClient),
+      // Only create RedisCache if we have metrics (to avoid circular dependency)
+      ...(metrics ? [new RedisCache(RedisClient.create({}, metrics))] : []),
     ];
 
     // Initialize warming components
@@ -87,6 +86,13 @@ export class CacheService implements ICache {
     }
   }
 
+  static create(
+    metrics?: IMetricsCollector,
+    caches?: ICache[],
+    config: Partial<CacheConfig> = {}
+  ): CacheService {
+    return new CacheService(metrics, caches, config);
+  }
   /**
    * Get data from cache with multi-level fallback
    */

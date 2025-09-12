@@ -1,10 +1,11 @@
 /**
- * Phase 2: Connection Pool Management Service
- * Advanced connection lifecycle and pool optimization
+ * Phase 2: PostgreSQL Connection Manager
+ * Advanced connection lifecycle and monitoring with circuit breaker
  */
 
 import { PrismaClient } from "@prisma/client";
 import { PostgreSQLClient } from "./PostgreSQLClient";
+import { PostgreSQLConnectionPool } from "./PostgreSQLConnectionPool";
 
 import {
   AppError,
@@ -20,8 +21,8 @@ import {
   ConnectionPoolConfigSchema,
 } from "./config/connectionPoolConfig";
 
-export interface IConnectionPoolManager {
-  initializePool(): Promise<void>;
+export interface IConnectionManager {
+  initialize(): Promise<void>;
   getConnectionSqlRaw(): Promise<{
     execute: <T>(query: string, params?: any[]) => Promise<T[]>;
     release: () => void;
@@ -43,13 +44,12 @@ export interface IConnectionPoolManager {
 }
 
 /**
- * Advanced connection pool management service
+ * Advanced PostgreSQL connection manager with real connection pooling and monitoring
  */
-export class ConnectionPoolManager implements IConnectionPoolManager {
+export class PostgreSQLConnectionManager implements IConnectionManager {
   private readonly config: ConnectionPoolConfig;
-  private readonly logger = createLogger("ConnectionPoolManager");
-
-  private readonly postgresClient: PostgreSQLClient;
+  private readonly logger = createLogger("PostgreSQLConnectionManager");
+  private readonly realPool: PostgreSQLConnectionPool;
 
   private stats: ConnectionPoolStats = {
     activeConnections: 0,
@@ -66,8 +66,6 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
   };
 
   private circuitBreakerEnabled: boolean;
-  private readonly connectionTimings: number[] = Array(100).fill(0);
-  private connectionTimingIndex = 0;
   private readonly queryTimings: number[] = Array(100).fill(0);
   private queryTimingIndex = 0;
   private scheduler: IScheduler;
@@ -87,9 +85,20 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
     }
     this.config = parsedConfig.data;
 
-    this.postgresClient = postgresClient;
-    this.scheduler = new Scheduler();
-    // Store circuit breaker configuration
+    // Create real connection pool instead of virtual pooling
+    this.realPool = PostgreSQLConnectionPool.fromPostgreSQLClient(
+      postgresClient,
+      {
+        enableCircuitBreaker: this.config.enableCircuitBreaker,
+        circuitBreakerThreshold: this.config.circuitBreakerThreshold,
+        max: this.config.maxConnections,
+        min: this.config.minConnections,
+        idleTimeoutMillis: this.config.idleTimeout,
+        connectionTimeoutMillis: this.config.connectionTimeout,
+      }
+    );
+
+    this.scheduler = Scheduler.create();
     this.circuitBreakerEnabled = this.config.enableCircuitBreaker || false;
 
     this.initializeStats();
@@ -98,10 +107,17 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
     this.startIdleConnectionCleanup();
   }
 
+  static create(
+    postgresClient: PostgreSQLClient,
+    config: Partial<ConnectionPoolConfig> = {}
+  ): PostgreSQLConnectionManager {
+    return new PostgreSQLConnectionManager(postgresClient, config);
+  }
+
   /**
-   * Initialize connection pool
+   * Initialize connection manager
    */
-  async initializePool(): Promise<void> {
+  async initialize(): Promise<void> {
     this.logger.info("Initializing connection pool", {
       initialConnections: this.config.initialConnections,
       maxConnections: this.config.maxConnections,
@@ -132,25 +148,21 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
   }
 
   /**
-   * Shared connection lifecycle logic for pool management
+   * Initialize stats structure
    */
-  private async acquireConnection(): Promise<{ release: () => void }> {
-    const startTime = performance.now();
-    await this.waitForAvailableConnection();
-    this.stats.activeConnections++;
-    this.stats.connectionWaitQueue = Math.max(
-      0,
-      this.stats.connectionWaitQueue - 1
-    );
-    this.updateConnectionTiming(performance.now() - startTime);
-    return {
-      release: () => {
-        this.stats.activeConnections = Math.max(
-          0,
-          this.stats.activeConnections - 1
-        );
-        this.stats.idleConnections++;
-      },
+  private initializeStats(): void {
+    this.stats = {
+      activeConnections: 0,
+      idleConnections: 0,
+      totalConnections: 0,
+      maxConnections: this.config.maxConnections,
+      minConnections: this.config.minConnections,
+      connectionWaitQueue: 0,
+      avgConnectionTime: 0,
+      avgQueryTime: 0,
+      connectionErrors: 0,
+      poolUtilization: 0,
+      healthScore: 1.0,
     };
   }
 
@@ -162,17 +174,14 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
     release: () => void;
   }> {
     try {
-      const { release } = await this.acquireConnection();
+      const client = await this.realPool.getClient();
       return {
         execute: async <T>(query: string, params?: any[]): Promise<T[]> => {
           const queryStart = performance.now();
           try {
-            const result = (await this.postgresClient.executeRaw(
-              query,
-              ...(params || [])
-            )) as T[];
+            const result = await client.query(query, params);
             this.updateQueryTiming(performance.now() - queryStart);
-            return result;
+            return result.rows as T[];
           } catch (error) {
             this.stats.connectionErrors++;
             this.logger.error("Query execution failed", error);
@@ -184,7 +193,7 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
             );
           }
         },
-        release,
+        release: () => client.release(),
       };
     } catch (error) {
       this.stats.connectionErrors++;
@@ -200,17 +209,12 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
     prisma: PrismaClient;
     release: () => void;
   }> {
-    try {
-      const { release } = await this.acquireConnection();
-      return {
-        prisma: this.postgresClient,
-        release,
-      };
-    } catch (error) {
-      this.stats.connectionErrors++;
-      this.logger.error("Failed to get Prisma ORM connection", error);
-      throw error;
-    }
+    // For now, this manager focuses on raw SQL connections through the pool
+    // Prisma connections should be handled directly through PostgreSQLClient
+    throw new AppError(
+      "Prisma connections not supported by ConnectionPoolManager. Use PostgreSQLClient directly.",
+      501
+    );
   }
 
   /**
@@ -248,15 +252,13 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
     const startTime = performance.now();
 
     try {
-      const result = await this.postgresClient.transaction(async (prisma) => {
+      const result = await this.realPool.transaction(async (client) => {
         const execute = async (
           query: string,
           params?: any[]
         ): Promise<any[]> => {
-          return (await prisma["$queryRawUnsafe"](
-            query,
-            ...(params || [])
-          )) as any[];
+          const result = await client.query(query, params);
+          return result.rows;
         };
 
         return await operations(execute);
@@ -309,15 +311,13 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
   private async establishInitialConnections(): Promise<void> {
     return executeWithRetry(
       async () => {
-        const connectPromises: Promise<void>[] = [];
-
-        for (let i = 0; i < this.config.initialConnections; i++) {
-          connectPromises.push(this.createConnection());
-        }
-
-        await Promise.all(connectPromises);
-        this.stats.totalConnections = this.config.initialConnections;
-        this.stats.idleConnections = this.config.initialConnections;
+        await this.realPool.connect();
+        // Update stats based on real pool
+        const poolStats = this.realPool.getStats();
+        this.stats.totalConnections = poolStats.totalCount;
+        this.stats.idleConnections = poolStats.idleCount;
+        this.stats.activeConnections =
+          poolStats.totalCount - poolStats.idleCount;
       },
       (error) => this.logger.warn("Initial connections setup retry", { error }),
       {
@@ -326,75 +326,6 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
         retryDelay: 2000,
       }
     );
-  }
-
-  /**
-   * Create a new connection
-   */
-  private async createConnection(): Promise<void> {
-    return executeWithRetry(
-      async () => {
-        const startTime = performance.now();
-
-        await this.postgresClient.connect();
-
-        const health = await this.postgresClient.healthCheck();
-        if (health.status !== "healthy") {
-          throw new AppError(
-            `Connection health check failed: ${health.status}`,
-            503
-          );
-        }
-
-        this.updateConnectionTiming(performance.now() - startTime);
-      },
-      (error) => {
-        this.stats.connectionErrors++;
-        this.logger.warn("Connection creation retry", { error });
-      },
-      {
-        operationName: "CreateConnection",
-        maxRetries: 3,
-        retryDelay: 1000,
-      }
-    );
-  }
-
-  /**
-   * Wait for an available connection
-   */
-  private async waitForAvailableConnection(): Promise<void> {
-    const startTime = Date.now();
-
-    while (this.stats.activeConnections >= this.config.maxConnections) {
-      if (Date.now() - startTime > this.config.connectionTimeout) {
-        throw new AppError("Connection timeout: No connections available", 503);
-      }
-
-      this.stats.connectionWaitQueue++;
-      // Proactively expand pool if possible
-      if (this.stats.totalConnections < this.config.maxConnections) {
-        try {
-          await this.createConnection();
-          this.stats.totalConnections++;
-          this.stats.idleConnections++;
-          this.logger.info("Proactively expanded pool");
-        } catch (error) {
-          this.logger.warn("Failed to expand pool proactively", error);
-        }
-      }
-      await new Promise((resolve) => setTimeout(resolve, 100)); // 100ms wait
-    }
-  }
-
-  /**
-   * Update connection timing statistics
-   */
-  private updateConnectionTiming(duration: number): void {
-    this.connectionTimings[this.connectionTimingIndex] = duration;
-    this.connectionTimingIndex = (this.connectionTimingIndex + 1) % 100;
-    this.stats.avgConnectionTime =
-      this.connectionTimings.reduce((sum, time) => sum + time, 0) / 100;
   }
 
   /**
@@ -415,17 +346,23 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
     reason?: string;
   }> {
     try {
-      // Check database connectivity
-      const health = await this.postgresClient.healthCheck();
-      if (health.status !== "healthy") {
+      // Check database connectivity using real pool
+      const healthy = await this.realPool.healthCheck();
+      if (!healthy) {
         return {
           healthy: false,
-          reason: `Database unhealthy: ${health.status}`,
+          reason: "Database connectivity check failed",
         };
       }
 
       // Check connection pool utilization
-      if (this.stats.poolUtilization > 0.9) {
+      const poolStats = this.realPool.getStats();
+      const utilization =
+        poolStats.totalCount > 0
+          ? (poolStats.totalCount - poolStats.idleCount) / poolStats.totalCount
+          : 0;
+
+      if (utilization > 0.9) {
         return { healthy: false, reason: "Pool utilization too high" };
       }
 
@@ -450,25 +387,6 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
         }`,
       };
     }
-  }
-
-  /**
-   * Initialize stats structure
-   */
-  private initializeStats(): void {
-    this.stats = {
-      activeConnections: 0,
-      idleConnections: 0,
-      totalConnections: 0,
-      maxConnections: this.config.maxConnections,
-      minConnections: this.config.minConnections,
-      connectionWaitQueue: 0,
-      avgConnectionTime: 0,
-      avgQueryTime: 0,
-      connectionErrors: 0,
-      poolUtilization: 0,
-      healthScore: 1.0,
-    };
   }
 
   /**
@@ -555,6 +473,17 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
    * Get current pool statistics
    */
   getStats(): ConnectionPoolStats {
+    const poolStats = this.realPool.getStats();
+    // Update our stats with real pool data
+    this.stats.activeConnections = poolStats.totalCount - poolStats.idleCount;
+    this.stats.idleConnections = poolStats.idleCount;
+    this.stats.totalConnections = poolStats.totalCount;
+    this.stats.connectionWaitQueue = poolStats.waitingCount;
+    this.stats.poolUtilization =
+      poolStats.totalCount > 0
+        ? this.stats.activeConnections / poolStats.totalCount
+        : 0;
+
     return { ...this.stats };
   }
 
@@ -579,42 +508,15 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
    * Graceful shutdown
    */
   async shutdown(): Promise<void> {
-    this.logger.info("Shutting down connection pool");
+    this.logger.info("Shutting down connection pool manager");
 
     try {
       this.scheduler.clearAll();
+      await this.realPool.disconnect();
 
-      // Close all idle connections immediately
-      if (this.stats.idleConnections > 0) {
-        this.logger.info(
-          `Closing ${this.stats.idleConnections} idle connections`
-        );
-        this.stats.totalConnections -= this.stats.idleConnections;
-        this.stats.idleConnections = 0;
-      }
-
-      // Wait for active connections to complete, then force-close after timeout
-      const maxWait = 30000; // 30 seconds
-      const startTime = Date.now();
-      let forced = false;
-      while (
-        this.stats.activeConnections > 0 &&
-        Date.now() - startTime < maxWait
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-      if (this.stats.activeConnections > 0) {
-        this.logger.warn(
-          `Force-closing ${this.stats.activeConnections} active connections after timeout`
-        );
-        this.stats.totalConnections -= this.stats.activeConnections;
-        this.stats.activeConnections = 0;
-        forced = true;
-      }
-
-      this.logger.info("Connection pool shutdown completed", { forced });
+      this.logger.info("Connection pool manager shutdown completed");
     } catch (error) {
-      this.logger.error("Error during connection pool shutdown", error);
+      this.logger.error("Error during connection pool manager shutdown", error);
       throw new AppError(
         `Shutdown failed: ${
           error instanceof Error ? error.message : "Unknown error"
@@ -624,24 +526,28 @@ export class ConnectionPoolManager implements IConnectionPoolManager {
     }
   }
   /**
-   * Idle connection cleanup
+   * Idle connection cleanup (monitoring only - real pool manages connections)
    */
   private startIdleConnectionCleanup(): void {
     this.scheduler.setInterval(
-      "idleConnectionCleanup",
+      "idleConnectionMonitoring",
       this.config.idleTimeout,
       () => {
         try {
-          // If idle connections exceed minConnections, close them
-          if (this.stats.idleConnections > this.config.minConnections) {
-            const toClose =
-              this.stats.idleConnections - this.config.minConnections;
-            this.stats.idleConnections -= toClose;
-            this.stats.totalConnections -= toClose;
-            this.logger.info(`Closed ${toClose} idle connections`);
+          const poolStats = this.realPool.getStats();
+          const idleCount = poolStats.idleCount;
+          const totalCount = poolStats.totalCount;
+
+          // Just monitor - pg.Pool handles idle connection cleanup automatically
+          if (idleCount > this.config.minConnections) {
+            this.logger.debug("Pool has idle connections above minimum", {
+              idle: idleCount,
+              min: this.config.minConnections,
+              total: totalCount,
+            });
           }
         } catch (error) {
-          this.logger.error("Idle connection cleanup failed", error);
+          this.logger.error("Idle connection monitoring failed", error);
         }
       }
     );

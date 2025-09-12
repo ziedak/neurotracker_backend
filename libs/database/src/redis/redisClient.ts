@@ -4,12 +4,14 @@ import Redis, {
   type ChainableCommander,
   type RedisKey,
 } from "ioredis";
-import { injectable, inject } from "tsyringe";
-import { MetricsCollector } from "@libs/monitoring";
+import { type IMetricsCollector } from "@libs/monitoring";
 import { getEnv, getNumberEnv, getBooleanEnv } from "@libs/config";
 import { createLogger, executeRedisWithRetry } from "@libs/utils";
 
-@injectable()
+export interface RedisConfig extends Partial<RedisOptions> {
+  // Additional Redis-specific configuration
+}
+
 export class RedisClient {
   private redis: Redis;
   private isConnected = false;
@@ -19,10 +21,10 @@ export class RedisClient {
   private readonly logger = createLogger("RedisClient");
 
   constructor(
-    @inject("MetricsCollector") private metrics: MetricsCollector,
-    redisOptions?: RedisOptions
+    private metrics?: IMetricsCollector,
+    redisOptions: RedisConfig = {}
   ) {
-    const options: RedisOptions = redisOptions || {
+    let options: RedisOptions = {
       host: getEnv("REDIS_HOST", "localhost"),
       port: getNumberEnv("REDIS_PORT", 6379),
       password: getEnv("REDIS_PASSWORD"),
@@ -45,6 +47,8 @@ export class RedisClient {
         ),
       };
     }
+
+    options = { ...options, ...redisOptions };
     this.redis = new Redis(options);
     this.setupEventHandlers();
     this.redis.connect().catch((err) => {
@@ -52,36 +56,43 @@ export class RedisClient {
     });
   }
 
+  static create(
+    config: RedisConfig = {},
+    metrics?: IMetricsCollector
+  ): RedisClient {
+    return new RedisClient(metrics, config);
+  }
+
   private setupEventHandlers() {
     this.redis.on("connect", () => {
       this.logger.info("Redis connected");
       this.isConnected = true;
       this.retryCount = 0;
-      this.metrics.recordCounter("redis_connection_success");
+      this.metrics?.recordCounter("redis_connection_success");
     });
     this.redis.on("ready", () => {
       this.logger.info("Redis ready to accept commands");
-      this.metrics.recordCounter("redis_ready");
+      this.metrics?.recordCounter("redis_ready");
     });
     this.redis.on("error", (error) => {
       this.logger.error("Redis error", error);
       this.isConnected = false;
-      this.metrics.recordCounter("redis_connection_error");
+      this.metrics?.recordCounter("redis_connection_error");
     });
     this.redis.on("close", () => {
       this.logger.info("Redis connection closed");
       this.isConnected = false;
-      this.metrics.recordCounter("redis_connection_closed");
+      this.metrics?.recordCounter("redis_connection_closed");
       this.scheduleReconnect();
     });
     this.redis.on("reconnecting", () => {
       this.logger.info("Redis reconnecting...");
-      this.metrics.recordCounter("redis_reconnecting");
+      this.metrics?.recordCounter("redis_reconnecting");
     });
     this.redis.on("end", () => {
       this.logger.warn("Redis connection ended");
       this.isConnected = false;
-      this.metrics.recordCounter("redis_connection_ended");
+      this.metrics?.recordCounter("redis_connection_ended");
     });
   }
 

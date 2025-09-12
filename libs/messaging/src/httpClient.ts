@@ -1,5 +1,5 @@
 import axios, { AxiosRequestConfig, AxiosResponse, AxiosError } from "axios";
-import { executeWithRetryAndBreaker } from "@libs/utils";
+import { executeWithRetry } from "@libs/utils";
 
 /**
  * HTTP Client Configuration Interface
@@ -146,7 +146,7 @@ export async function sendHttpRequestWithRetryAndBreaker<T = unknown>(
     retryDelay,
   });
 
-  return executeWithRetryAndBreaker(
+  return executeWithRetry(
     async () => {
       const response = await httpClient.request<T>(config);
       if (response.status >= 200 && response.status < 300) {
@@ -169,6 +169,7 @@ export async function sendHttpRequestWithRetryAndBreaker<T = unknown>(
       operationName: "HTTP Request",
       maxRetries: retryCount,
       retryDelay,
+      enableCircuitBreaker: true,
     }
   );
 }

@@ -1,13 +1,9 @@
 import { createClient, ClickHouseClient as CHClient } from "@clickhouse/client";
 import { getEnv, getNumberEnv, getBooleanEnv } from "@libs/config";
-import {
-  createLogger,
-  executeWithRetryAndBreaker,
-} from "@libs/utils";
+import { createLogger, executeWithRetry } from "@libs/utils";
 import { IMetricsCollector } from "@libs/monitoring";
 import { createHash } from "crypto";
-import { inject, injectable, singleton } from "tsyringe";
-import type { CacheService } from "../cache";
+import { ICache } from "../cache";
 
 /**
  * Configuration interface for ClickHouse client.
@@ -16,7 +12,7 @@ import type { CacheService } from "../cache";
       // TODO: Re-implement caching with proper DI
       // const cacheResult = await this.cacheService.get<T>(cacheKey);
       // if (cacheResult.data !== null) {
-      //   await this.metricsCollector.recordCounter("clickhouse.cache.hit", 1);
+      //   await this.metricsCollector?.recordCounter("clickhouse.cache.hit", 1);
       //   this.logger.debug("Cache hit for ClickHouse query", { cacheKey });
       //   return cacheResult.data;
       // }idation for connection settings.
@@ -126,8 +122,6 @@ export class ClickHouseError extends Error {
  * Optimized ClickHouse client with TSyringe dependency injection.
  * Uses singleton pattern for enterprise-wide database connection management.
  */
-@injectable()
-@singleton()
 export class ClickHouseClient implements IClickHouseClient {
   private readonly client: CHClient;
   private isConnected = false;
@@ -139,23 +133,31 @@ export class ClickHouseClient implements IClickHouseClient {
    * TSyringe-managed ClickHouse client constructor with proper dependency injection.
    * All dependencies are automatically resolved by the container.
    */
-  private readonly logger = createLogger("CacheCoherencyManager");
+  private readonly cacheService?: ICache;
+  private readonly logger = createLogger("ClickHouseClient");
   constructor(
-    @inject("IMetricsCollector")
-    private readonly metricsCollector: IMetricsCollector,
-    @inject("CacheService")
-    private readonly cacheService: CacheService
+    private readonly injectedCacheService?: ICache,
+    private readonly metricsCollector?: IMetricsCollector
   ) {
     this.config = this.createConfigFromEnv();
     this.resilienceConfig = this.createResilienceConfigFromEnv();
     this.queryCache = this.createQueryCacheConfigFromEnv();
     this.client = createClient(this.config);
+
+    // Use injected cache service
+    this.cacheService = injectedCacheService;
+
     this.logger.info("ClickHouse client initialized", {
       url: this.config.url,
       database: this.config.database,
       resilience: this.resilienceConfig,
       queryCache: this.queryCache,
+      hasCache: !!this.cacheService,
     });
+  }
+
+  static create(cacheService?: ICache, metricsCollector?: IMetricsCollector): ClickHouseClient {
+    return new ClickHouseClient(cacheService, metricsCollector);
   }
   /**
    * Creates configuration from environment variables.
@@ -256,14 +258,14 @@ export class ClickHouseClient implements IClickHouseClient {
     const startTime = Date.now();
     try {
       const result = await this.client.ping();
-      await this.metricsCollector.recordTimer(
+      await this.metricsCollector?.recordTimer(
         "clickhouse.ping.duration",
         Date.now() - startTime
       );
-      await this.metricsCollector.recordCounter("clickhouse.ping.success", 1);
+      await this.metricsCollector?.recordCounter("clickhouse.ping.success", 1);
       return result.success;
     } catch (error) {
-      await this.metricsCollector.recordCounter("clickhouse.ping.error", 1);
+      await this.metricsCollector?.recordCounter("clickhouse.ping.error", 1);
       this.logger.error("ClickHouse ping failed", error);
       throw new ClickHouseError("Ping failed", error);
     }
@@ -275,7 +277,7 @@ export class ClickHouseClient implements IClickHouseClient {
       const pingResult = await this.client.ping();
       const latency = Date.now() - startTime;
 
-      await this.metricsCollector.recordTimer(
+      await this.metricsCollector?.recordTimer(
         "clickhouse.healthcheck.duration",
         latency
       );
@@ -290,7 +292,7 @@ export class ClickHouseClient implements IClickHouseClient {
         }>();
         const version = versionData[0]?.version;
 
-        await this.metricsCollector.recordCounter(
+        await this.metricsCollector?.recordCounter(
           "clickhouse.healthcheck.success",
           1
         );
@@ -301,13 +303,13 @@ export class ClickHouseClient implements IClickHouseClient {
         };
       }
 
-      await this.metricsCollector.recordCounter(
+      await this.metricsCollector?.recordCounter(
         "clickhouse.healthcheck.unhealthy",
         1
       );
       return { status: HealthStatus.UNHEALTHY };
     } catch (error) {
-      await this.metricsCollector.recordCounter(
+      await this.metricsCollector?.recordCounter(
         "clickhouse.healthcheck.error",
         1
       );
@@ -333,7 +335,7 @@ export class ClickHouseClient implements IClickHouseClient {
 
     try {
       // Execute query with resilience and metrics tracking
-      const result = await executeWithRetryAndBreaker(
+      const result = await executeWithRetry(
         async () => {
           const queryResult = await this.client.query({
             query,
@@ -342,7 +344,7 @@ export class ClickHouseClient implements IClickHouseClient {
           });
           return queryResult.json() as T;
         },
-        (error) => {
+        (error: unknown) => {
           this.logger.error("ClickHouse query failed", error);
           throw new ClickHouseError("Query execution failed", error);
         },
@@ -350,18 +352,16 @@ export class ClickHouseClient implements IClickHouseClient {
           operationName,
           maxRetries: this.resilienceConfig.maxRetries,
           retryDelay: this.resilienceConfig.retryDelay,
-          //  circuitBreakerThreshold:
-          //  this.resilienceConfig.circuitBreakerThreshold,
-          //   circuitBreakerTimeout: this.resilienceConfig.circuitBreakerTimeout,
+          enableCircuitBreaker: true,
         }
       );
 
       const duration = Date.now() - startTime;
-      await this.metricsCollector.recordTimer(
+      await this.metricsCollector?.recordTimer(
         "clickhouse.query.duration",
         duration
       );
-      await this.metricsCollector.recordCounter("clickhouse.query.success", 1);
+      await this.metricsCollector?.recordCounter("clickhouse.query.success", 1);
 
       this.logger.debug(`ClickHouse query executed successfully`, {
         query: operationName,
@@ -371,11 +371,11 @@ export class ClickHouseClient implements IClickHouseClient {
       return result;
     } catch (error) {
       const duration = Date.now() - startTime;
-      await this.metricsCollector.recordTimer(
+      await this.metricsCollector?.recordTimer(
         "clickhouse.query.error_duration",
         duration
       );
-      await this.metricsCollector.recordCounter("clickhouse.query.error", 1);
+      await this.metricsCollector?.recordCounter("clickhouse.query.error", 1);
 
       this.logger.error("ClickHouse query failed", error, {
         query: operationName,
@@ -400,8 +400,8 @@ export class ClickHouseClient implements IClickHouseClient {
       ...options,
     };
 
-    // If caching is disabled or not applicable, execute directly
-    if (!cacheOptions.useCache) {
+    // If caching is disabled, execute directly
+    if (cacheOptions.useCache === false) {
       return this.execute(query, values);
     }
 
@@ -411,30 +411,32 @@ export class ClickHouseClient implements IClickHouseClient {
       this.generateCacheKey(query, values ? Object.values(values) : undefined);
 
     try {
-      // Try to get from cache first
-      // TODO: Re-implement caching with proper DI
-      const cacheResult = await this.cacheService.get<T>(cacheKey);
-      if (cacheResult.data !== null) {
-        await this.metricsCollector.recordCounter("clickhouse.cache.hit", 1);
-        this.logger.debug("Cache hit for ClickHouse query", { cacheKey });
-        return cacheResult.data;
+      // Check cache if available
+      if (this.cacheService && this.shouldCacheQuery(query)) {
+        const cacheResult = await this.cacheService.get<T>(cacheKey);
+        if (cacheResult.data !== null) {
+          await this.metricsCollector?.recordCounter("clickhouse.cache.hit", 1);
+          this.logger.debug("Cache hit for ClickHouse query", { cacheKey });
+          return cacheResult.data;
+        }
       }
 
       // Execute query if not in cache
-      await this.metricsCollector.recordCounter("clickhouse.cache.miss", 1);
+      await this.metricsCollector?.recordCounter("clickhouse.cache.miss", 1);
       const result = await this.execute<T>(query, values);
 
-      // Store in cache with TTL
-      // TODO: Re-implement caching with proper DI
-      await this.cacheService.set(cacheKey, result, cacheOptions.ttl);
-      this.logger.debug("Cached ClickHouse query result", {
-        cacheKey,
-        ttl: cacheOptions.ttl,
-      });
+      // Store in cache if available
+      if (this.cacheService) {
+        await this.cacheService.set(cacheKey, result, cacheOptions.ttl);
+        this.logger.debug("Cached ClickHouse query result", {
+          cacheKey,
+          ttl: cacheOptions.ttl,
+        });
+      }
 
       return result;
     } catch (error) {
-      await this.metricsCollector.recordCounter("clickhouse.cache.error", 1);
+      await this.metricsCollector?.recordCounter("clickhouse.cache.error", 1);
       this.logger.warn(
         "Cache operation failed, executing query directly",
         error
@@ -452,13 +454,13 @@ export class ClickHouseClient implements IClickHouseClient {
       const searchPattern = pattern || `${this.queryCache.cacheKeyPrefix}*`;
       // TODO: Re-implement caching with proper DI
       // await this.cacheService.invalidatePattern(searchPattern);
-      await this.metricsCollector.recordCounter(
+      await this.metricsCollector?.recordCounter(
         "clickhouse.cache.invalidated",
         1
       );
       this.logger.info("Cache invalidated", { pattern: searchPattern });
     } catch (error) {
-      await this.metricsCollector.recordCounter(
+      await this.metricsCollector?.recordCounter(
         "clickhouse.cache.invalidation_error",
         1
       );
@@ -481,7 +483,7 @@ export class ClickHouseClient implements IClickHouseClient {
 
     try {
       // Execute insert with resilience and metrics tracking
-      await executeWithRetryAndBreaker(
+      await executeWithRetry(
         async () => {
           await this.client.insert({
             table,
@@ -489,17 +491,21 @@ export class ClickHouseClient implements IClickHouseClient {
             format: format as "JSONEachRow" | "TabSeparated", // Type-safe format
           });
         },
-        (error) => this.logger.error("ClickHouse insert failed", error),
-        { operationName }
+        (error: unknown) =>
+          this.logger.error("ClickHouse insert failed", error),
+        { operationName, enableCircuitBreaker: true }
       );
 
       const duration = Date.now() - startTime;
-      await this.metricsCollector.recordTimer(
+      await this.metricsCollector?.recordTimer(
         "clickhouse.insert.duration",
         duration
       );
-      await this.metricsCollector.recordCounter("clickhouse.insert.success", 1);
-      await this.metricsCollector.recordCounter(
+      await this.metricsCollector?.recordCounter(
+        "clickhouse.insert.success",
+        1
+      );
+      await this.metricsCollector?.recordCounter(
         "clickhouse.insert.rows",
         data.length
       );
@@ -511,11 +517,11 @@ export class ClickHouseClient implements IClickHouseClient {
       });
     } catch (error) {
       const duration = Date.now() - startTime;
-      await this.metricsCollector.recordTimer(
+      await this.metricsCollector?.recordTimer(
         "clickhouse.insert.error_duration",
         duration
       );
-      await this.metricsCollector.recordCounter("clickhouse.insert.error", 1);
+      await this.metricsCollector?.recordCounter("clickhouse.insert.error", 1);
 
       this.logger.error("ClickHouse insert failed", error, {
         table,
@@ -619,23 +625,23 @@ export class ClickHouseClient implements IClickHouseClient {
       };
 
       // Record comprehensive metrics
-      await this.metricsCollector.recordTimer(
+      await this.metricsCollector?.recordTimer(
         "clickhouse.batch_insert.duration",
         duration
       );
-      await this.metricsCollector.recordCounter(
+      await this.metricsCollector?.recordCounter(
         "clickhouse.batch_insert.total_rows",
         totalRows
       );
-      await this.metricsCollector.recordCounter(
+      await this.metricsCollector?.recordCounter(
         "clickhouse.batch_insert.batches_processed",
         batches.length
       );
-      await this.metricsCollector.recordCounter(
+      await this.metricsCollector?.recordCounter(
         "clickhouse.batch_insert.successful_batches",
         successfulBatches
       );
-      await this.metricsCollector.recordCounter(
+      await this.metricsCollector?.recordCounter(
         "clickhouse.batch_insert.failed_batches",
         failedBatches
       );
@@ -645,11 +651,11 @@ export class ClickHouseClient implements IClickHouseClient {
       return result;
     } catch (error) {
       const duration = Date.now() - startTime;
-      await this.metricsCollector.recordTimer(
+      await this.metricsCollector?.recordTimer(
         "clickhouse.batch_insert.error_duration",
         duration
       );
-      await this.metricsCollector.recordCounter(
+      await this.metricsCollector?.recordCounter(
         "clickhouse.batch_insert.error",
         1
       );

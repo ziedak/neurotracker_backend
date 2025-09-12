@@ -1,5 +1,4 @@
 import { setTimeout, setInterval, clearTimeout, clearInterval } from "timers";
-import { injectable } from "tsyringe";
 
 interface Timer {
   type: "timeout" | "interval";
@@ -12,13 +11,17 @@ export interface IScheduler {
   clear(key: string): void;
   clearAll(): void;
 }
+
 /**
  * Service for managing timeouts and intervals across the application
  * Prevents memory leaks by ensuring all timers are properly cleaned up
  */
-@injectable()
 export class Scheduler implements IScheduler {
   private timers: Map<string, Timer> = new Map();
+
+  static create(): Scheduler {
+    return new Scheduler();
+  }
 
   /**
    * Set an interval with a unique key

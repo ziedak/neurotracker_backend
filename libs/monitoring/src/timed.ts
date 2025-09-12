@@ -1,5 +1,4 @@
 import { MetricsCollector } from "./MetricsCollector";
-import { container } from "tsyringe";
 
 // Performance monitoring decorator
 /**
@@ -10,6 +9,7 @@ import { container } from "tsyringe";
  * On error, it records a timer metric with status "error" and increments an error counter.
  *
  * @param metricName - Optional custom metric name. If not provided, defaults to `${ClassName}.${methodName}`.
+ * @param metricsCollector - Optional MetricsCollector instance. If not provided, uses singleton.
  * @returns A method decorator function.
  *
  * @example
@@ -22,7 +22,10 @@ import { container } from "tsyringe";
  * }
  * ```
  */
-export function timed(metricName?: string) {
+export function timed(
+  metricName?: string,
+  metricsCollector?: MetricsCollector
+) {
   return function (
     target: any,
     propertyName: string,
@@ -33,7 +36,7 @@ export function timed(metricName?: string) {
 
     descriptor.value = async function (...args: any[]) {
       const startTime = performance.now();
-      const metrics = container.resolve(MetricsCollector);
+      const metrics = metricsCollector || MetricsCollector.getInstance();
 
       try {
         const result = await method.apply(this, args);

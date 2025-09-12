@@ -6,7 +6,6 @@
  */
 
 import { PrometheusMetricsCollector } from "./PrometheusMetricsCollector";
-import { injectable, singleton, container } from "tsyringe";
 
 // ===================================================================
 // METRICS COLLECTOR INTERFACE
@@ -124,13 +123,26 @@ export interface IMetricsCollector {
 // METRICS COLLECTOR IMPLEMENTATION
 // ===================================================================
 
-@injectable()
-@singleton()
 export class MetricsCollector implements IMetricsCollector {
   private collector: PrometheusMetricsCollector;
 
-  constructor() {
-    this.collector = container.resolve(PrometheusMetricsCollector);
+  constructor(collector?: PrometheusMetricsCollector) {
+    this.collector = collector || new PrometheusMetricsCollector();
+  }
+
+  static create(collector?: PrometheusMetricsCollector): MetricsCollector {
+    return new MetricsCollector(collector);
+  }
+
+  /**
+   * Get singleton instance - for backwards compatibility
+   */
+  private static instance?: MetricsCollector;
+  static getInstance(): MetricsCollector {
+    if (!this.instance) {
+      this.instance = new MetricsCollector();
+    }
+    return this.instance;
   }
 
   // ===================================================================
@@ -248,19 +260,5 @@ export class MetricsCollector implements IMetricsCollector {
     this.collector.measureEventLoopLag(service);
   }
 }
-
-// ===================================================================
-// DEPENDENCY INJECTION SETUP
-// ===================================================================
-
-// Register the MetricsCollector as a singleton
-container.registerSingleton<IMetricsCollector>(
-  "MetricsCollector",
-  MetricsCollector
-);
-container.registerSingleton<MetricsCollector>(
-  "MetricsCollector",
-  MetricsCollector
-);
 
 export { MetricsCollector as default };

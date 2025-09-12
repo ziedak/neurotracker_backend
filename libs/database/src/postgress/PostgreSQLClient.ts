@@ -1,10 +1,10 @@
 import { PrismaClient } from "@prisma/client";
 import { withAccelerate } from "@prisma/extension-accelerate";
 import { getEnv, getBooleanEnv, getNumberEnv } from "@libs/config";
-import { injectable, singleton, inject } from "tsyringe";
 import { IMetricsCollector } from "@libs/monitoring";
 import { createHash } from "crypto";
-import { createLogger, executeWithRetryAndBreaker } from "@libs/utils";
+import { createLogger, executeWithRetry } from "@libs/utils";
+import type { ICache } from "@libs/database/src/cache/interfaces/ICache";
 
 /**
  * Custom error class for PostgreSQL operations.
@@ -76,32 +76,26 @@ export interface PostgreSQLQueryCacheOptions {
 }
 
 /**
- * PostgreSQLClient: Enterprise-grade Prisma client with full dependency injection
- * - TSyringe-managed singleton with structured logging and metrics
+ * PostgreSQLClient: Clean Prisma client with optional metrics
+ * - Optional dependency injection for metrics
  * - Connection pooling, health checks, transactions, and raw queries
- * - Strict typing, error resilience, and clean architecture
- *
- * Usage Example (via DI):
- *   @inject("PostgreSQLClient") private readonly pgClient: PostgreSQLClient
- *   const users = await this.pgClient.getInstance().user.findMany();
- *   await this.pgClient.transaction(async (prisma) => { ... });
+ * - Clean interface suitable for any framework
  */
-@injectable()
-@singleton()
 export class PostgreSQLClient {
   private readonly prismaClient: PrismaClient;
   private isConnected = false;
+  private isConnecting = false;
   private readonly resilienceConfig: PostgreSQLResilienceConfig;
   private readonly metricsConfig: PostgreSQLMetricsConfig;
   private readonly queryCache: PostgreSQLQueryCacheConfig;
   private readonly logger = createLogger("PostgreSQLClient");
 
   /**
-   * TSyringe-managed PostgreSQL client constructor with full dependency injection.
+   * Clean PostgreSQL client constructor with optional metrics and cache.
    */
   constructor(
-    @inject("IMetricsCollector")
-    private readonly metricsCollector: IMetricsCollector
+    private readonly metricsCollector?: IMetricsCollector,
+    private readonly cacheService?: ICache
   ) {
     this.resilienceConfig = this.createResilienceConfigFromEnv();
     this.metricsConfig = this.createMetricsConfigFromEnv();
@@ -133,6 +127,13 @@ export class PostgreSQLClient {
       metrics: this.metricsConfig,
       queryCache: this.queryCache,
     });
+  }
+
+  static create(
+    metricsCollector?: IMetricsCollector,
+    cacheService?: ICache
+  ): PostgreSQLClient {
+    return new PostgreSQLClient(metricsCollector, cacheService);
   }
 
   /**
@@ -211,45 +212,64 @@ export class PostgreSQLClient {
   }
 
   /**
-   * Execute operations with resilience (retry + circuit breaker).
+   * Execute operations with resilience (circuit breaker).
    * Uses cockatiel for battle-tested resilience patterns.
    */
-  // private async executeWithResilience<T>(
-  //   operation: () => Promise<T>,
-  //   operationName: string
-  // ): Promise<T> {
-  //   const retryPolicy = retry(handleAll, {
-  //     maxAttempts: this.resilienceConfig.maxRetries,
-  //   });
-
-  //   return retryPolicy.execute(async () => {
-  //     try {
-  //       return await operation();
-  //     } catch (error) {
-  //       this.logger.warn(`${operationName} failed, will retry`, error);
-  //       await this.metricsCollector.recordCounter("postgresql.operation.retry");
-  //       throw error;
-  //     }
-  //   });
-  // }
+  // Circuit breaker implementation available for future use
 
   /**
-   * Connect to database (idempotent)
+   * Connect to database (idempotent and thread-safe)
    */
   async connect(): Promise<void> {
-    if (!this.isConnected) {
+    if (this.isConnected) {
+      return; // Already connected
+    }
+
+    if (this.isConnecting) {
+      // Wait for ongoing connection attempt
+      while (this.isConnecting) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return; // Connection attempt completed
+    }
+
+    this.isConnecting = true;
+    try {
       await this.prismaClient.$connect();
       this.isConnected = true;
+      this.logger.info("Database connection established");
+    } catch (error) {
+      this.logger.error("Failed to connect to database", error);
+      throw error;
+    } finally {
+      this.isConnecting = false;
     }
   }
 
   /**
-   * Disconnect from database (idempotent)
+   * Disconnect from database (idempotent and thread-safe)
    */
   async disconnect(): Promise<void> {
-    if (this.isConnected) {
+    if (!this.isConnected) {
+      return; // Already disconnected
+    }
+
+    // Wait for any ongoing connection attempts to complete
+    while (this.isConnecting) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    if (!this.isConnected) {
+      return; // Connection was aborted during wait
+    }
+
+    try {
       await this.prismaClient.$disconnect();
       this.isConnected = false;
+      this.logger.info("Database connection closed");
+    } catch (error) {
+      this.logger.error("Error during database disconnection", error);
+      // Don't throw - disconnection errors shouldn't crash the application
     }
   }
 
@@ -257,7 +277,7 @@ export class PostgreSQLClient {
    * Ping database for connectivity with performance tracking and resilience
    */
   async ping(): Promise<boolean> {
-    return await executeWithRetryAndBreaker(
+    return await executeWithRetry(
       async () => {
         const start = performance.now();
         await this.prismaClient.$queryRaw`SELECT 1`;
@@ -267,11 +287,11 @@ export class PostgreSQLClient {
           duration: `${duration.toFixed(2)}ms`,
         });
 
-        await this.metricsCollector.recordTimer(
+        await this.metricsCollector?.recordTimer(
           "postgresql.ping.duration",
           duration
         );
-        await this.metricsCollector.recordCounter("postgresql.ping.success");
+        await this.metricsCollector?.recordCounter("postgresql.ping.success");
 
         if (
           this.metricsConfig.enabled &&
@@ -289,10 +309,11 @@ export class PostgreSQLClient {
         this.logger.error("PostgreSQL ping failed after retries", error),
       {
         operationName: "PostgreSQL ping",
+        enableCircuitBreaker: true,
       }
     ).catch((error: any) => {
       this.logger.error("PostgreSQL ping failed after retries", error);
-      this.metricsCollector.recordCounter("postgresql.ping.failure");
+      this.metricsCollector?.recordCounter("postgresql.ping.failure");
       throw new PostgreSQLError("Database ping failed", error);
     });
   }
@@ -302,7 +323,7 @@ export class PostgreSQLClient {
    */
   async healthCheck(): Promise<IPostgreSQLHealthResult> {
     try {
-      return await executeWithRetryAndBreaker(
+      return await executeWithRetry(
         async () => {
           const start = performance.now();
           const versionResult = await this.prismaClient.$queryRaw<
@@ -321,11 +342,11 @@ export class PostgreSQLClient {
             version: version?.substring(0, 50) + "...",
           });
 
-          await this.metricsCollector.recordTimer(
+          await this.metricsCollector?.recordTimer(
             "postgresql.healthcheck.duration",
             latency
           );
-          await this.metricsCollector.recordCounter(
+          await this.metricsCollector?.recordCounter(
             "postgresql.healthcheck.success"
           );
 
@@ -347,18 +368,19 @@ export class PostgreSQLClient {
             : { status, latency };
         },
 
-        (error) =>
+        (error: unknown) =>
           this.logger.error(
             "PostgreSQL health check failed after retries",
             error
           ),
         {
           operationName: "PostgreSQL health check",
+          enableCircuitBreaker: true,
         }
       );
     } catch (error) {
       this.logger.error("PostgreSQL health check failed after retries", error);
-      await this.metricsCollector.recordCounter(
+      await this.metricsCollector?.recordCounter(
         "postgresql.healthcheck.failure"
       );
 
@@ -380,7 +402,7 @@ export class PostgreSQLClient {
    * Execute raw SQL query with performance tracking, structured error handling, and resilience
    */
   async executeRaw(query: string, ...params: unknown[]): Promise<unknown> {
-    return await executeWithRetryAndBreaker(
+    return await executeWithRetry(
       async () => {
         const start = performance.now();
         const result = await this.prismaClient.$queryRawUnsafe(
@@ -396,11 +418,11 @@ export class PostgreSQLClient {
           duration: `${duration.toFixed(2)}ms`,
         });
 
-        await this.metricsCollector.recordTimer(
+        await this.metricsCollector?.recordTimer(
           "postgresql.raw_query.duration",
           duration
         );
-        await this.metricsCollector.recordCounter(
+        await this.metricsCollector?.recordCounter(
           "postgresql.raw_query.success"
         );
 
@@ -415,22 +437,23 @@ export class PostgreSQLClient {
             paramCount: params.length,
           });
 
-          await this.metricsCollector.recordCounter("postgresql.slow_query");
+          await this.metricsCollector?.recordCounter("postgresql.slow_query");
         }
 
         return result;
       },
-      (error) =>
+      (error: unknown) =>
         this.logger.error("PostgreSQL raw query failed after retries", error),
       {
         operationName: "PostgreSQL raw query",
+        enableCircuitBreaker: true,
       }
     ).catch((error: any) => {
       this.logger.error("PostgreSQL raw query failed after retries", error, {
         query: query.substring(0, 100) + "...",
         paramCount: params.length,
       });
-      this.metricsCollector.recordCounter("postgresql.raw_query.failure");
+      this.metricsCollector?.recordCounter("postgresql.raw_query.failure");
       throw new PostgreSQLError("Raw query execution failed", error);
     });
   }
@@ -457,31 +480,35 @@ export class PostgreSQLClient {
       cacheOptions.cacheKey || this.generateCacheKey(query, params);
 
     try {
-      // TODO: Re-implement caching with proper DI
-      // const cacheResult = await this.cacheService.get<T>(cacheKey);
-      // if (cacheResult.data !== null) {
-      //   await this.metricsCollector.recordCounter("postgresql.cache.hit");
-      //   this.logger.debug("Cache hit for PostgreSQL query", {
-      //     cacheKey,
-      //     query: query.substring(0, 100) + "...",
-      //   });
-      //   return cacheResult.data;
-      // }
+      // Check cache first if available
+      if (this.cacheService) {
+        const cacheResult = await this.cacheService.get<T>(cacheKey);
+        if (cacheResult.data !== null) {
+          await this.metricsCollector?.recordCounter("postgresql.cache.hit");
+          this.logger.debug("Cache hit for PostgreSQL query", {
+            cacheKey,
+            query: query.substring(0, 100) + "...",
+          });
+          return cacheResult.data;
+        }
+      }
 
-      await this.metricsCollector.recordCounter("postgresql.cache.miss");
+      await this.metricsCollector?.recordCounter("postgresql.cache.miss");
       const result = (await this.executeRaw(query, ...params)) as T;
 
-      // TODO: Re-implement caching with proper DI
-      // await this.cacheService.set(cacheKey, result, cacheOptions.ttl);
-      this.logger.debug("Cached PostgreSQL query result", {
-        cacheKey,
-        ttl: cacheOptions.ttl,
-        query: query.substring(0, 100) + "...",
-      });
+      // Cache the result if cache service is available
+      if (this.cacheService) {
+        await this.cacheService.set(cacheKey, result, cacheOptions.ttl);
+        this.logger.debug("Cached PostgreSQL query result", {
+          cacheKey,
+          ttl: cacheOptions.ttl,
+          query: query.substring(0, 100) + "...",
+        });
+      }
 
       return result;
     } catch (error) {
-      await this.metricsCollector.recordCounter("postgresql.cache.error");
+      await this.metricsCollector?.recordCounter("postgresql.cache.error");
       this.logger.warn(
         "Cache operation failed, executing query directly",
         error
@@ -495,14 +522,24 @@ export class PostgreSQLClient {
    */
   async invalidateCache(pattern?: string): Promise<void> {
     try {
+      if (!this.cacheService) {
+        this.logger.debug("Cache service not available, skipping invalidation");
+        return;
+      }
+
       const searchPattern = pattern || `${this.queryCache.cacheKeyPrefix}*`;
-      // TODO: Re-implement caching with proper DI
-      // await this.cacheService.invalidatePattern(searchPattern);
+      const invalidatedCount = await this.cacheService.invalidatePattern(
+        searchPattern
+      );
 
       this.logger.info("PostgreSQL cache invalidated", {
         pattern: searchPattern,
+        invalidatedCount,
       });
-      await this.metricsCollector.recordCounter("postgresql.cache.invalidated");
+      await this.metricsCollector?.recordCounter(
+        "postgresql.cache.invalidated",
+        invalidatedCount
+      );
     } catch (error) {
       this.logger.error("PostgreSQL cache invalidation failed", error);
       throw new PostgreSQLError("Cache invalidation failed", error);
@@ -522,17 +559,31 @@ export class PostgreSQLClient {
       hitRate: number;
     };
   }> {
-    const mockMetrics = {
-      hits: 0,
-      misses: 0,
-      errors: 0,
-      hitRate: 0,
-    };
+    if (!this.cacheService) {
+      return {
+        enabled: false,
+        config: this.queryCache,
+        metrics: {
+          hits: 0,
+          misses: 0,
+          errors: 0,
+          hitRate: 0,
+        },
+      };
+    }
+
+    const cacheStats = this.cacheService.getStats();
+    const cacheHealth = await this.cacheService.healthCheck();
 
     return {
-      enabled: this.queryCache.enabled,
+      enabled: this.queryCache.enabled && (await this.cacheService.isEnabled()),
       config: this.queryCache,
-      metrics: mockMetrics,
+      metrics: {
+        hits: cacheStats.Hits,
+        misses: cacheStats.Misses,
+        errors: 0, // TODO: Track cache errors separately
+        hitRate: cacheHealth.hitRate,
+      },
     };
   }
 
@@ -614,15 +665,16 @@ export class PostgreSQLClient {
 
         const batchPromises = batch.map(async (operation, index) => {
           try {
-            return await executeWithRetryAndBreaker(
+            return await executeWithRetry(
               operation,
-              (error) =>
+              (error: unknown) =>
                 this.logger.error(
                   `Batch operation ${i + index + 1} failed after retries`,
                   error
                 ),
               {
                 operationName: `Batch operation ${i + index + 1}`,
+                enableCircuitBreaker: true,
               }
             );
           } catch (error) {
@@ -671,15 +723,15 @@ export class PostgreSQLClient {
       const duration = performance.now() - start;
       const stats = { processed, failed: errors.length, duration };
 
-      await this.metricsCollector.recordTimer(
+      await this.metricsCollector?.recordTimer(
         "postgresql.batch.duration",
         duration
       );
-      await this.metricsCollector.recordCounter(
+      await this.metricsCollector?.recordCounter(
         "postgresql.batch.operations",
         processed
       );
-      await this.metricsCollector.recordCounter(
+      await this.metricsCollector?.recordCounter(
         "postgresql.batch.errors",
         errors.length
       );

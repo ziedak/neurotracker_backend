@@ -1,42 +1,26 @@
-import { container } from "tsyringe";
-import { RedisClient } from "../redis/redisClient";
+import { RedisClient, type RedisConfig } from "../redis/redisClient";
 import { ClickHouseClient } from "../clickhouse/clickhouseClient";
+import { type IMetricsCollector } from "@libs/monitoring";
 
 /**
- * Service Factory for bridging TSyringe DI with existing ServiceContainer pattern.
- * Provides getInstance-style methods for backward compatibility.
+ * Service Factory for creating database clients with clean interfaces.
+ * Provides simple factory methods without framework coupling.
  */
-export class ServiceFactory {
-  private static redisInstance: RedisClient;
-  private static clickhouseInstance: ClickHouseClient;
+export class DatabaseFactory {
   /**
-   * Get Redis client instance (singleton).
+   * Create Redis client instance.
    */
-  static getRedisClient(): RedisClient {
-    if (!this.redisInstance) {
-      // Register dependencies if not already registered
-
-      this.redisInstance = container.resolve(RedisClient);
-    }
-    return this.redisInstance;
+  static createRedis(
+    config: RedisConfig = {},
+    metrics?: IMetricsCollector
+  ): RedisClient {
+    return RedisClient.create(config, metrics);
   }
 
   /**
-   * Get ClickHouse client instance (enterprise version).
+   * Create ClickHouse client instance.
    */
-  static getClickHouseClient(): ClickHouseClient {
-    if (!this.clickhouseInstance) {
-      this.clickhouseInstance = container.resolve(ClickHouseClient);
-    }
-    return this.clickhouseInstance;
-  }
-
-  /**
-   * Clean up all cached instances.
-   * Useful for testing or graceful shutdown.
-   */
-  static cleanup() {
-    this.redisInstance = undefined as any;
-    this.clickhouseInstance = undefined as any;
+  static createClickHouse(metrics?: IMetricsCollector): ClickHouseClient {
+    return ClickHouseClient.create(metrics);
   }
 }

@@ -10,7 +10,6 @@
  */
 
 import * as prometheus from "prom-client";
-import { injectable, singleton } from "tsyringe";
 
 import { METRIC_BUCKETS } from "./config/MetricConfig";
 import type { IMetricsCollector } from "./MetricsCollector";
@@ -20,8 +19,6 @@ import { createLogger } from "@libs/utils";
 // PROMETHEUS METRICS COLLECTOR
 // ===================================================================
 
-@injectable()
-@singleton()
 export class PrometheusMetricsCollector implements IMetricsCollector {
   // Prometheus metric instances cache
   private counters = new Map<string, prometheus.Counter>();
@@ -33,10 +30,15 @@ export class PrometheusMetricsCollector implements IMetricsCollector {
   private labelCache = new Map<string, Record<string, string>>();
   private metricRegistry: prometheus.Registry;
   private logger = createLogger("PrometheusMetricsCollector");
+
   constructor() {
     this.metricRegistry = prometheus.register;
     this.setupDefaultMetrics();
     this.setupCleanup();
+  }
+
+  static create(): PrometheusMetricsCollector {
+    return new PrometheusMetricsCollector();
   }
 
   // ===================================================================
