@@ -5,6 +5,11 @@
   "types": "../../dist/libs/database/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmitOnError",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src/**/*.ts tests/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts tests/**/*.ts --fix",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
@@ -32,8 +37,16 @@
     "@types/ioredis": "^5.0.0",
     "@types/lodash": "^4.17.20",
     "@types/node": "^24.3.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-prettier": "^5.0.0",
+    "jest": "^29.0.0",
+    "prettier": "^3.0.0",
     "prisma-repository-generator": "^3.2.2",
     "prisma-zod-generator": "^1.17.1",
+    "ts-jest": "^29.0.0",
     "tsx": "^4.20.5"
   }
 }

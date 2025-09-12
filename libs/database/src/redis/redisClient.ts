@@ -75,36 +75,36 @@ export class RedisClient {
       this.logger.info("Redis connected");
       this.isConnected = true;
       this.retryCount = 0;
-      this.metrics?.recordCounter("redis_connection_success");
+      this.metrics?.recordCounter?.("redis_connection_success");
     });
 
     this.redis.on("ready", () => {
       this.logger.info("Redis ready to accept commands");
-      this.metrics?.recordCounter("redis_ready");
+      this.metrics?.recordCounter?.("redis_ready");
     });
 
     this.redis.on("error", (error) => {
       this.logger.error("Redis error", error);
       this.isConnected = false;
-      this.metrics?.recordCounter("redis_connection_error");
+      this.metrics?.recordCounter?.("redis_connection_error");
     });
 
     this.redis.on("close", () => {
       this.logger.info("Redis connection closed");
       this.isConnected = false;
-      this.metrics?.recordCounter("redis_connection_closed");
+      this.metrics?.recordCounter?.("redis_connection_closed");
       this.scheduleReconnect();
     });
 
     this.redis.on("reconnecting", () => {
       this.logger.info("Redis reconnecting...");
-      this.metrics?.recordCounter("redis_reconnecting");
+      this.metrics?.recordCounter?.("redis_reconnecting");
     });
 
     this.redis.on("end", () => {
       this.logger.warn("Redis connection ended");
       this.isConnected = false;
-      this.metrics?.recordCounter("redis_connection_ended");
+      this.metrics?.recordCounter?.("redis_connection_ended");
     });
 
     this.eventHandlersAttached = true;
@@ -185,7 +185,7 @@ export class RedisClient {
         delete this.reconnectTimeout;
       }
 
-      if (this.redis && this.isConnected) {
+      if (this.redis) {
         await this.redis.quit();
         this.isConnected = false;
         this.logger.info("Redis disconnected");
@@ -350,17 +350,25 @@ export class RedisClient {
       }
     }
 
-    return executeRedisWithRetry(
-      this.redis,
-      (redis: Redis) => Promise.resolve(redis.del(...args)),
-      (error) =>
-        this.logger.warn(`Safe del failed for keys ${args.join(", ")}`, error),
-      {
-        operationName: "redis_del",
-        enableCircuitBreaker: true,
-        enableMetrics: true,
-      }
-    );
+    try {
+      return await executeRedisWithRetry(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.del(...args)),
+        (error) =>
+          this.logger.warn(
+            `Safe del failed for keys ${args.join(", ")}`,
+            error
+          ),
+        {
+          operationName: "redis_del",
+          enableCircuitBreaker: true,
+          enableMetrics: true,
+        }
+      );
+    } catch (error) {
+      this.logger.warn(`Safe del failed for keys ${args.join(", ")}`, error);
+      return 0;
+    }
   }
 
   getRedis(): Redis {
@@ -575,8 +583,17 @@ export class RedisClient {
   }> {
     try {
       const start = Date.now();
-      await this.ping();
+      const isHealthy = await this.ping();
       const latency = Date.now() - start;
+
+      if (!isHealthy) {
+        return {
+          status: "unhealthy",
+          connectionState: this.redis?.status || "unknown",
+          retryCount: this.retryCount,
+        };
+      }
+
       return {
         status: "healthy",
         latency,

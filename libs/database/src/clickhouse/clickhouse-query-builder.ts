@@ -284,11 +284,13 @@ export class ClickHouseQueryBuilder {
     // Build SELECT clause with time grouping
     const selectClause = [
       `${intervalFunction} AS time_interval`,
-      ...select.filter(
-        (field) =>
-          this.isValidIdentifier(field) &&
-          (allowedFields.length === 0 || allowedFields.includes(field))
-      ),
+      ...select
+        .filter(
+          (field) =>
+            this.isValidIdentifier(field) &&
+            (allowedFields.length === 0 || allowedFields.includes(field))
+        )
+        .map((field) => this.escapeIdentifier(field)),
     ].join(", ");
 
     // Add date range to WHERE conditions

@@ -91,6 +91,9 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
    * Cache health check
    */
   async healthCheck(): Promise<CacheHealth> {
+    // Update stats to reflect current state
+    this.updateMemoryStats();
+
     let result: CacheHealth = {
       status: "healthy",
       capacity: "ok",
@@ -229,6 +232,12 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
   }
 
   protected async doSet<T>(key: string, data: T, ttl: number): Promise<void> {
+    // Basic data validation - prevent storing undefined as data
+    if (data === undefined) {
+      this.logger.warn("Attempted to cache undefined data", { key });
+      return;
+    }
+
     // Compress data if enabled and meets threshold
     let finalData = data;
     let compressed = false;

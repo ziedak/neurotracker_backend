@@ -23,7 +23,10 @@ try {
     typeof DatabaseFactory.createClickHouse
   );
 } catch (error) {
-  console.error("   ❌ Database library failed:", error.message);
+  console.error(
+    "   ❌ Database library failed:",
+    error instanceof Error ? error.message : error
+  );
 }
 
 // Test 2: Utils Library
@@ -37,7 +40,10 @@ try {
   console.log("   ✅ Scheduler.create() works:", typeof scheduler);
   console.log("   ✅ Scheduler functionality works (basic test)");
 } catch (error) {
-  console.error("   ❌ Utils library failed:", error.message);
+  console.error(
+    "   ❌ Utils library failed:",
+    error instanceof Error ? error.message : error
+  );
 }
 
 // Test 3: Monitoring Library
@@ -66,7 +72,10 @@ try {
   await metrics.recordCounter("test_metric", 1);
   console.log("   ✅ Metrics recording works");
 } catch (error) {
-  console.error("   ❌ Monitoring library failed:", error.message);
+  console.error(
+    "   ❌ Monitoring library failed:",
+    error instanceof Error ? error.message : error
+  );
 }
 
 console.log("\n🎉 ALL LIBRARIES SUCCESSFULLY CLEANED OF TSYRINGE!");

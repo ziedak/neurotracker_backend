@@ -112,7 +112,10 @@ export enum HealthStatus {
  * Custom error class for ClickHouse operations.
  */
 export class ClickHouseError extends Error {
-  constructor(message: string, public override readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public override readonly cause?: unknown
+  ) {
     super(message);
     this.name = "ClickHouseError";
   }
@@ -356,7 +359,7 @@ export class ClickHouseClient implements IClickHouseClient {
         1
       );
       this.logger.error("ClickHouse health check failed", error);
-      throw new ClickHouseError("Health check failed", error);
+      return { status: HealthStatus.UNHEALTHY };
     }
   }
 
@@ -499,9 +502,8 @@ export class ClickHouseClient implements IClickHouseClient {
 
     try {
       const searchPattern = pattern || `${this.queryCache.cacheKeyPrefix}*`;
-      const invalidatedCount = await this.cacheService.invalidatePattern(
-        searchPattern
-      );
+      const invalidatedCount =
+        await this.cacheService.invalidatePattern(searchPattern);
       await this.metricsCollector?.recordCounter(
         "clickhouse.cache.invalidated",
         invalidatedCount

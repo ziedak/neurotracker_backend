@@ -10,7 +10,10 @@ import type { ICache } from "@libs/database/src/cache/interfaces/ICache";
  * Custom error class for PostgreSQL operations.
  */
 export class PostgreSQLError extends Error {
-  constructor(message: string, public override readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public override readonly cause?: unknown
+  ) {
     super(message);
     this.name = "PostgreSQLError";
   }
@@ -528,9 +531,8 @@ export class PostgreSQLClient {
       }
 
       const searchPattern = pattern || `${this.queryCache.cacheKeyPrefix}*`;
-      const invalidatedCount = await this.cacheService.invalidatePattern(
-        searchPattern
-      );
+      const invalidatedCount =
+        await this.cacheService.invalidatePattern(searchPattern);
 
       this.logger.info("PostgreSQL cache invalidated", {
         pattern: searchPattern,
@@ -685,19 +687,33 @@ export class PostgreSQLClient {
           }
         });
 
+        const timeoutIds: NodeJS.Timeout[] = [];
+
         const batchResults = await Promise.allSettled(
-          batchPromises.map((promise) =>
-            Promise.race([
-              promise,
-              new Promise((_, reject) =>
-                setTimeout(
-                  () => reject(new Error("Operation timeout")),
-                  batchConfig.timeoutMs
-                )
-              ),
-            ])
-          )
+          batchPromises.map((promise) => {
+            let timeoutId: NodeJS.Timeout;
+            const timeoutPromise = new Promise<never>((_, reject) => {
+              timeoutId = setTimeout(() => {
+                reject(new Error("Operation timeout"));
+              }, batchConfig.timeoutMs);
+              timeoutIds.push(timeoutId!);
+            });
+
+            return Promise.race([
+              promise.finally(() => {
+                if (timeoutId) {
+                  clearTimeout(timeoutId);
+                  const index = timeoutIds.indexOf(timeoutId);
+                  if (index > -1) timeoutIds.splice(index, 1);
+                }
+              }),
+              timeoutPromise,
+            ]);
+          })
         );
+
+        // Clean up any remaining timeouts
+        timeoutIds.forEach((id) => clearTimeout(id));
 
         batchResults.forEach((result) => {
           processed++;

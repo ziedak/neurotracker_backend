@@ -335,7 +335,40 @@ export class CacheService implements ICache {
    * Get cache statistics
    */
   getStats(): CacheStats {
-    return { ...this.stats };
+    // Aggregate stats from all caches
+    const cacheStats = this.caches.map((cache) => cache.getStats());
+    const totalHits = cacheStats
+      .map((stat) => stat.Hits)
+      .reduce((a, b) => a + b, 0);
+    const totalMisses = cacheStats
+      .map((stat) => stat.Misses)
+      .reduce((a, b) => a + b, 0);
+    const totalRequests = cacheStats
+      .map((stat) => stat.totalRequests)
+      .reduce((a, b) => a + b, 0);
+    const totalMemoryUsage = cacheStats
+      .map((stat) => stat.memoryUsage)
+      .reduce((a, b) => a + b, 0);
+    const totalEntryCount = cacheStats
+      .map((stat) => stat.entryCount)
+      .reduce((a, b) => a + b, 0);
+    const totalInvalidations = cacheStats
+      .map((stat) => stat.invalidations)
+      .reduce((a, b) => a + b, 0);
+    const totalCompressions = cacheStats
+      .map((stat) => stat.compressions)
+      .reduce((a, b) => a + b, 0);
+
+    return {
+      Hits: totalHits,
+      Misses: totalMisses,
+      totalRequests,
+      hitRate: totalRequests > 0 ? totalHits / totalRequests : 0,
+      memoryUsage: totalMemoryUsage,
+      entryCount: totalEntryCount,
+      invalidations: totalInvalidations,
+      compressions: totalCompressions,
+    };
   }
 
   /**
@@ -378,15 +411,15 @@ export class CacheService implements ICache {
     const worstStatus = healthChecks.some((h) => h.status === "critical")
       ? "critical"
       : healthChecks.some((h) => h.status === "degraded")
-      ? "degraded"
-      : "healthy";
+        ? "degraded"
+        : "healthy";
 
     // Determine overall capacity - worst case wins
     const worstCapacity = healthChecks.some((h) => h.capacity === "error")
       ? "error"
       : healthChecks.some((h) => h.capacity === "full")
-      ? "full"
-      : "ok";
+        ? "full"
+        : "ok";
 
     return {
       status: worstStatus,
@@ -449,7 +482,11 @@ export class CacheService implements ICache {
       // Clear all cache levels
       for (const cache of this.caches) {
         if (cache && typeof cache.dispose === "function") {
-          await cache.dispose();
+          try {
+            await cache.dispose();
+          } catch (error) {
+            this.logger.error("Error disposing cache", error as Error);
+          }
         }
       }
 
