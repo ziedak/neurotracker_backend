@@ -25,11 +25,15 @@ jest.mock("../../../src/redis/redisClient", () => ({
   },
 }));
 
+jest.mock("@libs/monitoring", () => ({
+  IMetricsCollector: jest.fn(),
+}));
+
 describe("CacheService", () => {
   let cacheService: CacheService;
   let mockMemoryCache: jest.Mocked<ICache>;
   let mockRedisCache: jest.Mocked<ICache>;
-  let mockMetrics: any;
+  let mockMetrics: unknown; // Mock for IMetricsCollector
 
   beforeEach(() => {
     mockMemoryCache = {
@@ -266,7 +270,7 @@ describe("CacheService", () => {
     it("should reject undefined data", async () => {
       const testKey = "test-key";
 
-      await cacheService.set(testKey, undefined as any);
+      await cacheService.set(testKey, undefined as unknown);
 
       expect(mockMemoryCache.set).not.toHaveBeenCalled();
       expect(mockRedisCache.set).not.toHaveBeenCalled();

@@ -1,10 +1,32 @@
 import { CacheService } from "../../src/cache/cache.service";
 import { MemoryCache } from "../../src/cache/strategies/MemoryCache";
 import { RedisCache } from "../../src/cache/strategies/RedisCache";
+import type { RedisClient } from "../../src/redis/redisClient";
 
 describe("CacheService Integration", () => {
   let cacheService: CacheService;
-  let mockRedisClient: any;
+  // Import the RedisClient type from the correct location
+
+  let mockRedisClient: {
+    isHealthy: jest.Mock<Promise<boolean>, []>;
+    ping: jest.Mock<Promise<string>, []>;
+    safeGet: jest.Mock<
+      Promise<string | null>,
+      [key: string, defaultValue?: string]
+    >;
+    safeSetEx: jest.Mock<
+      Promise<boolean>,
+      [key: string, ttl: number, value: string]
+    >;
+    safeDel: jest.Mock<Promise<number>, [key: string]>;
+    safeKeys: jest.Mock<Promise<string[]>, [pattern: string]>;
+    safeIncrBy: jest.Mock<Promise<number>, [key: string, increment: number]>;
+    safeExpire: jest.Mock<Promise<boolean>, [key: string, ttl: number]>;
+    safeExists: jest.Mock<Promise<number>, [key: string]>;
+    safeMget: jest.Mock<Promise<(string | null)[]>, [keys: string[]]>;
+    pipeline: jest.Mock;
+    disconnect: jest.Mock<Promise<void>, []>;
+  };
 
   beforeEach(() => {
     // Mock Redis client for RedisCache
@@ -27,7 +49,10 @@ describe("CacheService Integration", () => {
 
     // Create cache service with real implementations
     const memoryCache = new MemoryCache();
-    const redisCache = new RedisCache(mockRedisClient);
+    // Cast mockRedisClient to the expected RedisClient type
+    const redisCache = new RedisCache(
+      mockRedisClient as unknown as RedisClient
+    );
     cacheService = new CacheService(undefined, [memoryCache, redisCache]);
   });
 
@@ -224,7 +249,7 @@ describe("CacheService Integration", () => {
         new MemoryCache({
           compressionConfig: { enableCompression: true, thresholdBytes: 1024 },
         }),
-        new RedisCache(mockRedisClient, {
+        new RedisCache(mockRedisClient as unknown as RedisClient, {
           compressionConfig: { enableCompression: true, thresholdBytes: 1024 },
         }),
       ]);
@@ -261,10 +286,12 @@ describe("CacheService Integration", () => {
 
       const results = await Promise.all(readPromises);
 
-      // Verify all reads succeeded
-      results.forEach((result: any, i: number) => {
-        expect(result.data).toEqual({ ...testData, id: i });
-        expect(result.source).toBe("l1");
+      results.forEach((result: unknown, i: number) => {
+        expect((result as { data: unknown; source: string }).data).toEqual({
+          ...testData,
+          id: i,
+        });
+        expect((result as { data: unknown; source: string }).source).toBe("l1");
       });
     });
 
@@ -327,7 +354,7 @@ describe("CacheService Integration", () => {
       expect(result.source).toBe("l1");
 
       // Now make Redis work again
-      mockRedisClient.safeSetEx.mockResolvedValue("OK");
+      mockRedisClient.safeSetEx.mockResolvedValue(true);
       mockRedisClient.safeGet.mockResolvedValue(
         JSON.stringify({
           data: testData,

@@ -51,10 +51,10 @@ export const DEFAULT_MEMORY_TRACKER_CONFIG: MemoryTrackerConfig = {
  */
 export class MemoryTracker {
   private config: MemoryTrackerConfig;
-  private memoryMap: Map<string, MemoryInfo> = new Map();
+  private readonly memoryMap: Map<string, MemoryInfo> = new Map();
   private totalMemoryUsage: number = 0;
   private operationCount: number = 0;
-  private logger = createLogger("MemoryTracker");
+  private readonly logger = createLogger("MemoryTracker");
 
   constructor(config: Partial<MemoryTrackerConfig> = {}) {
     this.config = { ...DEFAULT_MEMORY_TRACKER_CONFIG, ...config };
@@ -63,7 +63,7 @@ export class MemoryTracker {
   /**
    * Calculate the size of a JavaScript object in bytes
    */
-  calculateObjectSize(obj: any): number {
+  calculateObjectSize(obj: unknown): number {
     if (obj === null || obj === undefined) return 0;
 
     const type = typeof obj;
@@ -72,9 +72,9 @@ export class MemoryTracker {
       case "boolean":
         return 4; // 4 bytes for boolean
       case "number":
-        return obj % 1 === 0 ? 8 : 16; // 8 bytes for int, 16 for float
+        return (obj as number) % 1 === 0 ? 8 : 16; // 8 bytes for int, 16 for float
       case "string":
-        return obj.length * 2; // 2 bytes per character (UTF-16)
+        return (obj as string).length * 2; // 2 bytes per character (UTF-16)
       case "object":
         if (Array.isArray(obj)) {
           return (
@@ -86,14 +86,17 @@ export class MemoryTracker {
         }
 
         // For plain objects, calculate size of all properties
-        let size = 8; // Object overhead
-        for (const key in obj) {
-          if (obj.hasOwnProperty(key)) {
-            size += this.calculateObjectSize(key); // Key size
-            size += this.calculateObjectSize(obj[key]); // Value size
+        {
+          let size = 8; // Object overhead
+          const objAsRecord = obj as Record<string, unknown>;
+          for (const key in objAsRecord) {
+            if (Object.prototype.hasOwnProperty.call(objAsRecord, key)) {
+              size += this.calculateObjectSize(key); // Key size
+              size += this.calculateObjectSize(objAsRecord[key]); // Value size
+            }
           }
+          return size;
         }
-        return size;
 
       default:
         return 8; // Default overhead for other types
@@ -105,8 +108,8 @@ export class MemoryTracker {
    */
   private calculateMemoryInfo(
     key: string,
-    value: any,
-    metadata?: any
+    value: unknown,
+    metadata?: unknown
   ): MemoryInfo {
     const keySize = this.calculateObjectSize(key);
     const valueSize = this.calculateObjectSize(value);
@@ -124,7 +127,7 @@ export class MemoryTracker {
   /**
    * Track memory usage for a cache entry
    */
-  trackEntry(key: string, value: any, metadata?: any): MemoryInfo {
+  trackEntry(key: string, value: unknown, metadata?: unknown): MemoryInfo {
     const memoryInfo = this.calculateMemoryInfo(key, value, metadata);
 
     // Update or add entry
@@ -159,7 +162,7 @@ export class MemoryTracker {
    * Get memory info for a specific entry
    */
   getEntryMemoryInfo(key: string): MemoryInfo | null {
-    return this.memoryMap.get(key) || null;
+    return this.memoryMap.get(key) ?? null;
   }
 
   /**

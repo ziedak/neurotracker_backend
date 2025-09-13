@@ -16,6 +16,39 @@ export interface ConfigValidationOptions {
   autoCorrect?: boolean; // Attempt to fix invalid values
 }
 
+export interface MemoryConfig {
+  maxMemoryMB: number;
+  warningThresholdPercent: number;
+  criticalThresholdPercent: number;
+  sizeCalculationInterval?: number;
+}
+
+export interface CompressionConfig {
+  algorithm: "gzip" | "deflate" | "brotli" | "lz4" | "none";
+  level: number;
+  thresholdBytes?: number;
+  enableCompression: boolean;
+  fallbackOnError: boolean;
+}
+
+export interface WarmingConfig {
+  backgroundWarmingInterval?: number;
+  maxWarmupKeys?: number;
+  warmupBatchSize?: number;
+  enableBackgroundWarming: boolean;
+  adaptiveWarming?: boolean;
+  enablePatternLearning?: boolean;
+}
+
+export interface CacheConfig {
+  enable: boolean;
+  defaultTTL: number;
+  maxMemoryCacheSize?: number;
+  memoryConfig?: MemoryConfig;
+  compressionConfig?: CompressionConfig;
+  warmingConfig?: WarmingConfig;
+}
+
 /**
  * Validates cache configuration for correctness and optimal performance
  */
@@ -26,7 +59,7 @@ export class CacheConfigValidator {
    * Validate complete cache configuration
    */
   validateCacheConfig(
-    config: any,
+    config: CacheConfig,
     options: ConfigValidationOptions = {}
   ): ValidationResult {
     const { strict = false, autoCorrect = false } = options;
@@ -78,7 +111,7 @@ export class CacheConfigValidator {
    * Validate basic cache configuration
    */
   private validateBasicConfig(
-    config: any,
+    config: CacheConfig,
     errors: string[],
     warnings: string[]
   ): void {
@@ -123,7 +156,7 @@ export class CacheConfigValidator {
    * Validate memory configuration
    */
   private validateMemoryConfig(
-    memoryConfig: any,
+    memoryConfig: MemoryConfig,
     errors: string[],
     warnings: string[]
   ): void {
@@ -181,7 +214,7 @@ export class CacheConfigValidator {
    * Validate compression configuration
    */
   private validateCompressionConfig(
-    compressionConfig: any,
+    compressionConfig: CompressionConfig,
     errors: string[],
     warnings: string[]
   ): void {
@@ -232,18 +265,21 @@ export class CacheConfigValidator {
    * Validate warming configuration
    */
   private validateWarmingConfig(
-    warmingConfig: any,
+    warmingConfig: WarmingConfig,
     errors: string[],
     warnings: string[]
   ): void {
     // Background warming interval
     if (
-      warmingConfig.backgroundWarmingInterval &&
+      warmingConfig.backgroundWarmingInterval !== undefined &&
       (typeof warmingConfig.backgroundWarmingInterval !== "number" ||
         warmingConfig.backgroundWarmingInterval <= 0)
     ) {
       errors.push("backgroundWarmingInterval must be a positive number");
-    } else if (warmingConfig.backgroundWarmingInterval < 60) {
+    } else if (
+      warmingConfig.backgroundWarmingInterval &&
+      warmingConfig.backgroundWarmingInterval < 60
+    ) {
       warnings.push(
         "backgroundWarmingInterval < 60 seconds may be too frequent"
       );
@@ -251,45 +287,56 @@ export class CacheConfigValidator {
 
     // Max warmup keys
     if (
-      warmingConfig.maxWarmupKeys &&
+      warmingConfig.maxWarmupKeys !== undefined &&
       (typeof warmingConfig.maxWarmupKeys !== "number" ||
         warmingConfig.maxWarmupKeys <= 0)
     ) {
       errors.push("maxWarmupKeys must be a positive number");
-    } else if (warmingConfig.maxWarmupKeys > 10000) {
+    } else if (
+      warmingConfig.maxWarmupKeys &&
+      warmingConfig.maxWarmupKeys > 10000
+    ) {
       warnings.push("maxWarmupKeys > 10000 may cause long warmup times");
     }
 
     // Warmup batch size
     if (
-      warmingConfig.warmupBatchSize &&
+      warmingConfig.warmupBatchSize !== undefined &&
       (typeof warmingConfig.warmupBatchSize !== "number" ||
         warmingConfig.warmupBatchSize <= 0)
     ) {
       errors.push("warmupBatchSize must be a positive number");
-    } else if (warmingConfig.warmupBatchSize > 100) {
+    } else if (
+      warmingConfig.warmupBatchSize &&
+      warmingConfig.warmupBatchSize > 100
+    ) {
       warnings.push("warmupBatchSize > 100 may overwhelm the database");
     }
 
-    // Boolean flags
-    [
-      "enableBackgroundWarming",
-      "adaptiveWarming",
-      "enablePatternLearning",
-    ].forEach((flag) => {
-      if (
-        warmingConfig[flag] !== undefined &&
-        typeof warmingConfig[flag] !== "boolean"
-      ) {
-        errors.push(`${flag} must be a boolean`);
-      }
-    });
+    // Boolean flags validation
+    if (typeof warmingConfig.enableBackgroundWarming !== "boolean") {
+      errors.push("enableBackgroundWarming must be a boolean");
+    }
+
+    if (
+      warmingConfig.adaptiveWarming !== undefined &&
+      typeof warmingConfig.adaptiveWarming !== "boolean"
+    ) {
+      errors.push("adaptiveWarming must be a boolean");
+    }
+
+    if (
+      warmingConfig.enablePatternLearning !== undefined &&
+      typeof warmingConfig.enablePatternLearning !== "boolean"
+    ) {
+      errors.push("enablePatternLearning must be a boolean");
+    }
   }
 
   /**
    * Apply automatic corrections to configuration
    */
-  private applyAutoCorrections(config: any, warnings: string[]): void {
+  private applyAutoCorrections(config: CacheConfig, warnings: string[]): void {
     // Correct TTL if too low
     if (config.defaultTTL < 60) {
       config.defaultTTL = 300; // 5 minutes
@@ -320,16 +367,12 @@ export class CacheConfigValidator {
    */
   generateRecommendedConfig(
     environment: "development" | "staging" | "production"
-  ): any {
-    const baseConfig = {
-      enable: true,
-      defaultTTL: 3600, // 1 hour
-    };
-
+  ): CacheConfig {
     switch (environment) {
       case "development":
         return {
-          ...baseConfig,
+          enable: true,
+          defaultTTL: 3600,
           maxMemoryCacheSize: 1000,
           memoryConfig: {
             maxMemoryMB: 25,
@@ -337,7 +380,10 @@ export class CacheConfigValidator {
             criticalThresholdPercent: 95,
           },
           compressionConfig: {
-            enableCompression: false, // Disable for faster debugging
+            enableCompression: false,
+            algorithm: "gzip",
+            level: 1,
+            fallbackOnError: true,
           },
           warmingConfig: {
             enableBackgroundWarming: false,
@@ -346,7 +392,8 @@ export class CacheConfigValidator {
 
       case "staging":
         return {
-          ...baseConfig,
+          enable: true,
+          defaultTTL: 3600,
           maxMemoryCacheSize: 5000,
           memoryConfig: {
             maxMemoryMB: 100,
@@ -357,6 +404,7 @@ export class CacheConfigValidator {
             enableCompression: true,
             algorithm: "gzip",
             level: 4,
+            fallbackOnError: true,
           },
           warmingConfig: {
             enableBackgroundWarming: true,
@@ -366,7 +414,8 @@ export class CacheConfigValidator {
 
       case "production":
         return {
-          ...baseConfig,
+          enable: true,
+          defaultTTL: 3600,
           maxMemoryCacheSize: 50000,
           memoryConfig: {
             maxMemoryMB: 500,
@@ -378,6 +427,7 @@ export class CacheConfigValidator {
             algorithm: "gzip",
             level: 6,
             thresholdBytes: 1024,
+            fallbackOnError: true,
           },
           warmingConfig: {
             enableBackgroundWarming: true,
@@ -388,7 +438,19 @@ export class CacheConfigValidator {
         };
 
       default:
-        return baseConfig;
+        return {
+          enable: true,
+          defaultTTL: 3600,
+          compressionConfig: {
+            enableCompression: false,
+            algorithm: "gzip",
+            level: 1,
+            fallbackOnError: true,
+          },
+          warmingConfig: {
+            enableBackgroundWarming: false,
+          },
+        };
     }
   }
 }

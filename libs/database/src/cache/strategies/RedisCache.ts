@@ -62,7 +62,7 @@ export class RedisCache extends BaseCache<RedisCacheConfig> {
    * Cache health check
    */
   async healthCheck(): Promise<CacheHealth> {
-    let result: CacheHealth = {
+    const result: CacheHealth = {
       status: "healthy",
       capacity: "ok",
       hitRate: this.stats.hitRate,
@@ -105,7 +105,7 @@ export class RedisCache extends BaseCache<RedisCacheConfig> {
             entry.data,
             DEFAULT_COMPRESSION_CONFIG
           );
-          entry.data = decompressResult.data;
+          entry.data = decompressResult.data as T;
           entry.compressed = false; // Mark as decompressed
         } catch (error) {
           this.logger.warn("Failed to decompress Redis cache entry", {
@@ -138,7 +138,7 @@ export class RedisCache extends BaseCache<RedisCacheConfig> {
     ttl: number
   ): Promise<void> {
     // Compress data if enabled and meets threshold
-    let finalData = data;
+    let finalData: T | unknown = data;
     let compressed = false;
     let compressionAlgorithm: string | undefined;
 
@@ -166,7 +166,7 @@ export class RedisCache extends BaseCache<RedisCacheConfig> {
     }
 
     const entry: CacheEntry<T> = {
-      data: finalData,
+      data: finalData as T,
       timestamp: Date.now(),
       ttl,
       hits: 0,

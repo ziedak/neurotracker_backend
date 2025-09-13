@@ -4,7 +4,6 @@
  * Functional implementation for better testability and composability
  */
 
-import { createLogger } from "@libs/utils";
 import {
   compressGzip,
   decompressGzip,
@@ -75,7 +74,7 @@ export interface CompressionStats {
  * Compression result
  */
 export interface CompressionResult {
-  data: any;
+  data: unknown;
   compressed: boolean;
   originalSize: number;
   compressedSize: number;
@@ -84,7 +83,7 @@ export interface CompressionResult {
 }
 
 export interface DecompressionResult {
-  data: any;
+  data: unknown;
   originalSize: number;
   compressedSize: number;
   decompressionTime: number;
@@ -92,19 +91,23 @@ export interface DecompressionResult {
 }
 
 /**
- * Compression context for functional operations
+ * Internal compressed data structure
  */
-export interface CompressionContext {
-  config: CompressionConfig;
-  stats: CompressionStats;
-  logger: ReturnType<typeof createLogger>;
+interface InternalCompressedData {
+  algorithm: CompressionAlgorithm;
+  compressed: boolean;
+  data: unknown;
+  originalSize: number;
+  compressedSize: number;
+  compressionTime: number;
+  compressionRatio: number;
 }
 
 /**
  * Compress data if it meets the threshold (pure function)
  */
 export async function compress(
-  data: any,
+  data: unknown,
   config: CompressionConfig
 ): Promise<CompressionResult> {
   const startTime = performance.now();
@@ -131,7 +134,7 @@ export async function compress(
     }
 
     // Use smart compression for gzip/deflate algorithms
-    let compressedData: any;
+    let compressedData: InternalCompressedData;
     if (config.algorithm === "gzip" || config.algorithm === "deflate") {
       const smartResult = await smartCompress(jsonString, {
         level: config.level,
@@ -139,7 +142,7 @@ export async function compress(
       });
 
       compressedData = {
-        algorithm: smartResult.algorithm,
+        algorithm: smartResult.algorithm as CompressionAlgorithm,
         compressed: true,
         data: smartResult.data,
         originalSize: smartResult.originalSize,
@@ -149,7 +152,7 @@ export async function compress(
       };
     } else {
       // Fall back to regular compression for other algorithms
-      compressedData = await compressData(data);
+      compressedData = (await compressData(data)) as InternalCompressedData;
     }
 
     const compressionTime = performance.now() - startTime;
@@ -183,7 +186,7 @@ export async function compress(
  * Decompress data if it was compressed (pure function)
  */
 export async function decompress(
-  compressedData: any,
+  compressedData: unknown,
   config: DecompressionConfig
 ): Promise<DecompressionResult> {
   const startTime = performance.now();
@@ -224,16 +227,16 @@ export async function decompress(
  * Compress data using the configured algorithm (pure function)
  */
 async function compressData(
-  data: any,
+  data: unknown,
   algorithm: CompressionAlgorithm = "gzip"
-): Promise<any> {
+): Promise<unknown> {
   const jsonString = JSON.stringify(data);
 
   switch (algorithm) {
     case "gzip":
-      return await gzipCompress(jsonString);
+      return gzipCompress(jsonString);
     case "deflate":
-      return await deflateCompress(jsonString);
+      return deflateCompress(jsonString);
     case "brotli":
     case "lz4":
     default:
@@ -245,9 +248,9 @@ async function compressData(
  * Decompress data using the specified algorithm (pure function)
  */
 async function decompressData(
-  compressedData: any,
+  compressedData: unknown,
   algorithm: CompressionAlgorithm
-): Promise<any> {
+): Promise<unknown> {
   let decompressedString: string;
 
   switch (algorithm) {
@@ -269,7 +272,7 @@ async function decompressData(
 /**
  * Gzip compression using production-grade CompressionEngine (pure function)
  */
-async function gzipCompress(data: string, level?: number): Promise<any> {
+async function gzipCompress(data: string, level?: number): Promise<unknown> {
   const result = await compressGzip(data, level);
   return {
     algorithm: "gzip",
@@ -282,20 +285,18 @@ async function gzipCompress(data: string, level?: number): Promise<any> {
   };
 }
 
-/**
- * Gzip decompression using production-grade CompressionEngine (pure function)
- */
-async function gzipDecompress(compressedData: any): Promise<string> {
-  if (compressedData.algorithm !== "gzip" || !compressedData.compressed) {
+async function gzipDecompress(compressedData: unknown): Promise<string> {
+  const data = compressedData as InternalCompressedData;
+  if (data.algorithm !== "gzip" || !data.compressed) {
     throw new Error("Invalid gzip compressed data");
   }
-  return await decompressGzip(compressedData.data);
+  return decompressGzip(data.data as Buffer);
 }
 
 /**
  * Deflate compression using production-grade CompressionEngine (pure function)
  */
-async function deflateCompress(data: string, level?: number): Promise<any> {
+async function deflateCompress(data: string, level?: number): Promise<unknown> {
   const result = await compressDeflate(data, level);
   return {
     algorithm: "deflate",
@@ -308,20 +309,18 @@ async function deflateCompress(data: string, level?: number): Promise<any> {
   };
 }
 
-/**
- * Deflate decompression using production-grade CompressionEngine (pure function)
- */
-async function deflateDecompress(compressedData: any): Promise<string> {
-  if (compressedData.algorithm !== "deflate" || !compressedData.compressed) {
+async function deflateDecompress(compressedData: unknown): Promise<string> {
+  const data = compressedData as InternalCompressedData;
+  if (data.algorithm !== "deflate" || !data.compressed) {
     throw new Error("Invalid deflate compressed data");
   }
-  return await decompressDeflate(compressedData.data);
+  return decompressDeflate(data.data as Buffer);
 }
 
 /**
  * Calculate data size in bytes (pure function)
  */
-export function calculateDataSize(data: any): number {
+export function calculateDataSize(data: unknown): number {
   if (data === null || data === undefined) return 0;
 
   if (typeof data === "string") {

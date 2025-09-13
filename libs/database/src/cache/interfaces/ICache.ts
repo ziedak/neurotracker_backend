@@ -14,7 +14,7 @@ export interface CacheWarmingConfig {
   readonly enablePatternLearning?: boolean;
 }
 
-export interface WarmupDataProvider<T = any> {
+export interface WarmupDataProvider<T = unknown> {
   getWarmupKeys(): Promise<string[]>;
   loadDataForKey(key: string): Promise<T | null>;
   getKeyPriority(key: string): number; // Higher number = higher priority

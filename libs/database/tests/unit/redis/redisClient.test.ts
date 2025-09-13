@@ -1,5 +1,5 @@
+import { createLogger, executeRedisWithRetry } from "../../../../utils/src";
 import { RedisClient } from "../../../src/redis/redisClient";
-import Redis from "ioredis";
 
 // Mock ioredis
 jest.mock("ioredis", () => {
@@ -42,7 +42,7 @@ jest.mock("@libs/config", () => ({
       REDIS_COMMAND_TIMEOUT: "5000",
       REDIS_KEEP_ALIVE: "30000",
     };
-    return envMap[key] || defaultValue || "";
+    return envMap[key] ?? defaultValue ?? "";
   }),
   getNumberEnv: jest.fn((key: string, defaultValue?: number) => {
     const envMap: Record<string, number> = {
@@ -73,14 +73,41 @@ jest.mock("@libs/monitoring", () => ({
   IMetricsCollector: jest.fn(),
 }));
 
-import { createLogger, executeRedisWithRetry } from "@libs/utils";
-
 describe("RedisClient", () => {
   let redisClient: RedisClient;
-  let mockRedis: any;
-  let mockLogger: any;
-  let mockMetrics: any;
-  let mockExecuteRedisWithRetry: any;
+  let mockRedis: {
+    connect: jest.Mock;
+    disconnect: jest.Mock;
+    quit: jest.Mock;
+    ping: jest.Mock;
+    get: jest.Mock;
+    set: jest.Mock;
+    setex: jest.Mock;
+    del: jest.Mock;
+    exists: jest.Mock;
+    keys: jest.Mock;
+    scan: jest.Mock;
+    mget: jest.Mock;
+    publish: jest.Mock;
+    subscribe: jest.Mock;
+    pipeline: jest.Mock;
+    on: jest.Mock;
+    off: jest.Mock;
+    once: jest.Mock;
+    emit: jest.Mock;
+    status: string;
+    options: Record<string, unknown>;
+  };
+  let mockLogger: {
+    info: jest.Mock;
+    debug: jest.Mock;
+    warn: jest.Mock;
+    error: jest.Mock;
+  };
+  let mockMetrics: {
+    recordTimer: jest.Mock;
+    recordCounter: jest.Mock;
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -99,6 +126,7 @@ describe("RedisClient", () => {
       keys: jest.fn().mockResolvedValue(["key1", "key2"]),
       mget: jest.fn().mockResolvedValue(["value1", "value2"]),
       publish: jest.fn().mockResolvedValue(1),
+      subscribe: jest.fn(),
       pipeline: jest.fn().mockReturnValue({ exec: jest.fn() }),
       scan: jest.fn().mockResolvedValue(["0", ["key1", "key2"]]),
       on: jest.fn(),
@@ -124,9 +152,10 @@ describe("RedisClient", () => {
     // Setup mock implementations
     (createLogger as jest.Mock).mockReturnValue(mockLogger);
     (executeRedisWithRetry as jest.Mock).mockImplementation(
-      async (redis, operation, errorHandler, options) => {
+      (redis, operation, errorHandler, _options) => {
         try {
-          return await operation(redis);
+          const result = operation(redis);
+          return result;
         } catch (error) {
           errorHandler(error);
           throw error;
@@ -191,7 +220,7 @@ describe("RedisClient", () => {
 
     it("should disconnect successfully", async () => {
       // Set connected state
-      (redisClient as any).isConnected = true;
+      (redisClient as unknown as { isConnected: boolean }).isConnected = true;
       mockRedis.quit.mockResolvedValue(undefined);
 
       await redisClient.disconnect();
@@ -406,7 +435,7 @@ describe("RedisClient", () => {
   describe("isHealthy", () => {
     it("should return true when healthy", async () => {
       // Set connected state
-      (redisClient as any).isConnected = true;
+      (redisClient as unknown as { isConnected: boolean }).isConnected = true;
       mockRedis.ping.mockResolvedValue("PONG");
 
       const result = await redisClient.isHealthy();
@@ -424,7 +453,7 @@ describe("RedisClient", () => {
 
     it("should return false when not connected", async () => {
       // Simulate disconnected state
-      redisClient.disconnect();
+      await redisClient.disconnect();
 
       const result = await redisClient.isHealthy();
 

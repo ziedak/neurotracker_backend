@@ -32,9 +32,9 @@ export interface IPostgreSQLConnectionPool {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   getClient(): Promise<PoolClient>;
-  query<T = any>(
+  query<T = unknown>(
     text: string,
-    params?: any[]
+    params?: unknown[]
   ): Promise<{ rows: T[]; rowCount: number }>;
   transaction<T>(callback: (client: PoolClient) => Promise<T>): Promise<T>;
   getStats(): {
@@ -55,14 +55,14 @@ export class PostgreSQLConnectionPool
   extends EventEmitter
   implements IPostgreSQLConnectionPool
 {
-  private pool: Pool;
-  private logger = createLogger("PostgreSQLConnectionPool");
-  private circuitBreakerPolicy?: any;
-  private metrics: IMetricsCollector | undefined;
+  private readonly pool: Pool;
+  private readonly logger = createLogger("PostgreSQLConnectionPool");
+  private readonly circuitBreakerPolicy?: ReturnType<typeof circuitBreaker>;
+  private readonly metrics: IMetricsCollector | undefined;
 
   constructor(config: PostgreSQLPoolConfig) {
     super();
-    this.metrics = config.metricsCollector || undefined;
+    this.metrics = config.metricsCollector ?? undefined;
 
     // Create the actual PostgreSQL connection pool
     this.pool = new Pool({
@@ -71,10 +71,10 @@ export class PostgreSQLConnectionPool
       database: config.database,
       user: config.user,
       password: config.password,
-      max: config.max || 20, // Maximum number of clients in the pool
-      min: config.min || 2, // Minimum number of clients in the pool
-      idleTimeoutMillis: config.idleTimeoutMillis || 30000,
-      connectionTimeoutMillis: config.connectionTimeoutMillis || 2000,
+      max: config.max ?? 20, // Maximum number of clients in the pool
+      min: config.min ?? 2, // Minimum number of clients in the pool
+      idleTimeoutMillis: config.idleTimeoutMillis ?? 30000,
+      connectionTimeoutMillis: config.connectionTimeoutMillis ?? 2000,
       ...config,
     });
 
@@ -85,7 +85,7 @@ export class PostgreSQLConnectionPool
     if (config.enableCircuitBreaker) {
       this.circuitBreakerPolicy = circuitBreaker(handleAll, {
         halfOpenAfter: 30000,
-        breaker: new ConsecutiveBreaker(config.circuitBreakerThreshold || 5),
+        breaker: new ConsecutiveBreaker(config.circuitBreakerThreshold ?? 5),
       });
     }
   }
@@ -154,11 +154,11 @@ export class PostgreSQLConnectionPool
     }
   }
 
-  async query<T = any>(
+  async query<T = unknown>(
     text: string,
-    params?: any[]
+    params?: unknown[]
   ): Promise<{ rows: T[]; rowCount: number }> {
-    const operation = async () => {
+    const operation = async (): Promise<{ rows: T[]; rowCount: number }> => {
       const startTime = performance.now();
       let client: PoolClient | undefined;
 
@@ -172,7 +172,7 @@ export class PostgreSQLConnectionPool
 
         return {
           rows: result.rows as T[],
-          rowCount: result.rowCount || 0,
+          rowCount: result.rowCount ?? 0,
         };
       } catch (error) {
         const duration = performance.now() - startTime;
@@ -187,16 +187,16 @@ export class PostgreSQLConnectionPool
     };
 
     if (this.circuitBreakerPolicy) {
-      return await this.circuitBreakerPolicy.execute(operation);
+      return this.circuitBreakerPolicy.execute(operation);
     }
 
-    return await operation();
+    return operation();
   }
 
   async transaction<T>(
     callback: (client: PoolClient) => Promise<T>
   ): Promise<T> {
-    const operation = async () => {
+    const operation = async (): Promise<T> => {
       const startTime = performance.now();
       const client = await this.getClient();
 
@@ -225,13 +225,17 @@ export class PostgreSQLConnectionPool
     };
 
     if (this.circuitBreakerPolicy) {
-      return await this.circuitBreakerPolicy.execute(operation);
+      return this.circuitBreakerPolicy.execute(operation);
     }
 
-    return await operation();
+    return operation();
   }
 
-  getStats() {
+  getStats(): {
+    totalCount: number;
+    idleCount: number;
+    waitingCount: number;
+  } {
     return {
       totalCount: this.pool.totalCount,
       idleCount: this.pool.idleCount,
@@ -264,10 +268,10 @@ export class PostgreSQLConnectionPool
     // This is a simplified example - in practice you'd need to extract
     // the actual connection parameters from the client
     const config: PostgreSQLPoolConfig = {
-      host: process.env["POSTGRES_HOST"] || "localhost",
-      port: parseInt(process.env["POSTGRES_PORT"] || "5432"),
-      database: process.env["POSTGRES_DB"] || "postgres",
-      user: process.env["POSTGRES_USER"] || "postgres",
+      host: process.env["POSTGRES_HOST"] ?? "localhost",
+      port: parseInt(process.env["POSTGRES_PORT"] ?? "5432"),
+      database: process.env["POSTGRES_DB"] ?? "postgres",
+      user: process.env["POSTGRES_USER"] ?? "postgres",
       password: process.env["POSTGRES_PASSWORD"],
       max: 20,
       min: 2,

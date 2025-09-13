@@ -49,7 +49,7 @@ export class CacheService implements ICache {
   private readonly caches: ICache[];
   private readonly warmingManager: CacheWarmingManager;
   private readonly dataProvider: WarmupDataProvider;
-  private stats: CacheStats = {
+  private readonly stats: CacheStats = {
     Hits: 0,
     Misses: 0,
     totalRequests: 0,
@@ -59,14 +59,14 @@ export class CacheService implements ICache {
     invalidations: 0,
     compressions: 0,
   };
-  private logger = createLogger("CacheService");
+  private readonly logger = createLogger("CacheService");
   constructor(
     metrics?: IMetricsCollector,
     caches?: ICache[],
     config: Partial<CacheConfig> = {}
   ) {
     this.config = { ...DEFAULT_CACHE_CONFIG, ...config };
-    this.caches = caches || [
+    this.caches = caches ?? [
       new MemoryCache(),
       // Only create RedisCache if we have metrics (to avoid circular dependency)
       ...(metrics ? [new RedisCache(RedisClient.create({}, metrics))] : []),
@@ -77,7 +77,9 @@ export class CacheService implements ICache {
     this.warmingManager = new CacheWarmingManager(this.config.warmingConfig);
 
     if (this.config.warmupOnStart) {
-      this.warmupCache();
+      this.warmupCache().catch((error) => {
+        this.logger.error("Cache warmup failed during initialization", error);
+      });
     }
 
     // Start background warming if enabled
@@ -124,11 +126,14 @@ export class CacheService implements ICache {
 
     for (let idx = 0; idx < this.caches.length; idx++) {
       const cache = this.caches[idx];
-      if (!cache || !cache.isEnabled()) continue;
+      if (!cache) continue;
+
+      const isEnabled = await cache.isEnabled();
+      if (!isEnabled) continue;
 
       try {
         const result = await cache.get<T>(key);
-        if (result && result.data !== null) {
+        if (result?.data !== null) {
           this.updateHitRate();
 
           // Record access pattern for adaptive learning
@@ -196,7 +201,10 @@ export class CacheService implements ICache {
 
     for (let idx = 0; idx < this.caches.length; idx++) {
       const cache = this.caches[idx];
-      if (!cache || !cache.isEnabled()) continue;
+      if (!cache) continue;
+
+      const isEnabled = await cache.isEnabled();
+      if (!isEnabled) continue;
 
       try {
         await cache.set<T>(key, data, ttl);
@@ -231,7 +239,10 @@ export class CacheService implements ICache {
 
     for (let idx = 0; idx < this.caches.length; idx++) {
       const cache = this.caches[idx];
-      if (!cache || !cache.isEnabled()) continue;
+      if (!cache) continue;
+
+      const isEnabled = await cache.isEnabled();
+      if (!isEnabled) continue;
 
       try {
         await cache.invalidate(key);
@@ -280,7 +291,10 @@ export class CacheService implements ICache {
 
     for (let idx = 0; idx < this.caches.length; idx++) {
       const cache = this.caches[idx];
-      if (!cache || !cache.isEnabled()) continue;
+      if (!cache) continue;
+
+      const isEnabled = await cache.isEnabled();
+      if (!isEnabled) continue;
 
       try {
         const count = await cache.invalidatePattern(pattern);
@@ -375,7 +389,7 @@ export class CacheService implements ICache {
    * Check if cache is enabled
    */
   async isEnabled(): Promise<boolean> {
-    return this.config.enable;
+    return Promise.resolve(this.config.enable);
   }
 
   /**
@@ -386,7 +400,10 @@ export class CacheService implements ICache {
 
     for (let idx = 0; idx < this.caches.length; idx++) {
       const cache = this.caches[idx];
-      if (!cache || !cache.isEnabled()) continue;
+      if (!cache) continue;
+
+      const isEnabled = await cache.isEnabled();
+      if (!isEnabled) continue;
 
       const health = await cache.healthCheck();
       healthChecks.push(health);
@@ -460,7 +477,16 @@ export class CacheService implements ICache {
   /**
    * Get cache warming statistics
    */
-  getWarmingStats(): any {
+  getWarmingStats(): {
+    strategies: string[];
+    backgroundStatus?: {
+      isRunning: boolean;
+      intervalSeconds: number;
+      activeWarmups: number;
+      maxConcurrentWarmups: number;
+    };
+    adaptiveStats?: { totalPatterns: number; topKeys: string[] };
+  } {
     return this.warmingManager.getStats();
   }
 

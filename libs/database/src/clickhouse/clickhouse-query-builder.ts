@@ -8,11 +8,17 @@
  *   allowedFields: ['id', 'timestamp', 'status']
  * });
  */
+
 export interface WindowFunctionQueryOptions {
   select: string[];
   where?: Record<
     string,
-    string | number | boolean | Date | null | { operator: string; value: any }
+    | string
+    | number
+    | boolean
+    | Date
+    | null
+    | { operator: string; value: unknown }
   >;
   orderBy?: { field: string; direction: "ASC" | "DESC" }[];
   limit?: number;
@@ -25,7 +31,12 @@ export interface SubqueryOptions {
   select: string[];
   where?: Record<
     string,
-    string | number | boolean | Date | null | { operator: string; value: any }
+    | string
+    | number
+    | boolean
+    | Date
+    | null
+    | { operator: string; value: unknown }
   >;
   orderBy?: { field: string; direction: "ASC" | "DESC" }[];
   limit?: number;
@@ -74,7 +85,7 @@ export class ClickHouseQueryBuilder {
             | boolean
             | Date
             | null
-            | { operator: string; value: any }
+            | { operator: string; value: unknown }
           >
         | undefined;
       groupBy?: string[] | undefined;
@@ -84,7 +95,7 @@ export class ClickHouseQueryBuilder {
       allowedTables?: readonly string[] | undefined;
       allowedFields?: readonly string[] | undefined;
     } = {}
-  ): { query: string; params: Record<string, any> } {
+  ): { query: string; params: Record<string, unknown> } {
     const {
       select = ["*"],
       where = {},
@@ -130,12 +141,12 @@ export class ClickHouseQueryBuilder {
    */
   static buildInsertQuery(
     table: string,
-    data: Record<string, any>[],
+    data: Record<string, unknown>[],
     options: {
       allowedTables?: readonly string[];
       allowedFields?: readonly string[];
     } = {}
-  ): { table: string; data: Record<string, any>[] } {
+  ): { table: string; data: Record<string, unknown>[] } {
     const { allowedTables = [], allowedFields = [] } = options;
 
     // Centralized table validation
@@ -143,7 +154,7 @@ export class ClickHouseQueryBuilder {
 
     // Validate and sanitize data
     const sanitizedData = data.map((row) => {
-      const sanitizedRow: Record<string, any> = {};
+      const sanitizedRow: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(row)) {
         this.validateAllowed(key, allowedFields, "field");
         sanitizedRow[key] = this.sanitizeValue(value);
@@ -176,7 +187,7 @@ export class ClickHouseQueryBuilder {
             | boolean
             | Date
             | null
-            | { operator: string; value: any }
+            | { operator: string; value: unknown }
           >
         | undefined;
       groupBy?: string[] | undefined;
@@ -188,13 +199,13 @@ export class ClickHouseQueryBuilder {
             | boolean
             | Date
             | null
-            | { operator: string; value: any }
+            | { operator: string; value: unknown }
           >
         | undefined;
       allowedTables?: readonly string[] | undefined;
       allowedFields?: readonly string[] | undefined;
     } = {}
-  ): { query: string; params: Record<string, any> } {
+  ): { query: string; params: Record<string, unknown> } {
     const {
       where = {},
       groupBy = [],
@@ -256,7 +267,7 @@ export class ClickHouseQueryBuilder {
             | boolean
             | Date
             | null
-            | { operator: string; value: any }
+            | { operator: string; value: unknown }
           >
         | undefined;
       dateFrom?: string | Date | undefined;
@@ -264,7 +275,7 @@ export class ClickHouseQueryBuilder {
       allowedTables?: readonly string[] | undefined;
       allowedFields?: readonly string[] | undefined;
     } = {}
-  ): { query: string; params: Record<string, any> } {
+  ): { query: string; params: Record<string, unknown> } {
     const {
       select = ["*"],
       where = {},
@@ -322,7 +333,7 @@ export class ClickHouseQueryBuilder {
   static buildWindowFunctionQuery(
     table: string,
     options: WindowFunctionQueryOptions
-  ): { query: string; params: Record<string, any> } {
+  ): { query: string; params: Record<string, unknown> } {
     const {
       select,
       where = {},
@@ -368,7 +379,7 @@ export class ClickHouseQueryBuilder {
   static buildSubquery(
     subquery: string,
     options: SubqueryOptions
-  ): { query: string; params: Record<string, any> } {
+  ): { query: string; params: Record<string, unknown> } {
     const { select, where = {}, orderBy = [], limit, offset } = options;
 
     if (!subquery || typeof subquery !== "string") {
@@ -435,12 +446,17 @@ export class ClickHouseQueryBuilder {
   private static buildWhereClause(
     where: Record<
       string,
-      string | number | boolean | Date | null | { operator: string; value: any }
+      | string
+      | number
+      | boolean
+      | Date
+      | null
+      | { operator: string; value: unknown }
     > = {},
     paramPrefix: string = ""
-  ): { whereClause: string; params: Record<string, any> } {
+  ): { whereClause: string; params: Record<string, unknown> } {
     const conditions: string[] = [];
-    const params: Record<string, any> = {};
+    const params: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(where)) {
       if (!this.isValidIdentifier(key)) {
@@ -468,7 +484,9 @@ export class ClickHouseQueryBuilder {
         conditions.push(
           `${this.escapeIdentifier(key)} ${operator} {${paramKey}:String}`
         );
-        params[paramKey] = this.sanitizeValue((value as { value: any }).value);
+        params[paramKey] = this.sanitizeValue(
+          (value as { value: unknown }).value
+        );
       } else {
         conditions.push(`${this.escapeIdentifier(key)} = {${paramKey}:String}`);
         params[paramKey] = this.sanitizeValue(value);
@@ -487,12 +505,17 @@ export class ClickHouseQueryBuilder {
   private static buildWhereClauseWithDateRange(
     where: Record<
       string,
-      string | number | boolean | Date | null | { operator: string; value: any }
+      | string
+      | number
+      | boolean
+      | Date
+      | null
+      | { operator: string; value: unknown }
     > = {},
     dateField: string
-  ): { whereClause: string; params: Record<string, any> } {
+  ): { whereClause: string; params: Record<string, unknown> } {
     const conditions: string[] = [];
-    const params: Record<string, any> = {};
+    const params: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(where)) {
       if (key === `${dateField}_from`) {
@@ -535,7 +558,7 @@ export class ClickHouseQueryBuilder {
           conditions.push(
             `${this.escapeIdentifier(key)} ${operator} {${key}:String}`
           );
-          params[key] = this.sanitizeValue((value as { value: any }).value);
+          params[key] = this.sanitizeValue((value as { value: unknown }).value);
         } else {
           conditions.push(`${this.escapeIdentifier(key)} = {${key}:String}`);
           params[key] = this.sanitizeValue(value);
@@ -683,7 +706,11 @@ export class ClickHouseQueryBuilder {
     ] as const;
 
     const upperOperator = operator.toUpperCase();
-    if (!allowedOperators.includes(upperOperator as any)) {
+    if (
+      !allowedOperators.includes(
+        upperOperator as (typeof allowedOperators)[number]
+      )
+    ) {
       throw new Error(
         `[ClickHouseQueryBuilder] Invalid operator: ${operator}. Allowed: ${allowedOperators.join(
           ", "
@@ -698,14 +725,14 @@ export class ClickHouseQueryBuilder {
    * Only allows primitive types and simple arrays
    */
   private static sanitizeValue(
-    value: any
+    value: unknown
   ): string | number | boolean | null | (string | number | boolean | null)[] {
     if (value === null || value === undefined) return null;
 
     // Only allow primitive types
     if (typeof value === "string") {
       // Remove dangerous patterns, enforce max length, strip control chars
-      let sanitized = value.replace(/[\0\b\n\r\t\Z]/g, "");
+      let sanitized = value.replace(/[\0\b\n\r\tZ]/g, "");
       sanitized = sanitized.replace(/['"`]/g, "").trim();
       if (sanitized.length > 1024) sanitized = sanitized.slice(0, 1024);
       return sanitized;

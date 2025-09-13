@@ -123,10 +123,11 @@ describe("CacheCompressor", () => {
       };
 
       // Mock a problematic object that might cause compression issues
-      const problematicData = {
-        circular: {} as any,
+      const problematicData: Record<string, unknown> = {
+        circular: {},
       };
-      problematicData.circular.self = problematicData;
+      (problematicData.circular as Record<string, unknown>).self =
+        problematicData;
 
       const result = await compress(problematicData, config);
 
@@ -160,8 +161,8 @@ describe("CacheCompressor", () => {
       };
 
       // Create an object that will cause JSON.stringify to fail
-      const badData = {};
-      (badData as any).circular = badData;
+      const badData: Record<string, unknown> = {};
+      badData.circular = badData;
 
       await expect(compress(badData, config)).rejects.toThrow();
     });
@@ -276,7 +277,7 @@ describe("CacheCompressor", () => {
         number: 42,
         boolean: true,
         null: null,
-        undefined: undefined, // Will be lost in JSON
+        undefined, // Will be lost in JSON
         array: [1, "two", { three: 3 }],
         object: {
           nested: {
@@ -312,12 +313,14 @@ describe("CacheCompressor", () => {
 
         // After first cycle, undefined becomes missing
         if (i === 0) {
+          const { data: decompressedData } = decompressed;
           const expected = { ...complexData };
-          (expected as any).undefined = undefined; // Keep undefined for comparison
-          expect(decompressed.data).toEqual(expected);
-          data = decompressed.data;
+          expected.undefined = undefined; // Keep undefined for comparison
+          expect(decompressedData).toEqual(expected);
+          data = decompressedData as typeof complexData;
         } else {
-          expect(decompressed.data).toEqual(data);
+          const { data: decompressedData } = decompressed;
+          expect(decompressedData).toEqual(data);
         }
       }
     });

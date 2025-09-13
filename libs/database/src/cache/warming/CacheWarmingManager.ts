@@ -9,6 +9,7 @@ import type {
   CacheWarmingConfig,
   CacheWarmingResult,
   WarmupDataProvider,
+  CacheWarmingStrategy,
 } from "../interfaces/ICache";
 import { AdaptiveCacheWarmingStrategy } from "./strategies/AdaptiveCacheWarmingStrategy";
 import { BackgroundCacheWarmingStrategy } from "./strategies/BackgroundCacheWarmingStrategy";
@@ -18,8 +19,8 @@ import { StaticCacheWarmingStrategy } from "./strategies/StaticCacheWarmingStrat
  * Manager for cache warming strategies
  */
 export class CacheWarmingManager {
-  private strategies: Map<string, any> = new Map();
-  private logger = createLogger("CacheWarmingManager");
+  private readonly strategies: Map<string, CacheWarmingStrategy> = new Map();
+  private readonly logger = createLogger("CacheWarmingManager");
 
   constructor(private readonly config: CacheWarmingConfig = {}) {
     this.initializeStrategies();
@@ -42,7 +43,7 @@ export class CacheWarmingManager {
       this.strategies.set(
         "background",
         new BackgroundCacheWarmingStrategy(
-          this.config.backgroundWarmingInterval || 300
+          this.config.backgroundWarmingInterval ?? 300
         )
       );
     }
@@ -170,10 +171,24 @@ export class CacheWarmingManager {
    */
   getStats(): {
     strategies: string[];
-    backgroundStatus?: any;
-    adaptiveStats?: any;
+    backgroundStatus?: {
+      isRunning: boolean;
+      intervalSeconds: number;
+      activeWarmups: number;
+      maxConcurrentWarmups: number;
+    };
+    adaptiveStats?: { totalPatterns: number; topKeys: string[] };
   } {
-    const stats: any = {
+    const stats: {
+      strategies: string[];
+      backgroundStatus?: {
+        isRunning: boolean;
+        intervalSeconds: number;
+        activeWarmups: number;
+        maxConcurrentWarmups: number;
+      };
+      adaptiveStats?: { totalPatterns: number; topKeys: string[] };
+    } = {
       strategies: Array.from(this.strategies.keys()),
     };
 

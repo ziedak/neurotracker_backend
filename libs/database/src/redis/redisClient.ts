@@ -13,18 +13,18 @@ export interface RedisConfig extends Partial<RedisOptions> {
 }
 
 export class RedisClient {
-  private redis: Redis;
+  private readonly redis: Redis;
   private isConnected = false;
   private connectionLock = false; // Prevent concurrent connection operations
   private eventHandlersAttached = false;
   private retryCount = 0;
-  private maxRetries = 3;
-  private reconnectDelay = 1000;
+  private readonly maxRetries = 3;
+  private readonly reconnectDelay = 1000;
   private reconnectTimeout?: NodeJS.Timeout;
   private readonly logger = createLogger("RedisClient");
 
   constructor(
-    private metrics?: IMetricsCollector,
+    private readonly metrics?: IMetricsCollector,
     redisOptions: RedisConfig = {}
   ) {
     let options: RedisOptions = {
@@ -66,7 +66,7 @@ export class RedisClient {
     return new RedisClient(metrics, config);
   }
 
-  private setupEventHandlers() {
+  private setupEventHandlers(): void {
     if (this.eventHandlersAttached) {
       return; // Prevent duplicate event handler attachment
     }
@@ -502,9 +502,9 @@ export class RedisClient {
         this.redis,
         async (redis: Redis) => {
           if (ttlSeconds) {
-            return await redis.set(key, value, "EX", ttlSeconds);
+            return redis.set(key, value, "EX", ttlSeconds);
           } else {
-            return await redis.set(key, value);
+            return redis.set(key, value);
           }
         },
         (error) => this.logger.warn(`Safe set failed for key ${key}`, error),
@@ -686,7 +686,7 @@ export class RedisClient {
           enableMetrics: true,
         }
       );
-      return result as number;
+      return result;
     } catch (error) {
       this.logger.error(`Failed to publish to channel ${channel}`, error);
       return 0;

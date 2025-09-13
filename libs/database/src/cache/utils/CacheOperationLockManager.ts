@@ -21,7 +21,7 @@ export interface LockInfo {
  * Manages operation locks to prevent race conditions
  */
 export class CacheOperationLockManager {
-  private readonly locks = new Map<string, Promise<any>>();
+  private readonly locks = new Map<string, Promise<unknown>>();
   private readonly lockInfo = new Map<string, LockInfo>();
   private readonly logger = createLogger("CacheOperationLockManager");
   private readonly cleanupTimer: NodeJS.Timeout;

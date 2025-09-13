@@ -71,7 +71,7 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
 
     this.logger.info("MemoryCache initialized", {
       maxEntries: fullConfig.maxMemoryCacheSize,
-      memoryLimitMB: fullConfig.memoryConfig?.maxMemoryMB || 50,
+      memoryLimitMB: fullConfig.memoryConfig?.maxMemoryMB ?? 50,
       compressionEnabled: fullConfig.compressionConfig?.enableCompression,
     });
   }
@@ -94,7 +94,7 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
     // Update stats to reflect current state
     this.updateMemoryStats();
 
-    let result: CacheHealth = {
+    const result: CacheHealth = {
       status: "healthy",
       capacity: "ok",
       hitRate: this.stats.hitRate,
@@ -108,7 +108,7 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
       result.capacity = "error";
     } else if (
       memoryStats.usagePercent >=
-      (this.config.memoryConfig?.warningThresholdPercent || 75)
+      (this.config.memoryConfig?.warningThresholdPercent ?? 75)
     ) {
       result.status = "degraded";
       result.capacity = "full";
@@ -120,7 +120,7 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
       result.status = result.status === "critical" ? "critical" : "degraded";
     }
 
-    return result;
+    return Promise.resolve(result);
   }
 
   /**
@@ -140,7 +140,7 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
   /**
    * Check if adding an entry would exceed memory limits
    */
-  private checkMemoryLimits(key: string, data: any): boolean {
+  private checkMemoryLimits(key: string, data: unknown): boolean {
     // If we're replacing an existing entry, account for the memory we'll free up
     const existingEntry = this.memoryCache.get(key);
     let projectedUsage = this.memoryTracker.getTotalMemoryUsage();
@@ -167,11 +167,11 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
     projectedUsage += newEntrySize;
 
     const maxBytes =
-      (this.config.memoryConfig?.maxMemoryMB || 50) * 1024 * 1024;
+      (this.config.memoryConfig?.maxMemoryMB ?? 50) * 1024 * 1024;
     const usagePercent = (projectedUsage / maxBytes) * 100;
 
     return (
-      usagePercent < (this.config.memoryConfig?.criticalThresholdPercent || 90)
+      usagePercent < (this.config.memoryConfig?.criticalThresholdPercent ?? 90)
     );
   }
 
@@ -201,14 +201,15 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
     const entry = this.memoryCache.get(key) as CacheEntry<T> | undefined;
     if (entry) {
       // Decompress data if it was compressed
-      let data = entry.data;
+      const { data: entryData, compressed } = entry;
+      let data = entryData;
       if (entry.compressed) {
         try {
-          const decompressResult = await decompress(
+          const { data: decompressedData } = await decompress(
             entry.data,
             DEFAULT_DECOMPRESSION_CONFIG
           );
-          data = decompressResult.data;
+          data = decompressedData as T;
         } catch (error) {
           this.logger.warn(
             "Failed to decompress cache entry, returning raw data",
@@ -222,10 +223,10 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
       }
 
       return {
-        data: data as T,
+        data,
         source: "l1",
         latency: 0, // Will be set by base class
-        compressed: entry.compressed,
+        compressed,
       };
     }
     return null;
@@ -239,7 +240,7 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
     }
 
     // Compress data if enabled and meets threshold
-    let finalData = data;
+    let finalData: T | unknown = data;
     let compressed = false;
     let compressionAlgorithm: string | undefined;
 
@@ -250,7 +251,7 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
           DEFAULT_COMPRESSION_CONFIG
         );
         if (compressionResult.compressed) {
-          finalData = compressionResult.data;
+          finalData = compressionResult.data as T;
           compressed = true;
           compressionAlgorithm = compressionResult.algorithm;
           this.stats.compressions++;
@@ -268,13 +269,13 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
       this.logger.warn("Memory limit exceeded, skipping cache set", {
         key,
         currentUsage: this.memoryTracker.getMemoryUsagePercent(),
-        limit: this.config.memoryConfig?.criticalThresholdPercent || 90,
+        limit: this.config.memoryConfig?.criticalThresholdPercent ?? 90,
       });
       return;
     }
 
     const entry: CacheEntry<T> = {
-      data: finalData,
+      data: finalData as T,
       timestamp: Date.now(),
       ttl,
       hits: 0,
@@ -308,6 +309,7 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
     this.memoryCache.delete(key);
     this.memoryTracker.removeEntry(key);
     this.logger.debug("Cache entry invalidated", { key });
+    await Promise.resolve();
   }
 
   protected async doInvalidatePattern(pattern: string): Promise<number> {
@@ -323,6 +325,7 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
       }
     }
 
+    await Promise.resolve();
     return invalidatedCount;
   }
 
@@ -338,8 +341,10 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
       this.memoryTracker.clear();
 
       this.logger.info("MemoryCache disposed successfully");
+      await Promise.resolve();
     } catch (error) {
       this.logger.error("Error during MemoryCache disposal", error as Error);
+      throw error;
     }
   }
 }

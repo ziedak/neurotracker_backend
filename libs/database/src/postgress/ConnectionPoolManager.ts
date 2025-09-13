@@ -24,21 +24,21 @@ import {
 export interface IConnectionManager {
   initialize(): Promise<void>;
   getConnectionSqlRaw(): Promise<{
-    execute: <T>(query: string, params?: any[]) => Promise<T[]>;
+    execute: <T>(query: string, params?: unknown[]) => Promise<T[]>;
     release: () => void;
   }>;
   getConnectionPrisma(): Promise<{
     prisma: PrismaClient;
     release: () => void;
   }>;
-  executeQuery<T>(query: string, params?: any[]): Promise<T[]>;
+  executeQuery<T>(query: string, params?: unknown[]): Promise<T[]>;
   executeTransaction<T>(
     operations: (
-      execute: (query: string, params?: any[]) => Promise<any[]>
+      execute: (query: string, params?: unknown[]) => Promise<unknown[]>
     ) => Promise<T>
   ): Promise<T>;
   executeBatch<T>(
-    queries: Array<{ query: string; params?: any[] }>
+    queries: Array<{ query: string; params?: unknown[] }>
   ): Promise<Array<T[] | Error>>;
   getStats(): ConnectionPoolStats;
 }
@@ -65,10 +65,10 @@ export class PostgreSQLConnectionManager implements IConnectionManager {
     healthScore: 1.0,
   };
 
-  private circuitBreakerEnabled: boolean;
+  private readonly circuitBreakerEnabled: boolean;
   private readonly queryTimings: number[] = Array(100).fill(0);
   private queryTimingIndex = 0;
-  private scheduler: IScheduler;
+  private readonly scheduler: IScheduler;
 
   constructor(
     postgresClient: PostgreSQLClient,
@@ -78,8 +78,9 @@ export class PostgreSQLConnectionManager implements IConnectionManager {
     const parsedConfig = ConnectionPoolConfigSchema.safeParse(mergedConfig);
     if (!parsedConfig.success) {
       throw new AppError(
-        "Invalid ConnectionPoolConfig: " +
-          JSON.stringify(parsedConfig.error.issues),
+        `Invalid ConnectionPoolConfig: ${JSON.stringify(
+          parsedConfig.error.issues
+        )}`,
         400
       );
     }
@@ -170,13 +171,13 @@ export class PostgreSQLConnectionManager implements IConnectionManager {
    * Get connection for raw SQL queries ($queryRawUnsafe)
    */
   async getConnectionSqlRaw(): Promise<{
-    execute: <T>(query: string, params?: any[]) => Promise<T[]>;
+    execute: <T>(query: string, params?: unknown[]) => Promise<T[]>;
     release: () => void;
   }> {
     try {
       const client = await this.realPool.getClient();
       return {
-        execute: async <T>(query: string, params?: any[]): Promise<T[]> => {
+        execute: async <T>(query: string, params?: unknown[]): Promise<T[]> => {
           const queryStart = performance.now();
           try {
             const result = await client.query(query, params);
@@ -202,10 +203,7 @@ export class PostgreSQLConnectionManager implements IConnectionManager {
     }
   }
 
-  /**
-   * Get connection for Prisma ORM queries
-   */
-  async getConnectionPrisma(): Promise<{
+  getConnectionPrisma(): Promise<{
     prisma: PrismaClient;
     release: () => void;
   }> {
@@ -220,7 +218,7 @@ export class PostgreSQLConnectionManager implements IConnectionManager {
   /**
    * Execute query with automatic connection management
    */
-  async executeQuery<T>(query: string, params?: any[]): Promise<T[]> {
+  async executeQuery<T>(query: string, params?: unknown[]): Promise<T[]> {
     return executeWithRetry(
       async () => {
         const connection = await this.getConnectionSqlRaw();
@@ -245,7 +243,7 @@ export class PostgreSQLConnectionManager implements IConnectionManager {
    */
   async executeTransaction<T>(
     operations: (
-      execute: (query: string, params?: any[]) => Promise<any[]>
+      execute: (query: string, params?: unknown[]) => Promise<unknown[]>
     ) => Promise<T>
   ): Promise<T> {
     const measurementId = `transaction_${Date.now()}`;
@@ -255,13 +253,13 @@ export class PostgreSQLConnectionManager implements IConnectionManager {
       const result = await this.realPool.transaction(async (client) => {
         const execute = async (
           query: string,
-          params?: any[]
-        ): Promise<any[]> => {
+          params?: unknown[]
+        ): Promise<unknown[]> => {
           const result = await client.query(query, params);
           return result.rows;
         };
 
-        return await operations(execute);
+        return operations(execute);
       });
 
       this.updateQueryTiming(performance.now() - startTime);
@@ -280,7 +278,7 @@ export class PostgreSQLConnectionManager implements IConnectionManager {
    * Batch execute queries with connection reuse
    */
   async executeBatch<T>(
-    queries: Array<{ query: string; params?: any[] }>
+    queries: Array<{ query: string; params?: unknown[] }>
   ): Promise<Array<T[] | Error>> {
     const connection = await this.getConnectionSqlRaw();
     const results: Array<T[] | Error> = [];
@@ -535,8 +533,8 @@ export class PostgreSQLConnectionManager implements IConnectionManager {
       () => {
         try {
           const poolStats = this.realPool.getStats();
-          const idleCount = poolStats.idleCount;
-          const totalCount = poolStats.totalCount;
+          const { idleCount } = poolStats;
+          const { totalCount } = poolStats;
 
           // Just monitor - pg.Pool handles idle connection cleanup automatically
           if (idleCount > this.config.minConnections) {

@@ -1,4 +1,5 @@
-import type { RedisKey, ChainableCommander, Callback } from "@libs/database";
+import type { RedisKey, ChainableCommander, Callback } from "ioredis";
+import type { Redis } from "ioredis";
 
 /**
  * Interface for cache storage backend
@@ -50,5 +51,5 @@ export interface ICacheStorage {
   };
 
   // For services that need the raw Redis client
-  getRawClient(): any;
+  getRawClient(): Redis;
 }

@@ -17,7 +17,7 @@ import { BaseCacheWarmingStrategy } from "./BaseCacheWarmingStrategy";
 export class AdaptiveCacheWarmingStrategy extends BaseCacheWarmingStrategy {
   readonly name = "Adaptive";
 
-  private accessPatterns: Map<string, AccessPattern> = new Map();
+  private readonly accessPatterns: Map<string, AccessPattern> = new Map();
   private readonly maxPatterns: number;
   private readonly minAccessCount: number;
 

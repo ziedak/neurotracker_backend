@@ -120,7 +120,7 @@ export class PostgreSQLClient {
       errorFormat: "pretty",
     });
 
-    this.prismaClient = client.$extends(withAccelerate()) as any;
+    this.prismaClient = client.$extends(withAccelerate());
     this.isConnected = false;
 
     this.logger.info("PostgreSQL client initialized", {
@@ -280,7 +280,7 @@ export class PostgreSQLClient {
    * Ping database for connectivity with performance tracking and resilience
    */
   async ping(): Promise<boolean> {
-    return await executeWithRetry(
+    return executeWithRetry(
       async () => {
         const start = performance.now();
         await this.prismaClient.$queryRaw`SELECT 1`;
@@ -314,7 +314,7 @@ export class PostgreSQLClient {
         operationName: "PostgreSQL ping",
         enableCircuitBreaker: true,
       }
-    ).catch((error: any) => {
+    ).catch((error: unknown) => {
       this.logger.error("PostgreSQL ping failed after retries", error);
       this.metricsCollector?.recordCounter("postgresql.ping.failure");
       throw new PostgreSQLError("Database ping failed", error);
@@ -342,7 +342,7 @@ export class PostgreSQLClient {
 
           this.logger.info("PostgreSQL health check successful", {
             latency: `${latency.toFixed(2)}ms`,
-            version: version?.substring(0, 50) + "...",
+            version: `${version?.substring(0, 50)}...`,
           });
 
           await this.metricsCollector?.recordTimer(
@@ -405,7 +405,7 @@ export class PostgreSQLClient {
    * Execute raw SQL query with performance tracking, structured error handling, and resilience
    */
   async executeRaw(query: string, ...params: unknown[]): Promise<unknown> {
-    return await executeWithRetry(
+    return executeWithRetry(
       async () => {
         const start = performance.now();
         const result = await this.prismaClient.$queryRawUnsafe(
@@ -416,7 +416,7 @@ export class PostgreSQLClient {
         const duration = performance.now() - start;
 
         this.logger.debug("PostgreSQL raw query executed successfully", {
-          query: query.substring(0, 100) + "...",
+          query: `${query.substring(0, 100)}...`,
           paramCount: params.length,
           duration: `${duration.toFixed(2)}ms`,
         });
@@ -434,7 +434,7 @@ export class PostgreSQLClient {
           duration > this.metricsConfig.slowQueryThreshold
         ) {
           this.logger.warn("PostgreSQL slow query detected", {
-            query: query.substring(0, 100) + "...",
+            query: `${query.substring(0, 100)}...`,
             duration: `${duration.toFixed(2)}ms`,
             threshold: `${this.metricsConfig.slowQueryThreshold}ms`,
             paramCount: params.length,
@@ -451,9 +451,9 @@ export class PostgreSQLClient {
         operationName: "PostgreSQL raw query",
         enableCircuitBreaker: true,
       }
-    ).catch((error: any) => {
+    ).catch((error: unknown) => {
       this.logger.error("PostgreSQL raw query failed after retries", error, {
-        query: query.substring(0, 100) + "...",
+        query: `${query.substring(0, 100)}...`,
         paramCount: params.length,
       });
       this.metricsCollector?.recordCounter("postgresql.raw_query.failure");
@@ -480,7 +480,7 @@ export class PostgreSQLClient {
     }
 
     const cacheKey =
-      cacheOptions.cacheKey || this.generateCacheKey(query, params);
+      cacheOptions.cacheKey ?? this.generateCacheKey(query, params);
 
     try {
       // Check cache first if available
@@ -490,7 +490,7 @@ export class PostgreSQLClient {
           await this.metricsCollector?.recordCounter("postgresql.cache.hit");
           this.logger.debug("Cache hit for PostgreSQL query", {
             cacheKey,
-            query: query.substring(0, 100) + "...",
+            query: `${query.substring(0, 100)}...`,
           });
           return cacheResult.data;
         }
@@ -505,7 +505,7 @@ export class PostgreSQLClient {
         this.logger.debug("Cached PostgreSQL query result", {
           cacheKey,
           ttl: cacheOptions.ttl,
-          query: query.substring(0, 100) + "...",
+          query: `${query.substring(0, 100)}...`,
         });
       }
 
@@ -530,7 +530,7 @@ export class PostgreSQLClient {
         return;
       }
 
-      const searchPattern = pattern || `${this.queryCache.cacheKeyPrefix}*`;
+      const searchPattern = pattern ?? `${this.queryCache.cacheKeyPrefix}*`;
       const invalidatedCount =
         await this.cacheService.invalidatePattern(searchPattern);
 
@@ -644,9 +644,9 @@ export class PostgreSQLClient {
     stats: { processed: number; failed: number; duration: number };
   }> {
     const batchConfig = {
-      batchSize: config?.batchSize || 10,
-      concurrency: config?.concurrency || 3,
-      timeoutMs: config?.timeoutMs || 30000,
+      batchSize: config?.batchSize ?? 10,
+      concurrency: config?.concurrency ?? 3,
+      timeoutMs: config?.timeoutMs ?? 30000,
     };
 
     const start = performance.now();
@@ -693,10 +693,11 @@ export class PostgreSQLClient {
           batchPromises.map((promise) => {
             let timeoutId: NodeJS.Timeout;
             const timeoutPromise = new Promise<never>((_, reject) => {
-              timeoutId = setTimeout(() => {
+              const id = setTimeout(() => {
                 reject(new Error("Operation timeout"));
               }, batchConfig.timeoutMs);
-              timeoutIds.push(timeoutId!);
+              timeoutId = id;
+              timeoutIds.push(id);
             });
 
             return Promise.race([
@@ -775,7 +776,7 @@ export class PostgreSQLClient {
   /**
    * Run a transaction with type-safe Prisma client
    */
-  async transaction<T>(
+  transaction<T>(
     callback: (
       prisma: Omit<
         PrismaClient,
@@ -788,7 +789,7 @@ export class PostgreSQLClient {
       >
     ) => Promise<T>
   ): Promise<T> {
-    return await this.prismaClient.$transaction(callback);
+    return this.prismaClient.$transaction(callback);
   }
 
   /**
@@ -833,16 +834,16 @@ export class PostgreSQLClient {
       const connectionInfo = {
         isConnected: this.isConnected,
         connectionPool: {
-          active: Number(poolInfo[0]?.active_connections || 0),
-          idle: Number(poolInfo[0]?.idle_connections || 0),
-          total: Number(poolInfo[0]?.total_connections || 0),
+          active: Number(poolInfo[0]?.active_connections ?? 0),
+          idle: Number(poolInfo[0]?.idle_connections ?? 0),
+          total: Number(poolInfo[0]?.total_connections ?? 0),
         },
         performance: {
           avgQueryTime: queryDuration,
           slowQueries: 0,
           errorRate: 0,
         },
-        uptime: Number(uptimeInfo[0]?.uptime || 0),
+        uptime: Number(uptimeInfo[0]?.uptime ?? 0),
       };
 
       this.logger.debug("PostgreSQL connection info retrieved", connectionInfo);

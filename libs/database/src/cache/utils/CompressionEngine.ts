@@ -140,8 +140,8 @@ export async function smartCompress(
 
   if (forceAlgorithm) {
     return forceAlgorithm === "gzip"
-      ? await compressGzip(data, level)
-      : await compressDeflate(data, level);
+      ? compressGzip(data, level)
+      : compressDeflate(data, level);
   }
 
   // Try both algorithms and pick the better one

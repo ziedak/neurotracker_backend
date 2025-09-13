@@ -26,11 +26,22 @@ jest.mock("@libs/monitoring", () => ({
 }));
 
 describe("ClickHouseClient", () => {
-  let mockClient: any;
-  let mockConfig: any;
-  let mockLogger: any;
-  let mockExecuteWithRetry: any;
-  let mockMetricsCollector: any;
+  let mockClient: {
+    ping: jest.Mock;
+    query: jest.Mock;
+    insert: jest.Mock;
+    close: jest.Mock;
+  };
+  let mockLogger: {
+    info: jest.Mock;
+    error: jest.Mock;
+    warn: jest.Mock;
+    debug: jest.Mock;
+  };
+  let mockMetricsCollector: {
+    recordCounter: jest.Mock;
+    recordTimer: jest.Mock;
+  };
 
   beforeEach(() => {
     // Reset all mocks
@@ -45,12 +56,6 @@ describe("ClickHouseClient", () => {
     };
 
     // Setup mock dependencies
-    mockConfig = {
-      getEnv: jest.fn(),
-      getNumberEnv: jest.fn(),
-      getBooleanEnv: jest.fn(),
-    };
-
     mockLogger = {
       info: jest.fn(),
       error: jest.fn(),
@@ -58,7 +63,6 @@ describe("ClickHouseClient", () => {
       debug: jest.fn(),
     };
 
-    mockExecuteWithRetry = jest.fn();
     mockMetricsCollector = {
       recordCounter: jest.fn(),
       recordTimer: jest.fn(),
@@ -79,7 +83,7 @@ describe("ClickHouseClient", () => {
         CLICKHOUSE_QUERY_CACHE_PREFIX: "ch:",
         CLICKHOUSE_QUERY_CACHE_EXCLUDE_PATTERNS: "INSERT,UPDATE,DELETE",
       };
-      return envMap[key] || defaultValue || "";
+      return envMap[key] ?? defaultValue ?? "";
     });
 
     getNumberEnv.mockImplementation((key: string, defaultValue?: number) => {
@@ -93,7 +97,7 @@ describe("ClickHouseClient", () => {
         CLICKHOUSE_QUERY_CACHE_TTL: 300,
         CLICKHOUSE_QUERY_CACHE_MAX_SIZE: 1000,
       };
-      return envMap[key] || defaultValue || 0;
+      return envMap[key] ?? defaultValue ?? 0;
     });
 
     getBooleanEnv.mockImplementation((key: string, defaultValue?: boolean) => {
@@ -102,7 +106,7 @@ describe("ClickHouseClient", () => {
         CLICKHOUSE_REQUEST_COMPRESSION: false,
         CLICKHOUSE_QUERY_CACHE_ENABLED: true,
       };
-      return envMap[key] || defaultValue || false;
+      return envMap[key] ?? defaultValue ?? false;
     });
 
     // Mock logger
@@ -111,7 +115,7 @@ describe("ClickHouseClient", () => {
 
     // Mock executeWithRetry
     const { executeWithRetry } = require("@libs/utils");
-    executeWithRetry.mockImplementation(async (fn: Function) => await fn());
+    executeWithRetry.mockImplementation((fn: Function) => fn());
   });
 
   describe("constructor", () => {
@@ -140,7 +144,7 @@ describe("ClickHouseClient", () => {
         healthCheck: jest.fn(),
         dispose: jest.fn(),
       };
-      const client = new ClickHouseClient(mockCache);
+      new ClickHouseClient(mockCache);
 
       expect(mockLogger.info).toHaveBeenCalledWith(
         "ClickHouse client initialized",
@@ -340,7 +344,7 @@ describe("ClickHouseClient", () => {
     it("should disconnect successfully", async () => {
       const client = new ClickHouseClient(undefined, mockMetricsCollector);
       // Simulate connected state
-      (client as any).isConnected = true;
+      (client as unknown as { isConnected: boolean }).isConnected = true;
 
       await client.disconnect();
 
@@ -356,7 +360,16 @@ describe("ClickHouseClient", () => {
   });
 
   describe("executeWithCache", () => {
-    let mockCache: any;
+    let mockCache: {
+      get: jest.Mock;
+      set: jest.Mock;
+      isEnabled: jest.Mock;
+      invalidate: jest.Mock;
+      invalidatePattern: jest.Mock;
+      getStats: jest.Mock;
+      healthCheck: jest.Mock;
+      dispose: jest.Mock;
+    };
 
     beforeEach(() => {
       mockCache = {
@@ -413,7 +426,16 @@ describe("ClickHouseClient", () => {
   });
 
   describe("invalidateCache", () => {
-    let mockCache: any;
+    let mockCache: {
+      invalidatePattern: jest.Mock;
+      get: jest.Mock;
+      set: jest.Mock;
+      isEnabled: jest.Mock;
+      invalidate: jest.Mock;
+      getStats: jest.Mock;
+      healthCheck: jest.Mock;
+      dispose: jest.Mock;
+    };
 
     beforeEach(() => {
       mockCache = {

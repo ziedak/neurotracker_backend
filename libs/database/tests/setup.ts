@@ -70,7 +70,7 @@ jest.mock("@libs/config", () => ({
       CLICKHOUSE_PASSWORD: "",
       CLICKHOUSE_DATABASE: "default",
     };
-    return envMap[key] || defaultValue || "";
+    return envMap[key] ?? defaultValue ?? "";
   }),
   getBooleanEnv: jest.fn((key: string, defaultValue?: boolean) => {
     const envMap: Record<string, boolean> = {
@@ -140,49 +140,22 @@ global.beforeAll(async () => {
   // Setup code that runs before all tests
 });
 
-global.afterAll(async () => {
+global.afterAll(() => {
   // Cleanup code that runs after all tests
   jest.clearAllMocks();
 });
 
 // Custom matchers
 expect.extend({
-  toBeValidCacheResult(received) {
+  toBeValidCacheResult(received: unknown): jest.CustomMatcherResult {
     const pass =
-      received &&
+      received !== null &&
       typeof received === "object" &&
+      received !== undefined &&
       "data" in received &&
       "source" in received &&
       "latency" in received &&
-      typeof received.latency === "number";
-
-    return {
-      message: () => `expected ${received} to be a valid cache result`,
-      pass,
-    };
-  },
-});
-
-// Global test utilities
-global.beforeAll(async () => {
-  // Setup code that runs before all tests
-});
-
-global.afterAll(async () => {
-  // Cleanup code that runs after all tests
-  jest.clearAllMocks();
-});
-
-// Custom matchers
-expect.extend({
-  toBeValidCacheResult(received) {
-    const pass =
-      received &&
-      typeof received === "object" &&
-      "data" in received &&
-      "source" in received &&
-      "latency" in received &&
-      typeof received.latency === "number";
+      typeof (received as Record<string, unknown>).latency === "number";
 
     return {
       message: () => `expected ${received} to be a valid cache result`,

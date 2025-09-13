@@ -94,7 +94,8 @@ describe("ClickHouseQueryBuilder", () => {
         "users",
         {
           select: ["id", "name"],
-          where: { status: ["active", "pending"] as any },
+          // @ts-expect-error Testing array input for IN operator
+          where: { status: ["active", "pending"] },
         }
       );
 
@@ -298,32 +299,27 @@ describe("ClickHouseQueryBuilder", () => {
       expect(() => {
         ClickHouseQueryBuilder.buildSelectQuery("users", {
           select: ["id"],
-          where: { data: { nested: "object" } as any },
+          // @ts-expect-error Testing complex object input
+          where: { data: { nested: "object" } },
         });
       }).toThrow("Objects and complex types not allowed in queries");
     });
 
     it("should sanitize string values", () => {
-      const { query, params } = ClickHouseQueryBuilder.buildSelectQuery(
-        "users",
-        {
-          select: ["id"],
-          where: { name: "test' OR 1=1 --" },
-        }
-      );
+      const { params } = ClickHouseQueryBuilder.buildSelectQuery("users", {
+        select: ["id"],
+        where: { name: "test' OR 1=1 --" },
+      });
 
       expect(params.name).toBe("test OR 1=1 --");
     });
 
     it("should handle Date objects", () => {
       const date = new Date("2023-01-01T00:00:00Z");
-      const { query, params } = ClickHouseQueryBuilder.buildSelectQuery(
-        "events",
-        {
-          select: ["id"],
-          where: { timestamp: date },
-        }
-      );
+      const { params } = ClickHouseQueryBuilder.buildSelectQuery("events", {
+        select: ["id"],
+        where: { timestamp: date },
+      });
 
       expect(params.timestamp).toBe("2023-01-01T00:00:00.000Z");
     });
@@ -344,7 +340,7 @@ describe("ClickHouseQueryBuilder", () => {
     });
 
     it("should handle empty GROUP BY", () => {
-      const { query, params } = ClickHouseQueryBuilder.buildAggregationQuery(
+      const { query } = ClickHouseQueryBuilder.buildAggregationQuery(
         "users",
         [{ field: "id", function: "COUNT" }],
         {

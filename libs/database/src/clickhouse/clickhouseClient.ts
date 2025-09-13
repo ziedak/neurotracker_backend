@@ -109,6 +109,15 @@ export enum HealthStatus {
 }
 
 /**
+ * Simple interface for dependency injection container.
+ * Only includes methods used by the registration function.
+ */
+interface IDependencyContainer {
+  isRegistered(name: string): boolean;
+  register(name: string, registration: unknown): void;
+}
+
+/**
  * Custom error class for ClickHouse operations.
  */
 export class ClickHouseError extends Error {
@@ -452,7 +461,7 @@ export class ClickHouseClient implements IClickHouseClient {
 
     // Generate cache key
     const cacheKey =
-      cacheOptions.cacheKey ||
+      cacheOptions.cacheKey ??
       this.generateCacheKey(query, values ? Object.values(values) : undefined);
 
     try {
@@ -501,7 +510,7 @@ export class ClickHouseClient implements IClickHouseClient {
     }
 
     try {
-      const searchPattern = pattern || `${this.queryCache.cacheKeyPrefix}*`;
+      const searchPattern = pattern ?? `${this.queryCache.cacheKeyPrefix}*`;
       const invalidatedCount =
         await this.cacheService.invalidatePattern(searchPattern);
       await this.metricsCollector?.recordCounter(
@@ -597,9 +606,9 @@ export class ClickHouseClient implements IClickHouseClient {
 
     // Default options for batch processing
     const opts: IBatchInsertOptions = {
-      batchSize: options?.batchSize || 1000,
-      maxConcurrency: options?.maxConcurrency || 3,
-      delayBetweenBatches: options?.delayBetweenBatches || 100,
+      batchSize: options?.batchSize ?? 1000,
+      maxConcurrency: options?.maxConcurrency ?? 3,
+      delayBetweenBatches: options?.delayBetweenBatches ?? 100,
     };
 
     const startTime = Date.now();
@@ -628,7 +637,7 @@ export class ClickHouseClient implements IClickHouseClient {
       const processBatch = async (
         batch: Record<string, unknown>[],
         index: number
-      ) => {
+      ): Promise<void> => {
         try {
           await this.insert(table, batch, format);
           successfulBatches++;
@@ -748,7 +757,9 @@ export interface IBatchInsertResult {
  * TSyringe container registration helper.
  * Call this during application initialization to register dependencies.
  */
-export const registerClickHouseDependencies = (container: any) => {
+export const registerClickHouseDependencies = (
+  container: IDependencyContainer
+): void => {
   const { MetricsCollector } = require("@libs/monitoring");
 
   if (!container.isRegistered("IMetricsCollector")) {

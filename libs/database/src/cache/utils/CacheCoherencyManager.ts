@@ -12,7 +12,7 @@ export interface CoherencyEvent {
   pattern?: string;
   timestamp: number;
   source: string;
-  metadata?: any;
+  metadata?: Record<string, unknown>;
 }
 
 export interface CoherencyConfig {
@@ -40,12 +40,12 @@ export class CacheCoherencyManager {
   private readonly pendingInvalidations = new Map<string, number>();
   private readonly instanceId: string;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
-  private subscriber?: any; // Raw Redis subscriber
+  private subscriber?: ReturnType<RedisClient["createSubscriber"]>;
 
   private readonly logger = createLogger("CacheCoherencyManager");
   constructor(
     config: Partial<CoherencyConfig> = {},
-    private redisClient: RedisClient
+    private readonly redisClient: RedisClient
   ) {
     this.config = { ...DEFAULT_COHERENCY_CONFIG, ...config };
     this.instanceId = generateUUId("cache");
@@ -55,7 +55,12 @@ export class CacheCoherencyManager {
     });
 
     if (this.config.enableDistributedInvalidation) {
-      this.initializeDistributedInvalidation();
+      this.initializeDistributedInvalidation().catch((error) => {
+        this.logger.error(
+          "Failed to initialize distributed invalidation",
+          error
+        );
+      });
     }
 
     this.startHeartbeat();
@@ -78,7 +83,9 @@ export class CacheCoherencyManager {
       this.config.enableDistributedInvalidation &&
       (event.type === "invalidate" || event.type === "clear")
     ) {
-      this.broadcastInvalidation(coherencyEvent);
+      this.broadcastInvalidation(coherencyEvent).catch((error) => {
+        this.logger.error("Failed to broadcast invalidation", error);
+      });
     }
   }
 
@@ -88,14 +95,14 @@ export class CacheCoherencyManager {
   async invalidateWithCoherency(
     key: string,
     cacheInstances: Array<{ invalidate: (key: string) => Promise<void> }>,
-    metadata?: any
+    metadata?: Record<string, unknown>
   ): Promise<void> {
     const event: CoherencyEvent = {
       type: "invalidate",
       key,
       timestamp: Date.now(),
       source: this.instanceId,
-      metadata,
+      ...(metadata && { metadata }),
     };
 
     // Track pending invalidation
@@ -129,22 +136,23 @@ export class CacheCoherencyManager {
    */
   async clearWithCoherency(
     cacheInstances: Array<{ clear?: () => Promise<void> }>,
-    metadata?: any
+    metadata?: Record<string, unknown>
   ): Promise<void> {
     const event: CoherencyEvent = {
       type: "clear",
       timestamp: Date.now(),
       source: this.instanceId,
-      metadata,
+      ...(metadata && { metadata }),
     };
 
     try {
       // Clear all cache instances that support it
-      await Promise.all(
-        cacheInstances
-          .filter((cache) => cache.clear)
-          .map((cache) => cache.clear!())
-      );
+      const clearPromises = cacheInstances
+        .map((cache) => cache.clear)
+        .filter((clear): clear is () => Promise<void> => clear !== undefined)
+        .map((clear) => clear());
+
+      await Promise.all(clearPromises);
 
       // Record successful operation
       this.recordOperation(event);
@@ -179,7 +187,7 @@ export class CacheCoherencyManager {
         this.logger.info("Distributed invalidation subscriber connected");
       });
 
-      this.subscriber.on("error", (error: any) => {
+      this.subscriber.on("error", (error: Error | unknown) => {
         this.logger.error("Distributed invalidation subscriber error", error);
       });
 
@@ -309,7 +317,9 @@ export class CacheCoherencyManager {
    */
   private startHeartbeat(): void {
     this.heartbeatTimer = setInterval(() => {
-      this.sendHeartbeat();
+      this.sendHeartbeat().catch((error) => {
+        this.logger.error("Heartbeat failed", error);
+      });
     }, this.config.heartbeatInterval);
   }
 
@@ -406,10 +416,10 @@ export class CacheCoherencyManager {
   /**
    * Simple event emitter for coherency events
    */
-  private eventListeners = new Map<string, Function[]>();
+  private readonly eventListeners = new Map<string, Function[]>();
 
-  private emit(event: string, data: any): void {
-    const listeners = this.eventListeners.get(event) || [];
+  private emit(event: string, data: CoherencyEvent): void {
+    const listeners = this.eventListeners.get(event) ?? [];
     listeners.forEach((listener) => {
       try {
         listener(data);
@@ -432,7 +442,10 @@ export class CacheCoherencyManager {
     if (!this.eventListeners.has(event)) {
       this.eventListeners.set(event, []);
     }
-    this.eventListeners.get(event)!.push(listener);
+    const listeners = this.eventListeners.get(event);
+    if (listeners) {
+      listeners.push(listener);
+    }
   }
 
   /**

@@ -101,7 +101,7 @@ export class BackgroundCacheWarmingStrategy extends BaseCacheWarmingStrategy {
   stopBackgroundWarming(): void {
     if (this.intervalId) {
       clearInterval(this.intervalId);
-      this.intervalId = undefined as any;
+      delete this.intervalId;
       this.logger.info("Stopped background cache warming");
     }
   }

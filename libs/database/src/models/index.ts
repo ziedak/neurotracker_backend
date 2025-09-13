@@ -57,7 +57,7 @@ export interface Store {
 export interface StoreSettings {
   id: string;
   storeId: string;
-  config: any;
+  config: unknown;
   createdAt: Date;
   updatedAt: Date;
   store: Store;
@@ -72,7 +72,7 @@ export interface RecoveryEvent {
   eventType: string;
   status: RecoveryStatus;
   outcome?: string | null;
-  metadata?: any | null;
+  metadata?: unknown | null;
   createdAt: Date;
   updatedAt: Date;
   cart: Cart;
@@ -86,7 +86,7 @@ export interface Report {
   storeId: string;
   type: string;
   status: ReportStatus;
-  data?: any | null;
+  data?: unknown | null;
   url?: string | null;
   generatedAt?: Date | null;
   error?: string | null;
@@ -101,7 +101,7 @@ export interface SessionActivity {
   storeId: string;
   activity: string;
   timestamp: Date;
-  metadata?: any | null;
+  metadata?: unknown | null;
   session: UserSession;
   store: Store;
   User: User[];
@@ -116,7 +116,7 @@ export interface Webhook {
   createdAt: Date;
   updatedAt: Date;
   lastTriggered?: Date | null;
-  metadata?: any | null;
+  metadata?: unknown | null;
   store: Store;
 }
 
@@ -131,7 +131,7 @@ export interface Role {
   createdAt: Date;
   updatedAt: Date;
   version: string;
-  metadata?: any | null;
+  metadata?: unknown | null;
   parentRoleId?: string | null;
   parentRole?: Role | null;
   childRoles: Role[];
@@ -148,8 +148,8 @@ export interface RolePermission {
   action: string;
   name: string;
   description?: string | null;
-  conditions?: any | null;
-  metadata?: any | null;
+  conditions?: unknown | null;
+  metadata?: unknown | null;
   priority: string;
   version: string;
   createdAt: Date;
@@ -177,7 +177,7 @@ export interface User {
   createdBy?: string | null;
   updatedBy?: string | null;
   organizationId?: string | null;
-  auditLog?: any | null;
+  auditLog?: unknown | null;
   roleId?: string | null;
   role?: Role | null;
   roleAssignedAt?: Date | null;
@@ -185,7 +185,7 @@ export interface User {
   roleAssignedBy?: string | null;
   roleRevokedBy?: string | null;
   roleExpiresAt?: Date | null;
-  metadata?: any | null;
+  metadata?: unknown | null;
   sessions: UserSession[];
   events: UserEvent[];
   carts: Cart[];
@@ -207,7 +207,7 @@ export interface UserSession {
   expiresAt?: Date | null;
   ipAddress?: string | null;
   userAgent?: string | null;
-  metadata?: any | null;
+  metadata?: unknown | null;
   isActive: boolean;
   endedAt?: Date | null;
   user: User;
@@ -223,7 +223,7 @@ export interface SessionLog {
   sessionId: string;
   event: string;
   timestamp: Date;
-  metadata?: any | null;
+  metadata?: unknown | null;
   session: UserSession;
 }
 
@@ -233,7 +233,7 @@ export interface UserEvent {
   sessionId?: string | null;
   eventType: string;
   timestamp: Date;
-  metadata?: any | null;
+  metadata?: unknown | null;
   pageUrl?: string | null;
   userAgent?: string | null;
   ipAddress?: string | null;
@@ -259,7 +259,7 @@ export interface Product {
   isDeleted: boolean;
   createdBy?: string | null;
   updatedBy?: string | null;
-  metadata?: any | null;
+  metadata?: unknown | null;
   cartItems: CartItem[];
   orderItems: OrderItem[];
   Store: Store[];
@@ -276,8 +276,8 @@ export interface Cart {
   deletedAt?: Date | null;
   isDeleted: boolean;
   archived: boolean;
-  metadata?: any | null;
-  auditLog?: any | null;
+  metadata?: unknown | null;
+  auditLog?: unknown | null;
   user: User;
   items: CartItem[];
   features: Feature[];
@@ -298,7 +298,7 @@ export interface Order {
   updatedAt: Date;
   completedAt?: Date | null;
   cancelledAt?: Date | null;
-  metadata?: any | null;
+  metadata?: unknown | null;
   cart: Cart;
   user: User;
   items: OrderItem[];
@@ -329,7 +329,7 @@ export interface Payment {
   updatedAt: Date;
   completedAt?: Date | null;
   failedAt?: Date | null;
-  metadata?: any | null;
+  metadata?: unknown | null;
   order: Order;
 }
 
@@ -340,8 +340,7 @@ export interface CartItem {
   quantity: number;
   price: PrismaDecimal; // FIXED: Was number, now Decimal for precision
   createdAt: Date;
-  updatedAt: Date;
-  metadata?: any | null;
+  metadata?: unknown | null;
   cart: Cart;
   product: Product;
 }
@@ -350,13 +349,13 @@ export interface Feature {
   id: string;
   cartId: string;
   name: string;
-  value: any;
+  value: unknown;
   version: string;
   description?: string | null;
   ttl?: number | null;
   createdAt: Date;
   updatedAt: Date;
-  metadata?: any | null;
+  metadata?: unknown | null;
   cart?: Cart | null;
 }
 
@@ -368,14 +367,14 @@ export interface Notification {
   read: boolean;
   createdAt: Date;
   readAt?: Date | null;
-  metadata?: any | null;
+  metadata?: unknown | null;
   user: User;
 }
 
 export interface Config {
   id: string;
   key: string;
-  value: any;
+  value: unknown;
   createdAt: Date;
   updatedAt: Date;
   description?: string | null;
@@ -392,7 +391,7 @@ export interface QualityValidation {
 export interface QualityAnomaly {
   id: string;
   type: string;
-  details?: any | null;
+  details?: unknown | null;
   timestamp: Date;
 }
 
@@ -440,7 +439,7 @@ export interface ApiKey {
   user: User;
   storeId?: string | null;
   store?: Store | null;
-  permissions?: any | null;
+  permissions?: unknown | null;
   scopes: string[];
   lastUsedAt?: Date | null;
   usageCount: number;
@@ -450,5 +449,5 @@ export interface ApiKey {
   updatedAt: Date;
   revokedAt?: Date | null;
   revokedBy?: string | null;
-  metadata?: any | null;
+  metadata?: unknown | null;
 }

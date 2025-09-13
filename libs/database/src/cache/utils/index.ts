@@ -43,7 +43,7 @@ export {
   type CompressionAlgorithm,
   type CompressionConfig,
   type CompressionStats,
-  type CompressionContext,
   type CompressionResult,
+  type DecompressionResult,
   DEFAULT_COMPRESSION_CONFIG,
 } from "./CacheCompressor";

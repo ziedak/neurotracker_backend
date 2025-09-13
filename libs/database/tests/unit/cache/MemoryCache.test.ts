@@ -2,7 +2,6 @@ import {
   MemoryCache,
   DEFAULT_MEMORY_CACHE_CONFIG,
 } from "../../../src/cache/strategies/MemoryCache";
-import { LRUCache } from "lru-cache";
 
 // Mock LRUCache at module level
 jest.mock("lru-cache", () => ({
@@ -34,7 +33,14 @@ jest.mock("@libs/utils", () => ({
 
 describe("MemoryCache", () => {
   let memoryCache: MemoryCache;
-  let mockLRUCache: jest.Mocked<any>;
+  let mockLRUCache: {
+    get: jest.Mock;
+    set: jest.Mock;
+    delete: jest.Mock;
+    clear: jest.Mock;
+    keys: jest.Mock;
+    size: number;
+  };
   let mockSize = 0;
 
   beforeEach(() => {
@@ -50,7 +56,7 @@ describe("MemoryCache", () => {
       delete: jest.fn(),
       clear: jest.fn(),
       keys: jest.fn().mockReturnValue([]),
-      get size() {
+      get size(): number {
         return mockSize;
       },
       set size(value: number) {
@@ -275,7 +281,7 @@ describe("MemoryCache", () => {
 
       // Mock the checkMemoryLimits method to return false (limit exceeded)
       const checkMemoryLimitsSpy = jest.spyOn(
-        memoryCache as any,
+        memoryCache as unknown as { checkMemoryLimits: () => boolean },
         "checkMemoryLimits"
       );
       checkMemoryLimitsSpy.mockReturnValue(false);
@@ -300,7 +306,7 @@ describe("MemoryCache", () => {
     it("should remove matching entries", async () => {
       const pattern = "user:*";
       const mockKeys = ["user:1", "user:2", "post:1"];
-      mockLRUCache.keys.mockReturnValue(mockKeys as any);
+      mockLRUCache.keys.mockReturnValue(mockKeys);
 
       // Mock matchPattern to return true for user:* pattern
       const { matchPattern } = require("@libs/utils");
@@ -325,7 +331,7 @@ describe("MemoryCache", () => {
   describe("healthCheck", () => {
     it("should return healthy status when within limits", async () => {
       // Set the mock size to 500
-      (mockLRUCache as any).size = 500;
+      mockLRUCache.size = 500;
 
       const health = await memoryCache.healthCheck();
 
@@ -336,7 +342,7 @@ describe("MemoryCache", () => {
     });
 
     it("should return degraded status when near capacity", async () => {
-      (mockLRUCache as any).size = 9500; // 95% of 10000
+      mockLRUCache.size = 9500; // 95% of 10000
 
       const health = await memoryCache.healthCheck();
 
@@ -355,7 +361,9 @@ describe("MemoryCache", () => {
       };
 
       // Mock the memory tracker
-      (cache as any).memoryTracker = mockMemoryTracker;
+      (
+        cache as unknown as { memoryTracker: typeof mockMemoryTracker }
+      ).memoryTracker = mockMemoryTracker;
 
       const health = await cache.healthCheck();
 
@@ -382,9 +390,9 @@ describe("MemoryCache", () => {
       };
 
       const cache = new MemoryCache();
-      (cache as any).memoryTracker.getMemoryStats = jest
-        .fn()
-        .mockReturnValue(mockStats);
+      (
+        cache as unknown as { memoryTracker: { getMemoryStats: jest.Mock } }
+      ).memoryTracker.getMemoryStats = jest.fn().mockReturnValue(mockStats);
 
       const stats = cache.getMemoryStats();
 
@@ -400,7 +408,7 @@ describe("MemoryCache", () => {
     });
 
     it("should handle null data", async () => {
-      await memoryCache.set("test-key", null as any);
+      await memoryCache.set("test-key", null as unknown);
       expect(mockLRUCache.set).toHaveBeenCalledWith(
         "test-key",
         expect.objectContaining({
@@ -410,7 +418,7 @@ describe("MemoryCache", () => {
     });
 
     it("should handle undefined data", async () => {
-      await memoryCache.set("test-key", undefined as any);
+      await memoryCache.set("test-key", undefined as unknown);
       expect(mockLRUCache.set).not.toHaveBeenCalled();
     });
 
