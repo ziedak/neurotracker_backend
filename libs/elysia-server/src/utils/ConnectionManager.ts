@@ -82,7 +82,7 @@ export class ConnectionManager extends EventEmitter {
   private readonly metadataPool: ObjectPool<ConnectionMetadata>;
 
   // Metrics
-  private metrics: ConnectionMetrics = {
+  private readonly metrics: ConnectionMetrics = {
     totalConnections: 0,
     activeConnections: 0,
     connectionsByUser: 0,
@@ -119,7 +119,7 @@ export class ConnectionManager extends EventEmitter {
       max: this.config.maxConnections,
       ttl: this.config.connectionTtl,
       updateAgeOnGet: true,
-      dispose: (connection: Connection) => {
+      dispose: (connection: Connection): void => {
         this.handleConnectionDisposal(connection);
       },
     });
@@ -127,7 +127,7 @@ export class ConnectionManager extends EventEmitter {
     this.userConnections = new LRUCache<string, Set<string>>({
       max: Math.floor(this.config.maxConnections / 2), // Assume 2 connections per user on average
       ttl: this.config.connectionTtl,
-      dispose: (connectionSet: Set<string>, userId: string) => {
+      dispose: (connectionSet: Set<string>, userId: string): void => {
         this.handleUserConnectionsDisposal(connectionSet, userId);
       },
     });
@@ -135,7 +135,7 @@ export class ConnectionManager extends EventEmitter {
     this.rooms = new LRUCache<string, Set<string>>({
       max: 1000, // Max 1000 rooms
       ttl: this.config.roomTtl,
-      dispose: (memberSet: Set<string>, roomId: string) => {
+      dispose: (memberSet: Set<string>, roomId: string): void => {
         this.handleRoomDisposal(memberSet, roomId);
       },
     });
@@ -186,11 +186,11 @@ export class ConnectionManager extends EventEmitter {
       id: connectionId,
       socket,
       userId,
-      sessionId: sessionId || generateId("session"),
+      sessionId: sessionId ?? generateId("session"),
       connectedAt: now,
       lastActivity: now,
-      remoteAddress: socket?.remoteAddress || undefined,
-      userAgent: metadata["userAgent"] || undefined,
+      remoteAddress: socket?.remoteAddress ?? undefined,
+      userAgent: metadata["userAgent"] ?? undefined,
       rooms,
       metadata: connectionMetadata,
       isAuthenticated: false,

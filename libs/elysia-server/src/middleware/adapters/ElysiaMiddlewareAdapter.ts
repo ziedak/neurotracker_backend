@@ -75,12 +75,12 @@ export class ElysiaMiddlewareAdapter<
     const config = middlewareInstance.getConfig();
 
     return new Elysia({ name: config.name })
-      .decorate(config.name as any, {
+      .decorate(config.name, {
         config,
         isEnabled: middlewareInstance.isEnabled.bind(middlewareInstance),
         getName: middlewareInstance.getName.bind(middlewareInstance),
       })
-      .derive(async (elysiaContext) => {
+      .derive((elysiaContext) => {
         // Skip if middleware is disabled
         if (!middlewareInstance.isEnabled()) {
           return {};
@@ -107,32 +107,66 @@ export class ElysiaMiddlewareAdapter<
         await middlewareFunction(middlewareContext, async () => {
           // No-op next function for onBeforeHandle
         });
-      });
+      }) as unknown as Elysia;
   }
 
   /**
    * Transform Elysia context to middleware context
    * @param elysiaContext - Elysia framework context
    */
-  private transformContext(elysiaContext: any): MiddlewareContext {
-    const { request, set, headers, path, query, params, body } = elysiaContext;
+  private transformContext(
+    elysiaContext: Record<string, unknown>
+  ): MiddlewareContext {
+    const { request, set, headers, path, query, params, body } =
+      elysiaContext as {
+        request?: { method?: string; url?: string };
+        set?: {
+          status?: number | string;
+          headers?: Record<string, string | number>;
+        };
+        headers?: Record<string, string | undefined>;
+        path?: string;
+        query?: Record<string, string>;
+        params?: Record<string, unknown>;
+        body?: unknown;
+      };
+
+    // Filter out undefined headers
+    const filteredHeaders: Record<string, string> = {};
+    if (headers) {
+      Object.entries(headers).forEach(([key, value]) => {
+        if (value !== undefined) {
+          filteredHeaders[key] = value;
+        }
+      });
+    }
+
+    // Filter out non-string params (decorators)
+    const filteredParams: Record<string, string> = {};
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (typeof value === "string") {
+          filteredParams[key] = value;
+        }
+      });
+    }
 
     return {
       requestId: this.generateRequestId(),
       request: {
-        method: request?.method || "GET",
-        url: request?.url || path || "/",
-        headers: headers || {},
+        method: request?.method ?? "GET",
+        url: request?.url ?? path ?? "/",
+        headers: filteredHeaders,
         body,
-        query: query || {},
-        params: params || {},
-        ip: this.extractClientIp(headers),
+        query: query ?? {},
+        params: filteredParams,
+        ip: this.extractClientIp(filteredHeaders),
       },
       set: {
-        status: set?.status,
-        headers: set?.headers || {},
+        status: typeof set?.status === "number" ? set.status : undefined,
+        headers: this.convertHeaders(set?.headers),
       },
-      path,
+      path: path ?? "/",
       // Allow access to original context for advanced use cases
       originalContext: elysiaContext,
     };
@@ -144,11 +178,27 @@ export class ElysiaMiddlewareAdapter<
    */
   private extractClientIp(headers: Record<string, string>): string {
     return (
-      headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
-      headers["x-real-ip"] ||
-      headers["cf-connecting-ip"] ||
+      headers["x-forwarded-for"]?.split(",")[0]?.trim() ??
+      headers["x-real-ip"] ??
+      headers["cf-connecting-ip"] ??
       "unknown"
     );
+  }
+
+  /**
+   * Convert HTTPHeaders to Record<string, string>
+   * @param headers - HTTPHeaders from Elysia
+   */
+  private convertHeaders(
+    headers: Record<string, string | number> | undefined
+  ): Record<string, string> {
+    const result: Record<string, string> = {};
+    if (headers) {
+      Object.entries(headers).forEach(([key, value]) => {
+        result[key] = String(value);
+      });
+    }
+    return result;
   }
 
   /**

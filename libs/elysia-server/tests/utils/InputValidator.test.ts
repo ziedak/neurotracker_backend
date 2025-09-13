@@ -66,7 +66,7 @@ describe("InputValidator", () => {
       const message = {
         type: 123,
         payload: { data: "value" },
-      } as any;
+      } as unknown as WebSocketMessage;
 
       expect(() => {
         InputValidator.validateWebSocketMessage(message);
@@ -121,7 +121,7 @@ describe("InputValidator", () => {
     });
 
     it("should reject functions", () => {
-      const func = () => "test";
+      const func = (): string => "test";
 
       expect(() => {
         InputValidator.validateJsonPayload(func, {});
@@ -138,7 +138,7 @@ describe("InputValidator", () => {
 
     it("should enforce max depth limit", () => {
       // Create deeply nested object
-      let deepObject: any = { level: 1 };
+      let deepObject: Record<string, unknown> = { level: 1 };
       for (let i = 2; i <= 15; i++) {
         deepObject = { level: i, nested: deepObject };
       }
@@ -187,7 +187,7 @@ describe("InputValidator", () => {
     it("should reject headers with array values", () => {
       const headers = {
         "content-type": ["application/json", "charset=utf-8"],
-      } as any;
+      } as unknown as HttpHeaders;
 
       expect(() => {
         InputValidator.validateHeaders(headers);
@@ -197,7 +197,7 @@ describe("InputValidator", () => {
     it("should reject headers with numeric values", () => {
       const headers = {
         "content-length": 1234,
-      } as any;
+      } as unknown as HttpHeaders;
 
       expect(() => {
         InputValidator.validateHeaders(headers);
@@ -215,7 +215,7 @@ describe("InputValidator", () => {
     it("should reject null header values", () => {
       const headers = {
         authorization: null,
-      } as any;
+      } as unknown as HttpHeaders;
 
       expect(() => {
         InputValidator.validateHeaders(headers);
@@ -307,7 +307,9 @@ describe("InputValidator", () => {
       }).toThrow("Invalid JSON: undefined values not allowed");
 
       expect(() => {
-        InputValidator.validateWebSocketMessage({ type: "" } as any);
+        InputValidator.validateWebSocketMessage({
+          type: "",
+        } as unknown as WebSocketMessage);
       }).toThrow("Invalid message: type cannot be empty");
     });
 

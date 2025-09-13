@@ -5,13 +5,13 @@ import { createLogger, type ILogger } from "@libs/utils";
  * and ensure proper cleanup of timers and intervals.
  */
 export class TimerManager {
-  private timers: Set<NodeJS.Timeout> = new Set();
-  private intervals: Set<NodeJS.Timeout> = new Set();
+  private readonly timers: Set<NodeJS.Timeout> = new Set();
+  private readonly intervals: Set<NodeJS.Timeout> = new Set();
   private isShuttingDown = false;
-  private logger: ILogger;
+  private readonly logger: ILogger;
 
   constructor(logger?: ILogger) {
-    this.logger = logger || createLogger("TimerManager");
+    this.logger = logger ?? createLogger("TimerManager");
   }
 
   /**
@@ -111,7 +111,12 @@ export class TimerManager {
   /**
    * Get detailed stats for monitoring
    */
-  getStats() {
+  getStats(): {
+    activeTimers: number;
+    activeIntervals: number;
+    total: number;
+    isShuttingDown: boolean;
+  } {
     return {
       activeTimers: this.timers.size,
       activeIntervals: this.intervals.size,

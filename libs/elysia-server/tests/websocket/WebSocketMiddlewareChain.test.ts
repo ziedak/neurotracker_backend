@@ -1,21 +1,25 @@
 // No Jest globals import needed, Jest provides these globally
 
 // Mock monitoring libraries
-const Logger = {
-  getInstance: jest.fn(() => ({
-    info: jest.fn(),
-    debug: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-  })),
-};
-
 const MetricsCollector = {
   getInstance: jest.fn(() => ({
     recordCounter: jest.fn(),
     recordTimer: jest.fn(),
     recordGauge: jest.fn(),
   })),
+};
+
+// Type for the metrics instance
+type MockMetricsInstance = {
+  recordCounter: jest.MockedFunction<
+    (name: string, value?: number, labels?: Record<string, string>) => void
+  >;
+  recordTimer: jest.MockedFunction<
+    (name: string, value: number, labels?: Record<string, string>) => void
+  >;
+  recordGauge: jest.MockedFunction<
+    (name: string, value: number, labels?: Record<string, string>) => void
+  >;
 };
 import {
   WebSocketMiddlewareChain,
@@ -64,10 +68,7 @@ const createTestMiddleware = (
       }
 
       // Set a marker to track execution order
-      if (!context.executionOrder) {
-        context.executionOrder = [];
-      }
-      (context.executionOrder as string[]).push(name);
+      (context.executionOrder ??= []).push(name);
 
       await next();
     }
@@ -76,11 +77,9 @@ const createTestMiddleware = (
 
 describe("WebSocketMiddlewareChain", () => {
   let chain: WebSocketMiddlewareChain;
-  let logger: any;
-  let metrics: any;
+  let metrics: MockMetricsInstance;
 
   beforeEach(() => {
-    logger = Logger.getInstance();
     metrics = MetricsCollector.getInstance();
     chain = new WebSocketMiddlewareChain(metrics, "test-chain");
   });
@@ -360,7 +359,7 @@ describe("WebSocketMiddlewareChain", () => {
     });
 
     it("should fail after max retries", async () => {
-      const alwaysFailMiddleware = jest.fn(async () => {
+      const alwaysFailMiddleware = jest.fn(() => {
         throw new Error("Always fails");
       });
 
@@ -496,7 +495,6 @@ describe("Performance Tests", () => {
   let chain: WebSocketMiddlewareChain;
 
   beforeEach(() => {
-    const logger = Logger.getInstance();
     const metrics = MetricsCollector.getInstance();
     chain = new WebSocketMiddlewareChain(metrics, "test-chain");
   });

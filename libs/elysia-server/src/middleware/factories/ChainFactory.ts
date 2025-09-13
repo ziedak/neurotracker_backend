@@ -199,6 +199,7 @@ export const MiddlewareChainPatterns = {
       security: 90,
       rateLimit: 80,
       auth: 70,
+      metrics: 10,
     },
   }),
 

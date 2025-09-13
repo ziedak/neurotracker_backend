@@ -631,7 +631,14 @@ export class WebSocketMiddlewareChain {
   }
 
   /**
-   * Create a factory function that returns an executable middleware function
+   * Get middleware count
+   */
+  getCount(): number {
+    return this.middleware.size;
+  }
+
+  /**
+   * Create an executable middleware function for use with WebSocket handlers
    */
   createExecutor(): WebSocketMiddlewareFunction {
     return async (context: WebSocketContext, next: () => Promise<void>) => {

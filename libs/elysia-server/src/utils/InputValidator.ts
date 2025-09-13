@@ -123,7 +123,7 @@ export class InputValidator {
         }
 
         // Sanitize header value (remove control characters)
-        const sanitizedValue = value.replace(/[\x00-\x1f\x7f]/g, "");
+        const sanitizedValue = value.replace(/\p{C}/gu, "");
 
         validated[key.toLowerCase()] = sanitizedValue;
         headerCount++;
@@ -283,7 +283,7 @@ export class InputValidator {
     }
 
     // Remove control characters
-    sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+    sanitized = sanitized.replace(/\p{C}/gu, "");
 
     return sanitized;
   }
@@ -359,11 +359,11 @@ export const CommonValidators = {
    * Strict API validation
    */
   api: {
-    validateToken: (token: string | undefined) =>
+    validateToken: (token: string | undefined): string =>
       InputValidator.validateToken(token),
-    validateHeaders: (headers: HttpHeaders) =>
+    validateHeaders: (headers: HttpHeaders): ValidatedHeaders =>
       InputValidator.validateHeaders(headers),
-    validatePayload: (payload: unknown) =>
+    validatePayload: (payload: unknown): JsonValue =>
       InputValidator.validateJsonPayload(payload, {
         maxSizeBytes: 10 * 1024 * 1024, // 10MB
         maxDepth: 15,
@@ -374,9 +374,9 @@ export const CommonValidators = {
    * WebSocket message validation
    */
   websocket: {
-    validateMessage: (message: WebSocketMessage) =>
+    validateMessage: (message: WebSocketMessage): ValidatedWebSocketMessage =>
       InputValidator.validateWebSocketMessage(message),
-    validatePayload: (payload: unknown) =>
+    validatePayload: (payload: unknown): JsonValue =>
       InputValidator.validateJsonPayload(payload, {
         maxSizeBytes: 64 * 1024, // 64KB
         maxDepth: 10,
@@ -387,17 +387,17 @@ export const CommonValidators = {
    * Basic string validation
    */
   string: {
-    username: (input: string | undefined) =>
+    username: (input: string | undefined): string =>
       InputValidator.sanitizeString(input, {
         maxLength: 50,
         allowedChars: /^[a-zA-Z0-9\-_]+$/,
       }),
-    email: (input: string | undefined) =>
+    email: (input: string | undefined): string =>
       InputValidator.sanitizeString(input, {
         maxLength: 254,
         allowedChars: /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/,
       }),
-    roomName: (input: string | undefined) =>
+    roomName: (input: string | undefined): string =>
       InputValidator.sanitizeString(input, {
         maxLength: 100,
         allowedChars: /^[a-zA-Z0-9\-_:]+$/,
