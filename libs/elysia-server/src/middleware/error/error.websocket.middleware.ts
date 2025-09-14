@@ -4,6 +4,7 @@ import {
   type WebSocketMiddlewareConfig,
 } from "../base/BaseWebSocketMiddleware";
 import { type WebSocketContext } from "../types";
+import { asWebSocket, type WebSocketLike } from "../types";
 
 export interface ErrorWebSocketMiddlewareConfig
   extends WebSocketMiddlewareConfig {
@@ -21,13 +22,13 @@ export interface ErrorWebSocketResponse {
   message: string;
   timestamp: string;
   connectionId?: string;
-  details?: any;
+  details?: Record<string, unknown>;
   stackTrace?: string;
 }
 
 export interface WebSocketCustomError extends Error {
   code?: string;
-  details?: any;
+  details?: Record<string, unknown>;
 }
 
 /**
@@ -82,13 +83,10 @@ export class ErrorWebSocketMiddleware extends BaseWebSocketMiddleware<ErrorWebSo
     error: Error,
     context: WebSocketContext
   ): Promise<void> {
-    const errorResponse = await this.ErrorcreateWebSocketResponse(
-      error,
-      context
-    );
+    const errorResponse = this.ErrorcreateWebSocketResponse(error, context);
 
     // Send error response to client
-    this.sendResponse(context, errorResponse);
+    await this.sendResponse(context, errorResponse);
 
     // Record error metrics
     await this.recordMetric("ws_error_handled", 1, {
@@ -98,22 +96,22 @@ export class ErrorWebSocketMiddleware extends BaseWebSocketMiddleware<ErrorWebSo
 
     // Log error if configured
     if (this.config.logErrors) {
-      await this.ErrorlogWebSocket(error, context);
+      this.ErrorlogWebSocket(error, context);
     }
   }
 
   /**
    * Create formatted WebSocket error response
    */
-  public async ErrorcreateWebSocketResponse(
+  public ErrorcreateWebSocketResponse(
     error: Error | WebSocketCustomError,
     context?: WebSocketContext
-  ): Promise<ErrorWebSocketResponse> {
+  ): ErrorWebSocketResponse {
     try {
-      const connectionId = context?.connectionId || "unknown";
+      const connectionId = context?.connectionId ?? "unknown";
 
       const errorResponse: ErrorWebSocketResponse = {
-        type: this.config.errorResponseType || "error",
+        type: this.config.errorResponseType ?? "error",
         success: false,
         error: this.getErrorType(error),
         message: this.getErrorMessage(error),
@@ -141,12 +139,12 @@ export class ErrorWebSocketMiddleware extends BaseWebSocketMiddleware<ErrorWebSo
       );
 
       return {
-        type: this.config.errorResponseType || "error",
+        type: this.config.errorResponseType ?? "error",
         success: false,
         error: "InternalError",
         message: "An internal error occurred",
         timestamp: new Date().toISOString(),
-        connectionId: context?.connectionId || "unknown",
+        connectionId: context?.connectionId ?? "unknown",
       };
     }
   }
@@ -155,9 +153,9 @@ export class ErrorWebSocketMiddleware extends BaseWebSocketMiddleware<ErrorWebSo
    * Handle async errors for WebSocket operations
    */
   public async ErrorhandleAsyncWebSocket(
-    errorPromise: Promise<any>,
+    errorPromise: Promise<unknown>,
     context?: WebSocketContext
-  ): Promise<any> {
+  ): Promise<unknown> {
     try {
       return await errorPromise;
     } catch (error) {
@@ -168,7 +166,7 @@ export class ErrorWebSocketMiddleware extends BaseWebSocketMiddleware<ErrorWebSo
   /**
    * Wrap WebSocket handler function with error handling
    */
-  public wrapWebSocketHandler<T extends any[], R>(
+  public wrapWebSocketHandler<T extends unknown[], R>(
     handler: (...args: T) => Promise<R>
   ): (...args: T) => Promise<R | ErrorWebSocketResponse> {
     return async (...args: T) => {
@@ -183,18 +181,18 @@ export class ErrorWebSocketMiddleware extends BaseWebSocketMiddleware<ErrorWebSo
   /**
    * Log WebSocket error with comprehensive context
    */
-  private async ErrorlogWebSocket(
+  private ErrorlogWebSocket(
     error: Error | WebSocketCustomError,
     context: WebSocketContext
-  ): Promise<void> {
-    const errorContext: Record<string, any> = {
+  ): void {
+    const errorContext: Record<string, unknown> = {
       connectionId: context.connectionId,
       errorType: this.getErrorType(error),
       errorMessage: error.message,
       timestamp: new Date().toISOString(),
       messageType: context.message?.type,
       authenticated: context.authenticated,
-      userId: context["user"]?.id,
+      userId: context.userId,
     };
 
     // Add error details if available
@@ -204,8 +202,11 @@ export class ErrorWebSocketMiddleware extends BaseWebSocketMiddleware<ErrorWebSo
 
     // Add connection info if available
     if (context.ws) {
-      errorContext["readyState"] = context.ws["readyState"];
-      errorContext["url"] = context.ws["url"];
+      const ws = asWebSocket(context.ws);
+      errorContext["readyState"] = ws.readyState;
+      // Safely access URL property if available
+      const wsWithUrl = ws as WebSocketLike & { url?: string };
+      errorContext["url"] = wsWithUrl.url ?? "unknown";
     }
 
     // Log with appropriate level
@@ -239,9 +240,11 @@ export class ErrorWebSocketMiddleware extends BaseWebSocketMiddleware<ErrorWebSo
   }
 
   /**
-   * Get error details
+   * Get error details with proper typing
    */
-  private getErrorDetails(error: Error | WebSocketCustomError): any {
+  private getErrorDetails(
+    error: Error | WebSocketCustomError
+  ): Record<string, unknown> | undefined {
     if (!("details" in error) || !error.details) {
       return undefined;
     }
@@ -255,7 +258,7 @@ export class ErrorWebSocketMiddleware extends BaseWebSocketMiddleware<ErrorWebSo
   private sanitizeErrorMessage(message: string): string {
     // Remove file paths
     message = message.replace(/[A-Z]:\\[^\\]+(?:\\[^\\]+)*/g, "[FILE_PATH]");
-    message = message.replace(/\/[^\/\s]+(?:\/[^\/\s]+)*/g, "[FILE_PATH]");
+    message = message.replace(/\/[^\\/\s]+(?:\/[^\\/\s]+)*/g, "[FILE_PATH]");
 
     // Remove potential connection strings
     message = message.replace(
@@ -275,8 +278,10 @@ export class ErrorWebSocketMiddleware extends BaseWebSocketMiddleware<ErrorWebSo
   /**
    * Sanitize error details to remove sensitive information
    */
-  private sanitizeErrorDetails(details: any): any {
-    const sensitiveFields = this.config.sensitiveFields || [];
+  private sanitizeErrorDetails(
+    details: Record<string, unknown>
+  ): Record<string, unknown> {
+    const sensitiveFields = this.config.sensitiveFields ?? [];
     return this.sanitizeObject(details, [...sensitiveFields]);
   }
 
@@ -285,11 +290,13 @@ export class ErrorWebSocketMiddleware extends BaseWebSocketMiddleware<ErrorWebSo
    */
   static createWebSocketValidationError(
     message: string,
-    details?: any
+    details?: Record<string, unknown>
   ): WebSocketCustomError {
     const error = new Error(message) as WebSocketCustomError;
     error.name = "WebSocketValidationError";
-    error.details = details;
+    if (details) {
+      error.details = details;
+    }
     return error;
   }
 

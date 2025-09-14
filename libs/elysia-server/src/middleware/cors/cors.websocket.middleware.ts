@@ -172,8 +172,10 @@ export class CorsWebSocketMiddleware extends BaseWebSocketMiddleware<CorsWebSock
       throw new Error("Missing upgrade headers for WebSocket CORS validation");
     }
 
-    const headers = this.extractUpgradeHeaders(context["upgradeHeaders"]);
-    const origin = headers.origin;
+    const headers = this.extractUpgradeHeaders(
+      context["upgradeHeaders"] as Record<string, string | string[] | undefined>
+    );
+    const {origin} = headers;
 
     this.logger.debug("Validating WebSocket upgrade", {
       origin: origin || "null",
@@ -262,8 +264,7 @@ export class CorsWebSocketMiddleware extends BaseWebSocketMiddleware<CorsWebSock
     }
 
     if (
-      !headers.connection ||
-      !headers.connection.toLowerCase().includes("upgrade")
+      !headers.connection?.toLowerCase().includes("upgrade")
     ) {
       throw new Error("Invalid or missing Connection header for WebSocket");
     }
@@ -423,10 +424,10 @@ export class CorsWebSocketMiddleware extends BaseWebSocketMiddleware<CorsWebSock
     });
 
     // Send error response if possible
-    if (
-      context["websocket"] &&
-      typeof context["websocket"].send === "function"
-    ) {
+    const websocket = context["websocket"] as
+      | { send?: (data: string) => void }
+      | undefined;
+    if (websocket && typeof websocket.send === "function") {
       try {
         const errorResponse = {
           type: "error",
@@ -435,7 +436,7 @@ export class CorsWebSocketMiddleware extends BaseWebSocketMiddleware<CorsWebSock
           timestamp: new Date().toISOString(),
         };
 
-        context["websocket"].send(JSON.stringify(errorResponse));
+        websocket.send(JSON.stringify(errorResponse));
       } catch (sendError) {
         this.logger.error("Failed to send WebSocket CORS error response", {
           sendError,
@@ -464,7 +465,7 @@ export class CorsWebSocketMiddleware extends BaseWebSocketMiddleware<CorsWebSock
       throw new Error("WebSocket CORS allowed protocols array cannot be empty");
     }
 
-    if (allowedExtensions && allowedExtensions.some((ext) => !ext.trim())) {
+    if (allowedExtensions?.some((ext) => !ext.trim())) {
       throw new Error(
         "WebSocket CORS allowed extensions cannot contain empty strings"
       );

@@ -1,0 +1,92 @@
+{
+  "task": "refact-elysia-server-optimization",
+  "created": "2025-09-13",
+  "desc": "Critical refactor of libs/elysia-server to eliminate code duplication, reduce architectural complexity, fix memory leaks, and optimize performance for microservice foundation",
+  "objectives": [
+    "Remove TimerManager duplication - consolidate with @libs/utils/Scheduler",
+    "Consolidate multiple InputValidator implementations with unified Zod system",
+    "Fix ConnectionManager memory leaks and thread safety",
+    "Simplify AdvancedElysiaServerBuilder over-engineered architecture",
+    "Integrate existing middleware with @libs/auth (Keycloak+CASL), @libs/ratelimit, @libs/monitoring",
+    "Add cockatiel circuit breaker to existing error middleware",
+    "Optimize LRU cache coordination and performance",
+    "Create comprehensive integration documentation for existing libs"
+  ],
+  "phases": [
+    {
+      "name": "audit",
+      "tasks": [
+        "Document duplicate utilities (TimerManager/Scheduler, multiple InputValidators)",
+        "Analyze AdvancedElysiaServerBuilder complexity",
+        "Identify memory leaks in ConnectionManager",
+        "Review middleware system integration points"
+      ],
+      "prog": 100
+    },
+    {
+      "name": "consolidation",
+      "tasks": [
+        "Remove TimerManager duplicate - use @libs/utils/Scheduler",
+        "Consolidate InputValidator implementations with Zod",
+        "Fix ConnectionManager memory leaks",
+        "Simplify AdvancedElysiaServerBuilder API surface"
+      ],
+      "prog": 0
+    },
+    {
+      "name": "integration",
+      "tasks": [
+        "Connect existing auth middleware to @libs/auth (Keycloak+CASL)",
+        "Integrate existing ratelimit middleware with @libs/ratelimit",
+        "Connect existing prometheus middleware to @libs/monitoring",
+        "Add cockatiel circuit breaker to existing error middleware"
+      ],
+      "prog": 0
+    },
+    {
+      "name": "performance",
+      "tasks": [
+        "Fix LRU cache coordination issues",
+        "Optimize middleware chain execution",
+        "Add proper connection pooling",
+        "Implement concurrent safety measures"
+      ],
+      "prog": 0
+    },
+    {
+      "name": "validation",
+      "tasks": [
+        "Create unified Zod validation schemas",
+        "Update existing middleware to use unified validation",
+        "Standardize error response formats",
+        "Add comprehensive input sanitization"
+      ],
+      "prog": 0
+    },
+    {
+      "name": "documentation",
+      "tasks": [
+        "Document middleware integration patterns",
+        "Create migration guide for breaking changes",
+        "Write performance optimization guide",
+        "Document security best practices with existing libs"
+      ],
+      "prog": 0
+    },
+    {
+      "name": "testing",
+      "tasks": [
+        "Add unit tests for consolidated utilities",
+        "Integration tests with @libs/auth, @libs/ratelimit, @libs/monitoring",
+        "Performance benchmarking",
+        "Security testing with existing middleware"
+      ],
+      "prog": 0
+    }
+  ],
+  "constitutional": {
+    "articles": [0, 1, 2, 3, 4, 5, 6],
+    "gates": [0, 1, 2, 3],
+    "compliance": 0
+  }
+}

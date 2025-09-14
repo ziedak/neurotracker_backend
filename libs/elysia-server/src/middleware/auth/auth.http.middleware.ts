@@ -77,18 +77,18 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
   ) {
     // Create complete configuration with validated defaults
     const completeConfig = {
-      name: config.name || "auth",
+      name: config.name ?? "auth",
       enabled: config.enabled ?? true,
       priority: config.priority ?? DEFAULT_AUTH_OPTIONS.PRIORITY,
       requireAuth: config.requireAuth ?? DEFAULT_AUTH_OPTIONS.REQUIRE_AUTH,
-      roles: config.roles || [],
-      permissions: config.permissions || [],
+      roles: config.roles ?? [],
+      permissions: config.permissions ?? [],
       action: config.action,
       resource: config.resource,
       allowAnonymous:
         config.allowAnonymous ?? DEFAULT_AUTH_OPTIONS.ALLOW_ANONYMOUS,
-      bypassRoutes: config.bypassRoutes || DEFAULT_AUTH_OPTIONS.BYPASS_ROUTES,
-      skipPaths: [...(config.skipPaths || []), ...(config.bypassRoutes || [])],
+      bypassRoutes: config.bypassRoutes ?? DEFAULT_AUTH_OPTIONS.BYPASS_ROUTES,
+      skipPaths: [...(config.skipPaths ?? []), ...(config.bypassRoutes ?? [])],
       apiKeyAuth: config.apiKeyAuth ?? DEFAULT_AUTH_OPTIONS.API_KEY_AUTH,
       jwtAuth: config.jwtAuth ?? DEFAULT_AUTH_OPTIONS.JWT_AUTH,
       sessionAuth: config.sessionAuth ?? DEFAULT_AUTH_OPTIONS.SESSION_AUTH,
@@ -120,7 +120,7 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
       this.enrichContext(context, authResult);
 
       // Perform authorization checks if authentication succeeded or is required
-      if (authResult.user || this.config.requireAuth) {
+      if (authResult.user ?? this.config.requireAuth) {
         await this.authorizeRequest(context, authResult, requestId);
       }
 
@@ -130,7 +130,7 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
       // Record successful request metrics
       await this.recordAuthMetrics("auth_success", {
         method: authResult.method,
-        userId: authResult.user?.id || "anonymous",
+        userId: authResult.user?.id ?? "anonymous",
         hasUser: authResult.user ? "true" : "false",
         path: context.request.url,
       });
@@ -212,7 +212,7 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
 
     // Return the first attempted result or anonymous result
     return (
-      results[0] || {
+      results[0] ?? {
         user: null,
         authContext: null,
         method: "anonymous",
@@ -232,7 +232,7 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
       const authHeader = context.request.headers["authorization"];
       const token = this.authService
         .getJWTService()
-        .extractTokenFromHeader(authHeader || "");
+        .extractTokenFromHeader(authHeader ?? "");
 
       if (!token) {
         return {
@@ -384,7 +384,7 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
       const session = await this.authService
         .getSessionService()
         .getSession(sessionId);
-      if (!session || !session.isActive) {
+      if (!session?.isActive) {
         return {
           user: null,
           authContext: null,
@@ -455,26 +455,28 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
     }
 
     // If no user, skip authorization checks (assuming allowAnonymous is true)
-    if (!authResult.user || !authResult.authContext) {
+    if (!authResult.user && !authResult.authContext) {
       if (this.config.requireAuth) {
         throw new UnauthorizedError("Authentication required");
       }
       return;
     }
 
-    const user = authResult.user;
-
+    const { user } = authResult;
+    if (!user) {
+      throw new UnauthorizedError("Authentication required");
+    }
     // Check role requirements
     if (this.config.roles && this.config.roles.length > 0) {
       const hasRequiredRole = this.config.roles.some((role) =>
-        user.roles.includes(role)
+        user?.roles.includes(role)
       );
       if (!hasRequiredRole) {
         await this.recordAuthMetrics("auth_failure", {
           reason: "insufficient_roles",
-          userId: user.id,
+          userId: user?.id ?? "unknown",
           requiredRoles: this.config.roles.join(","),
-          userRoles: user.roles.join(","),
+          userRoles: user?.roles.join(",") ?? "unknown",
         });
         throw new ForbiddenError("Insufficient role permissions");
       }
@@ -483,12 +485,12 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
     // Check permission requirements
     if (this.config.permissions && this.config.permissions.length > 0) {
       const hasRequiredPermission = this.config.permissions.some((permission) =>
-        user.permissions.includes(permission)
+        user?.permissions.includes(permission)
       );
       if (!hasRequiredPermission) {
         await this.recordAuthMetrics("auth_failure", {
           reason: "insufficient_permissions",
-          userId: user.id,
+          userId: user?.id ?? "unknown",
           requiredPermissions: this.config.permissions.join(","),
         });
         throw new ForbiddenError("Insufficient permissions");
@@ -505,7 +507,7 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
       if (!canPerform) {
         await this.recordAuthMetrics("auth_failure", {
           reason: "insufficient_ability",
-          userId: user.id,
+          userId: user?.id ?? "unknown",
           action: this.config.action,
           resource: this.config.resource,
         });
@@ -533,7 +535,14 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
   ): void {
     if (this.config.extractUserInfo) {
       if (authResult.user) {
-        context.user = authResult.user;
+        context.user = {
+          id: authResult.user.id,
+          roles: authResult.user.roles || [],
+          permissions: authResult.user.permissions || [],
+          authenticated: true,
+          anonymous: false,
+          ...(authResult.user as unknown as Record<string, unknown>),
+        };
       }
       context["authContext"] = authResult.authContext;
       context["isAuthenticated"] = !!authResult.user;
@@ -555,7 +564,7 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
     const cookies = context.request.headers["cookie"];
     if (cookies) {
       const sessionCookieMatch = cookies.match(/sessionid=([^;]+)/);
-      if (sessionCookieMatch && sessionCookieMatch[1]) {
+      if (sessionCookieMatch?.[1]) {
         return sessionCookieMatch[1];
       }
     }

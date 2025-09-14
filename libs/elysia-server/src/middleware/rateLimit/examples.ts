@@ -130,7 +130,10 @@ export function createTieredRateLimit() {
     keyStrategy: "custom",
     customKeyGenerator: (context) => {
       const userId = context.user?.id;
-      const userTier = context.user?.["subscription"]?.["tier"] || "free";
+      const subscription = (context.user as Record<string, unknown>)?.[
+        "subscription"
+      ] as Record<string, unknown> | undefined;
+      const userTier = (subscription?.["tier"] as string) ?? "free";
 
       if (userId) {
         return `user:${userTier}:${userId}`;
@@ -142,8 +145,12 @@ export function createTieredRateLimit() {
     },
     // Use different configurations based on tier in middleware logic
     onLimitReached: (_result, context) => {
-      const userTier = context.user?.["subscription"]?.["tier"];
-      console.log(`Rate limit reached for ${userTier || "anonymous"} user`);
+      const subscription = (context.user as Record<string, unknown>)?.[
+        "subscription"
+      ] as Record<string, unknown> | undefined;
+      const userTier = (subscription?.["tier"] as string) ?? "anonymous";
+      // Note: Replace console.log with proper logging in production
+      console.error(`Rate limit reached for ${userTier} user`);
     },
     name: "tiered-rate-limit",
     enabled: true,

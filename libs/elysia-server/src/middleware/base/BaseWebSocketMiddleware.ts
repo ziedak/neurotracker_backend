@@ -1,5 +1,10 @@
 import { IMetricsCollector } from "@libs/monitoring";
-import type { WebSocketContext, WebSocketMiddlewareFunction } from "../types";
+import type {
+  WebSocketContext,
+  WebSocketMessage,
+  WebSocketMiddlewareFunction,
+} from "../types";
+import { asWebSocket } from "../types";
 import {
   AbstractMiddleware,
   type BaseMiddlewareConfig,
@@ -101,7 +106,7 @@ export abstract class BaseWebSocketMiddleware<
    */
   protected override shouldSkip(context: WebSocketContext): boolean {
     const messageType = context.message.type;
-    return this.config.skipMessageTypes?.includes(messageType) || false;
+    return this.config.skipMessageTypes?.includes(messageType) ?? false;
   }
 
   /**
@@ -109,7 +114,7 @@ export abstract class BaseWebSocketMiddleware<
    */
   protected override extractContextInfo(
     context: WebSocketContext
-  ): Record<string, any> {
+  ): Record<string, unknown> {
     return {
       messageType: context.message.type,
       connectionId: context.connectionId,
@@ -153,46 +158,62 @@ export abstract class BaseWebSocketMiddleware<
    * @param message - Message to send
    * @param options - Send options
    */
-  protected sendResponse(
+  protected async sendResponse(
     context: WebSocketContext,
-    message: any,
+    message: WebSocketMessage,
     options: {
       addTimestamp?: boolean;
       maxRetries?: number;
     } = {}
-  ): boolean {
+  ): Promise<boolean> {
     const { addTimestamp = true, maxRetries = 1 } = options;
 
     let attempt = 0;
     while (attempt < maxRetries) {
       try {
         const payload = addTimestamp
-          ? { ...message, timestamp: new Date().toISOString() }
+          ? typeof message === "object" && message !== null
+            ? { ...message, timestamp: new Date().toISOString() }
+            : { value: message, timestamp: new Date().toISOString() }
           : message;
 
         const serialized = this.safeJsonStringify(payload);
         if (!serialized) {
           this.logger.error("Failed to serialize WebSocket message", {
             connectionId: context.connectionId,
-            messageType: message.type,
+            messageType:
+              typeof message === "object" &&
+              message !== null &&
+              "type" in message
+                ? (message as { type: string }).type
+                : undefined,
             attempt: attempt + 1,
           });
           return false;
         }
 
-        context.ws.send(serialized);
+        // Send message (may be async)
+        const sendResult = asWebSocket(context.ws).send(serialized);
+        if (sendResult && typeof sendResult.then === "function") {
+          sendResult.catch((err) =>
+            console.error("WebSocket send failed:", err)
+          );
+        }
         return true;
       } catch (error) {
         attempt++;
         this.logger.error("Failed to send WebSocket response", error as Error, {
           connectionId: context.connectionId,
-          messageType: message.type,
+          messageType:
+            typeof message === "object" && message !== null && "type" in message
+              ? (message as { type: string }).type
+              : undefined,
           attempt,
           willRetry: attempt < maxRetries,
         });
 
         if (attempt >= maxRetries) {
-          this.recordMetric(`${this.config.name}_send_failed`, 1, {
+          await this.recordMetric(`${this.config.name}_send_failed`, 1, {
             connectionId: context.connectionId,
             messageType: message.type,
           });
@@ -208,7 +229,7 @@ export abstract class BaseWebSocketMiddleware<
    * Safe JSON stringification with circular reference handling
    * @param obj - Object to stringify
    */
-  private safeJsonStringify(obj: any): string | null {
+  private safeJsonStringify(obj: unknown): string | null {
     const seen = new Set();
 
     try {

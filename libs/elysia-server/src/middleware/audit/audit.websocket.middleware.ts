@@ -760,10 +760,14 @@ export class AuditWebSocketMiddleware extends BaseWebSocketMiddleware<AuditWebSo
 
   private extractResourceId(context: WebSocketContext): string | undefined {
     // Try to extract resource ID from message payload
-    const payload = context.message.payload;
+    const {payload} = context.message;
     if (payload && typeof payload === "object") {
+      const payloadObj = payload as Record<string, unknown>;
       return (
-        payload.id || payload.roomId || payload.channelId || payload.resourceId
+        (payloadObj["id"] as string) ||
+        (payloadObj["roomId"] as string) ||
+        (payloadObj["channelId"] as string) ||
+        (payloadObj["resourceId"] as string)
       );
     }
     return undefined;

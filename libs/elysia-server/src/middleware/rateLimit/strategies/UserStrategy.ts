@@ -65,18 +65,22 @@ export class UserStrategy implements RateLimitStrategy {
     }
 
     // Check JWT payload (if JWT is used)
-    if (context["jwt"]?.payload?.sub) {
-      return String(context["jwt"].payload.sub);
+    const jwt = context["jwt"] as
+      | { payload?: { sub?: string; user_id?: string } }
+      | undefined;
+    if (jwt?.payload?.sub) {
+      return String(jwt.payload.sub);
     }
 
     // Check JWT payload user_id (alternative JWT pattern)
-    if (context["jwt"]?.payload?.user_id) {
-      return String(context["jwt"].payload.user_id);
+    if (jwt?.payload?.user_id) {
+      return String(jwt.payload.user_id);
     }
 
     // Check authentication object
-    if (context["auth"]?.userId) {
-      return String(context["auth"].userId);
+    const auth = context["auth"] as { userId?: string } | undefined;
+    if (auth?.userId) {
+      return String(auth.userId);
     }
 
     return null;
@@ -135,7 +139,7 @@ export class UserStrategy implements RateLimitStrategy {
     for (const cookieName of sessionCookieNames) {
       const regex = new RegExp(`${cookieName}=([^;]+)`);
       const match = cookieString.match(regex);
-      if (match && match[1]) {
+      if (match?.[1]) {
         return match[1];
       }
     }
@@ -149,7 +153,7 @@ export class UserStrategy implements RateLimitStrategy {
    */
   private extractClientIp(context: MiddlewareContext): string {
     // Check common forwarded headers
-    const headers = context.request.headers;
+    const {headers} = context.request;
 
     // X-Forwarded-For (most common)
     const xForwardedFor = headers["x-forwarded-for"];

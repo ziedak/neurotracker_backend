@@ -160,7 +160,7 @@ export class PrometheusHttpMiddleware extends BaseMiddleware<PrometheusHttpMiddl
     result: "success" | "error"
   ): Promise<void> {
     const duration = Date.now() - startTime;
-    const method = context.request.method;
+    const {method} = context.request;
     const path = this.normalizePath(new URL(context.request.url).pathname);
     const statusCode =
       context.response?.status || (result === "error" ? 500 : 200);

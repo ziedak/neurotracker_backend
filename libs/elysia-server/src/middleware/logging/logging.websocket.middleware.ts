@@ -537,7 +537,7 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
     if (!payload) return payload;
 
     try {
-      let sanitized = this.deepSanitize(
+      const sanitized = this.deepSanitize(
         payload,
         this.config.sensitiveFields || []
       );
@@ -658,15 +658,14 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
     }
 
     if (
-      excludeMessageTypes &&
-      excludeMessageTypes.some((type) => !type.trim())
+      excludeMessageTypes?.some((type) => !type.trim())
     ) {
       throw new Error(
         "WebSocket logging excludeMessageTypes cannot contain empty strings"
       );
     }
 
-    if (sensitiveFields && sensitiveFields.some((field) => !field.trim())) {
+    if (sensitiveFields?.some((field) => !field.trim())) {
       throw new Error(
         "WebSocket logging sensitiveFields cannot contain empty strings"
       );

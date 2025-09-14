@@ -19,7 +19,7 @@ export interface IMetricsCollector {
     name: string,
     value?: number,
     labels?: Record<string, string>
-  ): void;
+  ): Promise<void>;
 
   /**
    * Record timer metric (in milliseconds)
@@ -28,7 +28,7 @@ export interface IMetricsCollector {
     name: string,
     value: number,
     labels?: Record<string, string>
-  ): void;
+  ): Promise<void>;
 
   /**
    * Record gauge metric
@@ -37,7 +37,7 @@ export interface IMetricsCollector {
     name: string,
     value: number,
     labels?: Record<string, string>
-  ): void;
+  ): Promise<void>;
 
   /**
    * Record histogram metric
@@ -47,7 +47,7 @@ export interface IMetricsCollector {
     value: number,
     labels?: Record<string, string>,
     buckets?: number[]
-  ): void;
+  ): Promise<void>;
 
   /**
    * Record summary metric
@@ -56,7 +56,7 @@ export interface IMetricsCollector {
     name: string,
     value: number,
     labels?: Record<string, string>
-  ): void;
+  ): Promise<void>;
 
   /**
    * Get current metrics as Prometheus exposition format
@@ -76,7 +76,7 @@ export interface IMetricsCollector {
     statusCode: number,
     duration: number,
     service?: string
-  ): void;
+  ): Promise<void>;
 
   /**
    * Record database operation
@@ -87,7 +87,7 @@ export interface IMetricsCollector {
     duration: number,
     success: boolean,
     service?: string
-  ): void;
+  ): Promise<void>;
 
   /**
    * Record authentication operation
@@ -96,7 +96,7 @@ export interface IMetricsCollector {
     operation: "login" | "register" | "refresh" | "logout",
     result: "success" | "failure" | "error",
     userRole?: string
-  ): void;
+  ): Promise<void>;
 
   /**
    * Record WebSocket activity
@@ -106,17 +106,17 @@ export interface IMetricsCollector {
     messageType: string,
     direction: "inbound" | "outbound",
     connectionCount?: number
-  ): void;
+  ): Promise<void>;
 
   /**
    * Record Node.js process metrics
    */
-  recordNodeMetrics(service: string): void;
+  recordNodeMetrics(service: string): Promise<void>;
 
   /**
    * Measure and record event loop lag
    */
-  measureEventLoopLag(service: string): void;
+  measureEventLoopLag(service: string): Promise<void>;
 }
 
 // ===================================================================
@@ -134,59 +134,48 @@ export class MetricsCollector implements IMetricsCollector {
     return new MetricsCollector(collector);
   }
 
-  /**
-   * Get singleton instance - for backwards compatibility
-   */
-  private static instance?: MetricsCollector;
-  static getInstance(): MetricsCollector {
-    if (!this.instance) {
-      this.instance = new MetricsCollector();
-    }
-    return this.instance;
-  }
-
   // ===================================================================
   // CORE METRIC METHODS
   // ===================================================================
 
-  recordCounter(
+  async recordCounter(
     name: string,
     value = 1,
     labels?: Record<string, string>
-  ): void {
+  ): Promise<void> {
     this.collector.recordCounter(name, value, labels);
   }
 
-  recordTimer(
+  async recordTimer(
     name: string,
     value: number,
     labels?: Record<string, string>
-  ): void {
+  ): Promise<void> {
     this.collector.recordTimer(name, value, labels);
   }
 
-  recordGauge(
+  async recordGauge(
     name: string,
     value: number,
     labels?: Record<string, string>
-  ): void {
+  ): Promise<void> {
     this.collector.recordGauge(name, value, labels);
   }
 
-  recordHistogram(
+  async recordHistogram(
     name: string,
     value: number,
     labels?: Record<string, string>,
     buckets?: number[]
-  ): void {
+  ): Promise<void> {
     this.collector.recordHistogram(name, value, labels, buckets);
   }
 
-  recordSummary(
+  async recordSummary(
     name: string,
     value: number,
     labels?: Record<string, string>
-  ): void {
+  ): Promise<void> {
     this.collector.recordSummary(name, value, labels);
   }
 
@@ -198,13 +187,13 @@ export class MetricsCollector implements IMetricsCollector {
   // HIGH-LEVEL BUSINESS METRICS
   // ===================================================================
 
-  recordApiRequest(
+  async recordApiRequest(
     method: string,
     route: string,
     statusCode: number,
     duration: number,
     service = "unknown"
-  ): void {
+  ): Promise<void> {
     this.collector.recordApiRequest(
       method,
       route,
@@ -214,13 +203,13 @@ export class MetricsCollector implements IMetricsCollector {
     );
   }
 
-  recordDatabaseOperation(
+  async recordDatabaseOperation(
     clientType: "redis" | "postgres" | "clickhouse",
     operation: string,
     duration: number,
     success: boolean,
     service = "unknown"
-  ): void {
+  ): Promise<void> {
     this.collector.recordDatabaseOperation(
       clientType,
       operation,
@@ -230,20 +219,20 @@ export class MetricsCollector implements IMetricsCollector {
     );
   }
 
-  recordAuthOperation(
+  async recordAuthOperation(
     operation: "login" | "register" | "refresh" | "logout",
     result: "success" | "failure" | "error",
     userRole = "unknown"
-  ): void {
+  ): Promise<void> {
     this.collector.recordAuthOperation(operation, result, userRole);
   }
 
-  recordWebSocketActivity(
+  async recordWebSocketActivity(
     service: string,
     messageType: string,
     direction: "inbound" | "outbound",
     connectionCount?: number
-  ): void {
+  ): Promise<void> {
     this.collector.recordWebSocketActivity(
       service,
       messageType,
@@ -252,11 +241,11 @@ export class MetricsCollector implements IMetricsCollector {
     );
   }
 
-  recordNodeMetrics(service: string): void {
+  async recordNodeMetrics(service: string): Promise<void> {
     this.collector.recordNodeMetrics(service);
   }
 
-  measureEventLoopLag(service: string): void {
+  async measureEventLoopLag(service: string): Promise<void> {
     this.collector.measureEventLoopLag(service);
   }
 }

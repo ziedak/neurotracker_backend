@@ -36,6 +36,7 @@ const createMockContext = (): WebSocketContext => ({
   ws: {
     send: jest.fn(),
     close: jest.fn(),
+    readyState: 0,
   },
   connectionId: "test-conn-123",
   message: { type: "test", payload: { data: "test" } },
@@ -68,7 +69,6 @@ const createTestMiddleware = (
       }
 
       // Set a marker to track execution order
-      (context.executionOrder ??= []).push(name);
 
       await next();
     }

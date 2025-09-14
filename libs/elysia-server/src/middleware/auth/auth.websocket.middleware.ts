@@ -10,6 +10,7 @@ import {
   type WebSocketMiddlewareConfig,
 } from "../base";
 import type { WebSocketContext } from "../types";
+import { asWebSocket } from "../types";
 import {
   type AuthenticationService,
   type User,
@@ -19,6 +20,7 @@ import {
   type Action,
   type Resource,
 } from "@libs/auth";
+import { Scheduler } from "@libs/utils";
 
 /**
  * WebSocket authentication middleware configuration interface
@@ -48,6 +50,7 @@ export interface AuthWebSocketMiddlewareConfig
   readonly authenticationTimeout?: number;
   readonly reauthenticationInterval?: number;
   readonly allowUnauthenticatedTypes?: readonly string[];
+  readonly enableCleanupTimer?: boolean;
 }
 
 /**
@@ -66,6 +69,7 @@ const DEFAULT_WS_AUTH_OPTIONS = {
   AUTHENTICATION_TIMEOUT: 30000, // 30 seconds
   REAUTHENTICATION_INTERVAL: 3600000, // 1 hour
   PRIORITY: 5, // High priority for auth
+  ENABLE_CLEANUP_TIMER: true, // Enable automatic cleanup of expired connections
 } as const;
 
 /**
@@ -93,6 +97,8 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
     string,
     AuthenticatedConnection
   >();
+  private readonly scheduler = Scheduler.create();
+  private static readonly CLEANUP_TIMER_KEY = "ws-auth-cleanup";
 
   constructor(
     metrics: IMetricsCollector,
@@ -101,22 +107,22 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
   ) {
     // Create complete configuration with validated defaults
     const completeConfig = {
-      name: config.name || "websocket-auth",
+      name: config.name ?? "websocket-auth",
       enabled: config.enabled ?? true,
       priority: config.priority ?? DEFAULT_WS_AUTH_OPTIONS.PRIORITY,
       requireAuth: config.requireAuth ?? DEFAULT_WS_AUTH_OPTIONS.REQUIRE_AUTH,
-      roles: config.roles || [],
-      permissions: config.permissions || [],
+      roles: config.roles ?? [],
+      permissions: config.permissions ?? [],
       action: config.action,
       resource: config.resource,
       allowAnonymous:
         config.allowAnonymous ?? DEFAULT_WS_AUTH_OPTIONS.ALLOW_ANONYMOUS,
       skipAuthMessageTypes:
-        config.skipAuthMessageTypes ||
+        config.skipAuthMessageTypes ??
         DEFAULT_WS_AUTH_OPTIONS.SKIP_AUTH_MESSAGE_TYPES,
       skipMessageTypes: [
-        ...(config.skipMessageTypes || []),
-        ...(config.skipAuthMessageTypes || []),
+        ...(config.skipMessageTypes ?? []),
+        ...(config.skipAuthMessageTypes ?? []),
       ],
       closeOnAuthFailure:
         config.closeOnAuthFailure ??
@@ -127,21 +133,26 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
       strictMode: config.strictMode ?? DEFAULT_WS_AUTH_OPTIONS.STRICT_MODE,
       extractUserInfo:
         config.extractUserInfo ?? DEFAULT_WS_AUTH_OPTIONS.EXTRACT_USER_INFO,
-      messagePermissions: config.messagePermissions || {},
-      messageRoles: config.messageRoles || {},
-      messageActions: config.messageActions || {},
+      messagePermissions: config.messagePermissions ?? {},
+      messageRoles: config.messageRoles ?? {},
+      messageActions: config.messageActions ?? {},
       authenticationTimeout:
         config.authenticationTimeout ??
         DEFAULT_WS_AUTH_OPTIONS.AUTHENTICATION_TIMEOUT,
       reauthenticationInterval:
         config.reauthenticationInterval ??
         DEFAULT_WS_AUTH_OPTIONS.REAUTHENTICATION_INTERVAL,
-      allowUnauthenticatedTypes: config.allowUnauthenticatedTypes || [],
+      allowUnauthenticatedTypes: config.allowUnauthenticatedTypes ?? [],
+      enableCleanupTimer:
+        config.enableCleanupTimer ??
+        DEFAULT_WS_AUTH_OPTIONS.ENABLE_CLEANUP_TIMER,
     } as AuthWebSocketMiddlewareConfig;
 
     super(metrics, completeConfig);
     this.validateConfiguration();
-    this.startCleanupTimer();
+    if (this.config.enableCleanupTimer) {
+      this.startCleanupTimer();
+    }
   }
 
   /**
@@ -184,7 +195,7 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
       // Record successful request metrics
       await this.recordAuthMetrics("ws_auth_success", {
         method: authResult.method,
-        userId: authResult.user?.id || "anonymous",
+        userId: authResult.user?.id ?? "anonymous",
         messageType: context.message.type,
         connectionId: context.connectionId,
       });
@@ -226,7 +237,7 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
     context: WebSocketContext,
     requestId: string
   ): Promise<WebSocketAuthenticationResult> {
-    const connectionId = context.connectionId;
+    const { connectionId } = context;
 
     // Check if connection is already authenticated and valid
     const existingAuth = this.authenticatedConnections.get(connectionId);
@@ -322,7 +333,7 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
 
     // Return the first attempted result or anonymous result
     return (
-      results[0] || {
+      results[0] ?? {
         user: null,
         authContext: null,
         method: "anonymous",
@@ -340,20 +351,24 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
   ): Promise<WebSocketAuthenticationResult> {
     try {
       // Try to extract token from message payload first
-      let token = context.message.payload?.token;
+      const payload = context.message.payload as
+        | Record<string, unknown>
+        | undefined;
+      let token = payload?.["token"] as string | undefined;
 
       // Fallback to connection metadata headers
       if (!token) {
         const authHeader = context.metadata.headers["authorization"];
-        token = this.authService
-          .getJWTService()
-          .extractTokenFromHeader(authHeader || "");
+        if (authHeader) {
+          token =
+            this.authService
+              .getJWTService()
+              .extractTokenFromHeader(authHeader) ?? undefined;
+        }
       }
 
       // Fallback to connection query parameters
-      if (!token) {
-        token = context.metadata.query["token"];
-      }
+      token ??= context.metadata.query["token"] ?? undefined;
 
       if (!token) {
         return {
@@ -417,17 +432,16 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
   ): Promise<WebSocketAuthenticationResult> {
     try {
       // Try to extract API key from message payload
-      let apiKey = context.message.payload?.apiKey;
+      const payload = context.message.payload as
+        | Record<string, unknown>
+        | undefined;
+      let apiKey = payload?.["apiKey"] as string | undefined;
 
       // Fallback to connection metadata headers
-      if (!apiKey) {
-        apiKey = context.metadata.headers["x-api-key"];
-      }
+      apiKey ??= context.metadata.headers["x-api-key"];
 
       // Fallback to connection query parameters
-      if (!apiKey) {
-        apiKey = context.metadata.query["apiKey"];
-      }
+      apiKey ??= context.metadata.query?.["apiKey"] as string;
 
       if (!apiKey) {
         return {
@@ -520,7 +534,7 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
       const session = await this.authService
         .getSessionService()
         .getSession(sessionId);
-      if (!session || !session.isActive) {
+      if (!session?.isActive) {
         return {
           user: null,
           authContext: null,
@@ -603,20 +617,20 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
       return;
     }
 
-    const user = authResult.user;
+    const { user } = authResult;
 
     // Check global role requirements
     if (this.config.roles && this.config.roles.length > 0) {
       const hasRequiredRole = this.config.roles.some((role) =>
-        user.roles.includes(role)
+        user?.roles.includes(role)
       );
       if (!hasRequiredRole) {
         await this.recordAuthMetrics("ws_auth_failure", {
           reason: "insufficient_roles",
-          userId: user.id,
+          userId: user?.id ?? "unknown",
           messageType,
           requiredRoles: this.config.roles.join(","),
-          userRoles: user.roles.join(","),
+          userRoles: user?.roles.join(",") ?? "unknown",
         });
         throw new ForbiddenError("Insufficient role permissions");
       }
@@ -626,7 +640,7 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
     const messageRoles = this.config.messageRoles?.[messageType];
     if (messageRoles && messageRoles.length > 0) {
       const hasMessageRole = messageRoles.some((role) =>
-        user.roles.includes(role)
+        user?.roles.includes(role)
       );
       if (!hasMessageRole) {
         await this.recordAuthMetrics("ws_auth_failure", {
@@ -759,7 +773,10 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
    */
   private extractSessionId(context: WebSocketContext): string | null {
     // Check message payload first
-    const payloadSessionId = context.message.payload?.sessionId;
+    const payload = context.message.payload as
+      | Record<string, unknown>
+      | undefined;
+    const payloadSessionId = payload?.["sessionId"] as string | undefined;
     if (payloadSessionId) {
       return payloadSessionId;
     }
@@ -780,7 +797,7 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
     const cookies = context.metadata.headers["cookie"];
     if (cookies) {
       const sessionCookieMatch = cookies.match(/sessionid=([^;]+)/);
-      if (sessionCookieMatch && sessionCookieMatch[1]) {
+      if (sessionCookieMatch?.[1]) {
         return sessionCookieMatch[1];
       }
     }
@@ -797,10 +814,10 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
     const timeSinceActivity = now.getTime() - connection.lastActivity.getTime();
 
     const reauthInterval =
-      this.config.reauthenticationInterval ||
+      this.config.reauthenticationInterval ??
       DEFAULT_WS_AUTH_OPTIONS.REAUTHENTICATION_INTERVAL;
     const authTimeout =
-      this.config.authenticationTimeout ||
+      this.config.authenticationTimeout ??
       DEFAULT_WS_AUTH_OPTIONS.AUTHENTICATION_TIMEOUT;
 
     // Check if authentication has expired
@@ -849,7 +866,7 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
       );
 
       // Send error message before closing
-      this.sendResponse(context, {
+      await this.sendResponse(context, {
         type: "auth_error",
         error: error.message,
         code: error instanceof UnauthorizedError ? 401 : 403,
@@ -857,7 +874,7 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
 
       // Close connection
       try {
-        context.ws.close(
+        await asWebSocket(context.ws).close(
           error instanceof UnauthorizedError ? 4401 : 4403,
           error.message
         );
@@ -899,9 +916,13 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
    * Start cleanup timer for expired connections
    */
   private startCleanupTimer(): void {
-    setInterval(() => {
-      this.cleanupExpiredConnections();
-    }, 300000); // Cleanup every 5 minutes
+    this.scheduler.setInterval(
+      AuthWebSocketMiddleware.CLEANUP_TIMER_KEY,
+      300000, // Cleanup every 5 minutes
+      () => {
+        this.cleanupExpiredConnections();
+      }
+    );
   }
 
   /**
@@ -952,10 +973,10 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
     }
 
     const authTimeout =
-      this.config.authenticationTimeout ||
+      this.config.authenticationTimeout ??
       DEFAULT_WS_AUTH_OPTIONS.AUTHENTICATION_TIMEOUT;
     const reauthInterval =
-      this.config.reauthenticationInterval ||
+      this.config.reauthenticationInterval ??
       DEFAULT_WS_AUTH_OPTIONS.REAUTHENTICATION_INTERVAL;
 
     if (authTimeout < 1000) {
@@ -980,7 +1001,7 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
     const methods: Record<string, number> = {};
 
     for (const connection of this.authenticatedConnections.values()) {
-      methods[connection.method] = (methods[connection.method] || 0) + 1;
+      methods[connection.method] = (methods[connection.method] ?? 0) + 1;
     }
 
     return {
@@ -995,6 +1016,14 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
    */
   public invalidateConnection(connectionId: string): boolean {
     return this.authenticatedConnections.delete(connectionId);
+  }
+
+  /**
+   * Cleanup middleware resources - prevents memory leaks
+   */
+  public cleanup(): void {
+    this.scheduler.clear(AuthWebSocketMiddleware.CLEANUP_TIMER_KEY);
+    this.authenticatedConnections.clear();
   }
 
   /**

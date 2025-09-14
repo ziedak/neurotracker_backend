@@ -5,6 +5,8 @@ import {
   RateLimitingCacheAdapter,
   type RateLimitAlgorithm,
   type RateLimitingAdapterConfig,
+  type RateLimitResult,
+  type RateLimitingStats,
 } from "@libs/ratelimit";
 import type { CacheService } from "@libs/database";
 import { CacheConfigValidator } from "@libs/database";
@@ -15,22 +17,30 @@ import {
   type RateLimitStrategy,
 } from "./strategies";
 
+// Extended context for rate limiting
+interface RateLimitContext extends MiddlewareContext {
+  rateLimitError?: {
+    error: string;
+    message: string;
+    retryAfter?: number | undefined;
+    resetTime: string;
+    code: string;
+    limit: number;
+    remaining: number;
+    requestId?: string | undefined;
+  };
+}
+
+// Context with request containing IP
+interface ContextWithIP extends MiddlewareContext {
+  request: MiddlewareContext["request"] & {
+    ip?: string;
+  };
+}
+
 /**
  * Internal rate limit result interface for middleware use
  */
-export interface RateLimitResult {
-  allowed: boolean;
-  totalHits: number;
-  remaining: number;
-  resetTime: number;
-  windowStart: number;
-  windowEnd: number;
-  limit: number;
-  retryAfter?: number;
-  algorithm: RateLimitAlgorithm;
-  cached: boolean;
-  responseTime: number;
-}
 
 /**
  * Rate limit configuration interface
@@ -102,10 +112,10 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
   ) {
     // Create complete configuration with validated defaults
     const completeConfig = {
-      name: config.name || "rate-limit",
+      name: config.name ?? "rate-limit",
       enabled: config.enabled ?? true,
       priority: config.priority ?? DEFAULT_RATE_LIMIT_OPTIONS.PRIORITY,
-      skipPaths: config.skipPaths || [],
+      skipPaths: config.skipPaths ?? [],
       algorithm: config.algorithm ?? DEFAULT_RATE_LIMIT_OPTIONS.ALGORITHM,
       maxRequests:
         config.maxRequests ?? DEFAULT_RATE_LIMIT_OPTIONS.MAX_REQUESTS,
@@ -216,10 +226,10 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
 
       try {
         await next();
-        statusCode = context.set.status || 200;
+        statusCode = context.set.status ?? 200;
       } catch (error) {
         requestSuccessful = false;
-        statusCode = context.set.status || 500;
+        statusCode = context.set.status ?? 500;
         throw error;
       } finally {
         // Update metrics based on success/failure rules
@@ -311,9 +321,10 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
     });
 
     // Set error response in context
-    (context as any).rateLimitError = {
+    // Set error information on context for potential cleanup/logging
+    (context as RateLimitContext).rateLimitError = {
       error: "Rate limit exceeded",
-      message: this.config.message,
+      message: this.config.message ?? "Rate limit exceeded",
       retryAfter: result.retryAfter
         ? Math.ceil(result.retryAfter / 1000)
         : undefined,
@@ -341,7 +352,11 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
       this.logger.warn("Unknown rate limit strategy, falling back to IP", {
         strategy: this.config.keyStrategy,
       });
-      return this.strategies.get("ip")!.generateKey(context);
+      const ipStrategy = this.strategies.get("ip");
+      if (!ipStrategy) {
+        throw new Error("IP strategy not found - rate limiting cannot proceed");
+      }
+      return ipStrategy.generateKey(context);
     }
 
     const baseKey = strategy.generateKey(context);
@@ -383,15 +398,15 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
 
     const result: RateLimitResult = {
       allowed: adapterResult.allowed,
-      totalHits: (adapterResult as any).totalHits || 0,
+      totalHits: adapterResult.totalHits ?? 0,
       remaining: adapterResult.remaining,
       resetTime,
       algorithm: adapterResult.algorithm,
       windowStart,
       windowEnd,
-      limit: (adapterResult as any).limit || this.config.maxRequests,
-      cached: (adapterResult as any).cached || false,
-      responseTime: (adapterResult as any).responseTime || 0,
+      limit: adapterResult.limit ?? this.config.maxRequests,
+      cached: adapterResult.cached ?? false,
+      responseTime: adapterResult.responseTime ?? 0,
     };
 
     // Add retryAfter only if rate limited
@@ -496,7 +511,7 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
    * Get client IP address from context
    */
   protected override getClientIp(context: MiddlewareContext): string {
-    return (context.request as any).ip || "unknown";
+    return (context as ContextWithIP).request.ip ?? "unknown";
   }
 
   /**
@@ -506,25 +521,36 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
     // For testing environments, return a mock cache service
     if (process.env["NODE_ENV"] === "test" || process.env["JEST_WORKER_ID"]) {
       return {
-        get: async () => null,
-        set: async () => "OK",
-        del: async () => 1,
-        exists: async () => 0,
-        expire: async () => 1,
-        ttl: async () => -1,
-        keys: async () => [],
-        flush: async () => "OK",
-        ping: async () => "PONG",
-        connect: async () => {},
-        disconnect: async () => {},
-        isConnected: () => true,
-        getStats: () => ({
-          hits: 0,
-          misses: 0,
-          keys: 0,
-          memory: 0,
+        isEnabled: () => true,
+        get: () => ({
+          success: false,
+          data: null,
+          hit: false,
+          source: "memory",
         }),
-      } as any;
+        set: async () => {},
+        invalidate: async () => {},
+        invalidatePattern: () => 0,
+        getStats: () => ({
+          totalHits: 0,
+          totalMisses: 0,
+          totalKeys: 0,
+          hitRate: 0,
+          l1: { hits: 0, misses: 0, entryCount: 0 },
+          l2: { hits: 0, misses: 0, entryCount: 0 },
+          totalMemoryUsage: 0,
+          evictedKeys: 0,
+        }),
+        healthCheck: () => ({
+          isHealthy: true,
+          details: {
+            l1: { isHealthy: true },
+            l2: { isHealthy: true },
+            redis: { isHealthy: true },
+          },
+        }),
+        dispose: async () => {},
+      } as unknown as CacheService;
     }
 
     // For now, throw a descriptive error until service locator pattern is implemented
@@ -595,7 +621,7 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
   /**
    * Get rate limit statistics
    */
-  public async getRateLimitStats(): Promise<any> {
+  public getRateLimitStats(): RateLimitingStats | null {
     try {
       return this.rateLimiter.getRateLimitingStats();
     } catch (error) {
@@ -607,7 +633,17 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
   /**
    * Get adapter health status
    */
-  public async getHealth(): Promise<any> {
+  public async getHealth(): Promise<
+    | {
+        healthy: boolean;
+        cacheServiceHealth: unknown;
+        adapterStats: RateLimitingStats;
+      }
+    | {
+        healthy: boolean;
+        error: string;
+      }
+  > {
     try {
       return await this.rateLimiter.getHealth();
     } catch (error) {

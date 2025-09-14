@@ -22,7 +22,7 @@ export interface AuditEvent {
   ip: string;
   userAgent: string;
   timestamp: Date;
-  metadata?: Record<string, any> | undefined;
+  metadata?: Record<string, unknown> | undefined;
   result: "success" | "failure" | "partial";
   statusCode?: number | undefined;
   duration?: number | undefined;
@@ -67,11 +67,11 @@ export interface AuditHttpMiddlewareConfig extends HttpMiddlewareConfig {
   readonly includeResponse?: boolean;
   readonly sensitiveFields?: readonly string[];
   readonly skipRoutes?: readonly string[];
-  readonly storageStrategy?: "redis" | "clickhouse" | "both";
-  readonly redisTtl?: number;
-  readonly maxBodySize?: number;
+  readonly storageStrategy: "redis" | "clickhouse" | "both";
+  readonly redisTtl: number;
+  readonly maxBodySize: number;
   readonly enableRealTimeAnalytics?: boolean;
-  readonly retentionDays?: number;
+  readonly retentionDays: number;
   readonly anonymizePersonalData?: boolean;
   readonly complianceMode?: "GDPR" | "SOX" | "HIPAA" | "PCI_DSS" | "standard";
 }
@@ -102,6 +102,26 @@ const DEFAULT_AUDIT_OPTIONS = {
   PRIORITY: 5, // Medium priority for audit
 } as const;
 
+// Database row interfaces
+interface ActionCountRow {
+  action: string;
+  count: string | number;
+}
+
+interface ResourceCountRow {
+  resource: string;
+  count: string | number;
+}
+
+interface SummaryRow {
+  total_events: string | number;
+  successful_events: string | number;
+  failed_events: string | number;
+  partial_events: string | number;
+  unique_users: string | number;
+  average_duration: string | number;
+}
+
 /**
  * Production-grade Audit Middleware
  * Framework-agnostic implementation with comprehensive audit trail support
@@ -130,16 +150,16 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
   ) {
     // Create complete configuration with validated defaults
     const completeConfig = {
-      name: config.name || "audit",
+      name: config.name ?? "audit",
       enabled: config.enabled ?? true,
       priority: config.priority ?? DEFAULT_AUDIT_OPTIONS.PRIORITY,
-      skipPaths: [...(config.skipPaths || []), ...(config.skipRoutes || [])],
+      skipPaths: [...(config.skipPaths ?? []), ...(config.skipRoutes ?? [])],
       includeBody: config.includeBody ?? DEFAULT_AUDIT_OPTIONS.INCLUDE_BODY,
       includeResponse:
         config.includeResponse ?? DEFAULT_AUDIT_OPTIONS.INCLUDE_RESPONSE,
       sensitiveFields:
-        config.sensitiveFields || DEFAULT_AUDIT_OPTIONS.SENSITIVE_FIELDS,
-      skipRoutes: config.skipRoutes || DEFAULT_AUDIT_OPTIONS.SKIP_ROUTES,
+        config.sensitiveFields ?? DEFAULT_AUDIT_OPTIONS.SENSITIVE_FIELDS,
+      skipRoutes: config.skipRoutes ?? DEFAULT_AUDIT_OPTIONS.SKIP_ROUTES,
       storageStrategy:
         config.storageStrategy ?? DEFAULT_AUDIT_OPTIONS.STORAGE_STRATEGY,
       redisTtl: config.redisTtl ?? DEFAULT_AUDIT_OPTIONS.REDIS_TTL,
@@ -183,13 +203,14 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
       ip: this.extractClientIp(context),
       userAgent: this.extractUserAgent(context),
       timestamp: new Date(),
-      metadata: await this.buildMetadata(context),
+      metadata: this.buildMetadata(context),
       result: "success", // Will be updated in catch block if needed
       statusCode: 200, // Will be updated based on actual response
       duration: 0, // Will be calculated in finally block
     };
 
     let error: Error | null = null;
+    let shouldThrow = false;
 
     try {
       // Execute next middleware/handler
@@ -197,21 +218,22 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
 
       // Success case
       auditEvent.result = "success";
-      auditEvent.statusCode = context.response?.status || 200;
+      auditEvent.statusCode = context.response?.status ?? 200;
 
       await this.recordMetric("audit_success", 1, {
-        action: auditEvent.action!,
-        resource: auditEvent.resource!,
+        action: auditEvent.action,
+        resource: auditEvent.resource,
       });
     } catch (err) {
-      error = err as Error;
+      error = err instanceof Error ? err : new Error(String(err));
       auditEvent.result = "failure";
-      auditEvent.statusCode = context.response?.status || 500;
+      auditEvent.statusCode = context.response?.status ?? 500;
       auditEvent.error = error.message;
+      shouldThrow = true;
 
       await this.recordMetric("audit_failure", 1, {
-        action: auditEvent.action!,
-        resource: auditEvent.resource!,
+        action: auditEvent.action,
+        resource: auditEvent.resource,
         errorType: error.constructor.name,
       });
     } finally {
@@ -220,16 +242,17 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
 
       // Record timing metrics
       await this.recordTimer("audit_duration", auditEvent.duration, {
-        action: auditEvent.action!,
-        resource: auditEvent.resource!,
-        result: auditEvent.result!,
+        action: auditEvent.action,
+        resource: auditEvent.resource,
+        result: auditEvent.result,
       });
 
       // Store audit event
-      await this.storeAuditEvent(auditEvent); // Re-throw error if it occurred
-      if (error) {
-        throw error;
-      }
+      await this.storeAuditEvent(auditEvent);
+    }
+
+    if (shouldThrow && error) {
+      throw error;
     }
   }
 
@@ -237,7 +260,7 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
    * Determine if middleware should skip processing for this context
    */
   protected override shouldSkip(context: MiddlewareContext): boolean {
-    const path = context.request.url || "/";
+    const path = context.request.url ?? "/";
 
     // Skip if middleware is disabled
     if (!this.config.enabled) {
@@ -255,7 +278,7 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
    */
   protected override extractContextInfo(
     context: MiddlewareContext
-  ): Record<string, any> {
+  ): Record<string, string | undefined> {
     return {
       method: context.request.method,
       url: context.request.url,
@@ -294,7 +317,7 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
 
       // Record storage metrics
       await this.recordMetric("audit_stored", 1, {
-        storage: this.config.storageStrategy!,
+        storage: this.config.storageStrategy ?? "redis", // Default value - guaranteed by constructor
         action: event.action,
         resource: event.resource,
       });
@@ -320,7 +343,7 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
 
     await redis.setex(
       redisKey,
-      this.config.redisTtl!,
+      this.config.redisTtl ?? 3600, // Default 1 hour - guaranteed by constructor
       JSON.stringify(this.sanitizeAuditEvent(event))
     );
   }
@@ -332,19 +355,19 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
     await this.clickhouseClient.insert("audit_events", [
       {
         id: event.id,
-        user_id: event.userId || "",
-        session_id: event.sessionId || "",
+        user_id: event.userId ?? "",
+        session_id: event.sessionId ?? "",
         action: event.action,
         resource: event.resource,
-        resource_id: event.resourceId || "",
+        resource_id: event.resourceId ?? "",
         ip: event.ip,
         user_agent: event.userAgent,
         timestamp: event.timestamp,
-        metadata: JSON.stringify(event.metadata || {}),
+        metadata: JSON.stringify(event.metadata ?? {}),
         result: event.result,
-        status_code: event.statusCode || 0,
-        duration: event.duration || 0,
-        error: event.error || "",
+        status_code: event.statusCode ?? 0,
+        duration: event.duration ?? 0,
+        error: event.error ?? "",
       },
     ]);
   }
@@ -355,7 +378,7 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
   async queryAuditEvents(query: AuditQuery): Promise<AuditEvent[]> {
     try {
       let sql = "SELECT * FROM audit_events WHERE 1=1";
-      const queryParams: Record<string, any> = {};
+      const queryParams: Record<string, string | number | undefined> = {};
 
       // Build dynamic query
       if (query.userId) {
@@ -405,12 +428,11 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
         queryParams["offset"] = query.offset;
       }
 
-      const rows = (await this.clickhouseClient.execute(
-        sql,
-        queryParams
-      )) as any[];
+      const rows = await this.clickhouseClient.execute(sql, queryParams);
 
-      return rows.map((row: any) => this.mapRowToAuditEvent(row));
+      return (rows as Record<string, unknown>[]).map((row) =>
+        this.mapRowToAuditEvent(row)
+      );
     } catch (error) {
       this.logger.error("Failed to query audit events", error as Error, query);
       await this.recordMetric("audit_query_error", 1);
@@ -434,25 +456,34 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
           this.getSummaryStats(queryParams),
           this.getTopActions(queryParams),
           this.getTopResources(queryParams),
-        ])) as [any[], any[], any[]];
+        ])) as [SummaryRow[], ActionCountRow[], ResourceCountRow[]];
 
-      const summary = summaryResults[0];
+      const [summary] = summaryResults;
+      if (!summary) {
+        throw new Error("No summary data returned from audit stats query");
+      }
+
+      const toNumber = (value: string | number): number =>
+        typeof value === "number" ? value : parseInt(value, 10);
+
+      const toFloat = (value: string | number): number =>
+        typeof value === "number" ? value : parseFloat(value);
 
       return {
-        totalEvents: parseInt(summary.total_events),
-        successfulEvents: parseInt(summary.successful_events),
-        failedEvents: parseInt(summary.failed_events),
-        partialEvents: parseInt(summary.partial_events),
-        uniqueUsers: parseInt(summary.unique_users),
-        topActions: actionsResults.map((row: any) => ({
+        totalEvents: toNumber(summary.total_events),
+        successfulEvents: toNumber(summary.successful_events),
+        failedEvents: toNumber(summary.failed_events),
+        partialEvents: toNumber(summary.partial_events),
+        uniqueUsers: toNumber(summary.unique_users),
+        topActions: actionsResults.map((row: ActionCountRow) => ({
           action: row.action,
-          count: parseInt(row.count),
+          count: toNumber(row.count),
         })),
-        topResources: resourcesResults.map((row: any) => ({
+        topResources: resourcesResults.map((row: ResourceCountRow) => ({
           resource: row.resource,
-          count: parseInt(row.count),
+          count: toNumber(row.count),
         })),
-        averageDuration: parseFloat(summary.average_duration) || 0,
+        averageDuration: toFloat(summary.average_duration),
       };
     } catch (error) {
       this.logger.error("Failed to get audit summary", error as Error);
@@ -465,16 +496,16 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
    * Helper methods for data extraction
    */
   private extractUserId(context: MiddlewareContext): string | undefined {
-    return context.user?.id || context.request.headers?.["x-user-id"];
+    return context.user?.id ?? context.request.headers?.["x-user-id"];
   }
 
   private extractSessionId(context: MiddlewareContext): string | undefined {
-    return context.session?.id || context.request.headers?.["x-session-id"];
+    return context.session?.id ?? context.request.headers?.["x-session-id"];
   }
 
   private extractAction(context: MiddlewareContext): string {
-    const method = context.request.method?.toLowerCase() || "unknown";
-    const path = context.request.url?.split("?")[0] || "/";
+    const method = context.request.method?.toLowerCase() ?? "unknown";
+    const path = context.request.url?.split("?")[0] ?? "/";
 
     // Extract semantic action from path patterns
     if (path.includes("/gdpr/")) return "gdpr_operation";
@@ -487,18 +518,18 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
   }
 
   private extractResource(context: MiddlewareContext): string {
-    const path = context.request.url?.split("?")[0] || "/";
+    const path = context.request.url?.split("?")[0] ?? "/";
     const segments = path.split("/").filter(Boolean);
 
     if (segments.length > 0) {
-      return segments[0] || "unknown";
+      return segments[0] ?? "unknown";
     }
 
     return "unknown";
   }
 
   private extractResourceId(context: MiddlewareContext): string | undefined {
-    const path = context.request.url?.split("?")[0] || "/";
+    const path = context.request.url?.split("?")[0] ?? "/";
     const segments = path.split("/").filter(Boolean);
 
     // Look for UUID or numeric ID patterns
@@ -506,27 +537,30 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
       if (
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
           segment
-        ) ||
+        ) ??
         /^\d+$/.test(segment)
       ) {
         return segment;
       }
     }
 
-    return context["params"]?.id || context["query"]?.id;
+    return (
+      ((context["params"] as Record<string, unknown>)?.["id"] as string) ??
+      ((context["query"] as Record<string, unknown>)?.["id"] as string)
+    );
   }
 
   private extractClientIp(context: MiddlewareContext): string {
     return (
-      context.request.headers?.["x-forwarded-for"] ||
-      context.request.headers?.["x-real-ip"] ||
-      context.request.ip ||
+      context.request.headers?.["x-forwarded-for"] ??
+      context.request.headers?.["x-real-ip"] ??
+      context.request.ip ??
       "unknown"
     );
   }
 
   private extractUserAgent(context: MiddlewareContext): string {
-    return context.request.headers?.["user-agent"] || "unknown";
+    return context.request.headers?.["user-agent"] ?? "unknown";
   }
 
   private generateAuditId(): string {
@@ -536,14 +570,12 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
   /**
    * Build metadata object with request/response information
    */
-  private async buildMetadata(
-    context: MiddlewareContext
-  ): Promise<Record<string, any>> {
-    const metadata: Record<string, any> = {
+  private buildMetadata(context: MiddlewareContext): Record<string, unknown> {
+    const metadata: Record<string, unknown> = {
       method: context.request.method,
       url: context.request.url,
       headers: this.sanitizeObject(
-        context.request.headers || {},
+        context.request.headers ?? {},
         this.config.sensitiveFields as string[]
       ),
     };
@@ -564,17 +596,17 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
   /**
    * Sanitize request body based on configuration
    */
-  private sanitizeRequestBody(body: any): any {
+  private sanitizeRequestBody(body: unknown): unknown {
     if (!body || typeof body !== "object") return body;
 
     try {
       const sanitized = this.sanitizeObject(
-        body,
+        body as Record<string, unknown>,
         this.config.sensitiveFields as string[]
       );
       const bodyStr = JSON.stringify(sanitized);
 
-      if (bodyStr.length > this.config.maxBodySize!) {
+      if (bodyStr.length > this.config.maxBodySize) {
         return `[TRUNCATED - ${bodyStr.length} bytes]`;
       }
 
@@ -587,17 +619,17 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
   /**
    * Sanitize response body based on configuration
    */
-  private sanitizeResponseBody(response: any): any {
+  private sanitizeResponseBody(response: unknown): unknown {
     if (!response || typeof response !== "object") return response;
 
     try {
       const sanitized = this.sanitizeObject(
-        response,
+        response as Record<string, unknown>,
         this.config.sensitiveFields as string[]
       );
       const responseStr = JSON.stringify(sanitized);
 
-      if (responseStr.length > this.config.maxBodySize!) {
+      if (responseStr.length > this.config.maxBodySize) {
         return `[TRUNCATED - ${responseStr.length} bytes]`;
       }
 
@@ -656,20 +688,20 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
    * Validate middleware configuration
    */
   private validateConfiguration(): void {
-    if (this.config.maxBodySize! < 0) {
+    if (this.config.maxBodySize < 0) {
       throw new Error("maxBodySize must be non-negative");
     }
 
-    if (this.config.redisTtl! < 0) {
+    if (this.config.redisTtl < 0) {
       throw new Error("redisTtl must be non-negative");
     }
 
-    if (this.config.retentionDays! < 1) {
+    if (this.config.retentionDays < 1) {
       throw new Error("retentionDays must be at least 1");
     }
 
     if (
-      !["redis", "clickhouse", "both"].includes(this.config.storageStrategy!)
+      !["redis", "clickhouse", "both"].includes(this.config.storageStrategy)
     ) {
       throw new Error(
         "storageStrategy must be 'redis', 'clickhouse', or 'both'"
@@ -680,22 +712,23 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
   /**
    * Map database row to AuditEvent
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private mapRowToAuditEvent(row: any): AuditEvent {
     return {
       id: row.id,
-      userId: row.user_id || undefined,
-      sessionId: row.session_id || undefined,
+      userId: row.user_id ?? undefined,
+      sessionId: row.session_id ?? undefined,
       action: row.action,
       resource: row.resource,
-      resourceId: row.resource_id || undefined,
+      resourceId: row.resource_id ?? undefined,
       ip: row.ip,
       userAgent: row.user_agent,
       timestamp: new Date(row.timestamp),
       metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
       result: row.result as "success" | "failure" | "partial",
-      statusCode: row.status_code || undefined,
-      duration: row.duration || undefined,
-      error: row.error || undefined,
+      statusCode: row.status_code ?? undefined,
+      duration: row.duration ?? undefined,
+      error: row.error ?? undefined,
     };
   }
 
@@ -762,7 +795,7 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
     // Additional audit-specific error handling
     await this.recordMetric("audit_storage_error", 1, {
       errorType: error.constructor.name,
-      storage: this.config.storageStrategy!,
+      storage: this.config.storageStrategy,
     });
 
     // Log critical audit failures

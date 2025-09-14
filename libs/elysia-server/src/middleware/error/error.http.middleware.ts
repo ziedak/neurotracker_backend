@@ -19,14 +19,14 @@ export interface ErrorResponse {
   timestamp: string;
   requestId?: string;
   statusCode?: number;
-  details?: any;
+  details?: Record<string, unknown>;
   stackTrace?: string;
 }
 
 export interface CustomError extends Error {
   statusCode?: number;
   code?: string;
-  details?: any;
+  details?: Record<string, unknown>;
 }
 
 /**
@@ -51,7 +51,7 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
       ...{ includeStackTrace: false, logErrors: true, ...config },
     } as ErrorHttpMiddlewareConfig;
 
-    super(metrics, mergedConfig, config.name || "error-handler");
+    super(metrics, mergedConfig, config.name ?? "error-handler");
   }
 
   /**
@@ -79,18 +79,27 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
     const errorResponse = await this.createErrorResponse(error, context);
 
     // Set status code
-    context.set.status = errorResponse.statusCode || 500;
+    context.set.status = errorResponse.statusCode ?? 500;
 
     // Set error response - note: actual response setting depends on framework
+    // Set response status and headers
     if (context.set) {
-      // This approach works with frameworks that support set.body
-      (context.set as any).body = errorResponse;
+      context.set.status = errorResponse.statusCode ?? 500;
+      context.set.headers = {
+        "Content-Type": "application/json",
+        ...context.set.headers,
+      };
+    }
+
+    // Set response body
+    if (context.response) {
+      context.response.body = errorResponse;
     }
 
     // Record error metrics
     await this.recordMetric("error_handled", 1, {
       errorType: this.getErrorType(error),
-      statusCode: String(errorResponse.statusCode || 500),
+      statusCode: String(errorResponse.statusCode ?? 500),
     });
 
     // Log error if configured
@@ -108,7 +117,7 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
   ): Promise<ErrorResponse> {
     try {
       const requestId =
-        context?.requestId ||
+        context?.requestId ??
         (context ? this.getRequestId(context) : "unknown");
 
       const errorResponse: ErrorResponse = {
@@ -144,7 +153,7 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
         error: "InternalError",
         message: "An internal error occurred",
         timestamp: new Date().toISOString(),
-        requestId: context?.requestId || "unknown",
+        requestId: context?.requestId ?? "unknown",
         statusCode: 500,
       };
     }
@@ -153,10 +162,10 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
   /**
    * Handle async errors with promise rejection
    */
-  public async handleAsyncError(
-    errorPromise: Promise<any>,
+  public async handleAsyncError<T>(
+    errorPromise: Promise<T>,
     context?: MiddlewareContext
-  ): Promise<any> {
+  ): Promise<T | ErrorResponse> {
     try {
       return await errorPromise;
     } catch (error) {
@@ -167,7 +176,7 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
   /**
    * Wrap function with error handling
    */
-  public wrapWithErrorHandling<T extends any[], R>(
+  public wrapWithErrorHandling<T extends unknown[], R>(
     fn: (...args: T) => Promise<R>
   ): (...args: T) => Promise<R | ErrorResponse> {
     return async (...args: T) => {
@@ -186,7 +195,7 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
     error: Error | CustomError,
     context: MiddlewareContext
   ): Promise<void> {
-    const errorContext: Record<string, any> = {
+    const errorContext: Record<string, unknown> = {
       requestId: context.requestId,
       errorType: this.getErrorType(error),
       errorMessage: error.message,
@@ -222,7 +231,7 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
       return error.code;
     }
 
-    return error.name || error.constructor.name || "UnknownError";
+    return error.name ?? error.constructor.name ?? "UnknownError";
   }
 
   /**
@@ -237,7 +246,7 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
     }
 
     // Return sanitized original message
-    return this.sanitizeErrorMessage(error.message || "An error occurred");
+    return this.sanitizeErrorMessage(error.message ?? "An error occurred");
   }
 
   /**
@@ -262,13 +271,15 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
       TimeoutError: 504,
     };
 
-    return statusCodeMap[errorType] || 500;
+    return statusCodeMap[errorType] ?? 500;
   }
 
   /**
-   * Get error details
+   * Get error details with proper typing
    */
-  private getErrorDetails(error: Error | CustomError): any {
+  private getErrorDetails(
+    error: Error | CustomError
+  ): Record<string, unknown> | undefined {
     if (!("details" in error) || !error.details) {
       return undefined;
     }
@@ -282,7 +293,7 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
   private sanitizeErrorMessage(message: string): string {
     // Remove file paths
     message = message.replace(/[A-Z]:\\[^\\]+(?:\\[^\\]+)*/g, "[FILE_PATH]");
-    message = message.replace(/\/[^\/\s]+(?:\/[^\/\s]+)*/g, "[FILE_PATH]");
+    message = message.replace(/\/[^/\s]+(?:\/[^/\s]+)*/g, "[FILE_PATH]");
 
     // Remove potential SQL or connection strings
     message = message.replace(
@@ -302,19 +313,26 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
   /**
    * Sanitize error details to remove sensitive information
    */
-  private sanitizeErrorDetails(details: any): any {
-    const sensitiveFields = this.config.sensitiveFields || [];
+  private sanitizeErrorDetails(
+    details: Record<string, unknown>
+  ): Record<string, unknown> {
+    const sensitiveFields = this.config.sensitiveFields ?? [];
     return this.sanitizeObject(details, [...sensitiveFields]);
   }
 
   /**
    * Create custom error classes
    */
-  static createValidationError(message: string, details?: any): CustomError {
+  static createValidationError(
+    message: string,
+    details?: Record<string, unknown>
+  ): CustomError {
     const error = new Error(message) as CustomError;
     error.name = "ValidationError";
     error.statusCode = 400;
-    error.details = details;
+    if (details) {
+      error.details = details;
+    }
     return error;
   }
 

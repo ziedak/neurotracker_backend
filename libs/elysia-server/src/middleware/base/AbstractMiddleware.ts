@@ -194,7 +194,10 @@ export abstract class AbstractMiddleware<
    * @param obj - Object to sanitize
    * @param sensitiveFields - Additional sensitive field patterns
    */
-  protected sanitizeObject(obj: any, sensitiveFields: string[] = []): any {
+  protected sanitizeObject(
+    obj: unknown,
+    sensitiveFields: string[] = []
+  ): unknown {
     if (!obj || typeof obj !== "object") {
       return obj;
     }

@@ -1,27 +1,40 @@
 import { Context } from "@libs/elysia-server";
-import { Logger, MetricsCollector } from "@libs/monitoring";
+import { IMetricsCollector } from "@libs/monitoring";
+import type { ILogger } from "@libs/utils";
 import { performance } from "perf_hooks";
+
+// Extended Context interface for audit middleware
+interface AuditContext extends Context {
+  requestId?: string;
+  auditStartTime?: number;
+  auth?: {
+    userId?: string;
+    apiKey?: string;
+    permissions?: string[];
+  };
+  validatedBody?: Record<string, unknown>;
+}
 
 interface AuditEvent {
   eventId: string;
   timestamp: string;
-  userId?: string;
-  apiKey?: string;
+  userId: string | undefined;
+  apiKey: string | undefined;
   action: string;
   resource: string;
   method: string;
   path: string;
-  statusCode?: number;
-  duration?: number;
-  requestSize?: number;
-  responseSize?: number;
+  statusCode: number | undefined;
+  duration: number | undefined;
+  requestSize: number | undefined;
+  responseSize: number | undefined;
   clientIp: string;
-  userAgent?: string;
-  requestId?: string;
-  sessionId?: string;
+  userAgent: string | undefined;
+  requestId: string | undefined;
+  sessionId: string | undefined;
   success: boolean;
-  error?: string;
-  metadata?: Record<string, any>;
+  error: string | undefined;
+  metadata: Record<string, unknown> | undefined;
 }
 
 interface AuditConfig {
@@ -39,7 +52,7 @@ interface AuditConfig {
  */
 export class AuditMiddleware {
   private readonly logger: ILogger;
-  private readonly metrics: MetricsCollector;
+  private readonly metrics: IMetricsCollector;
   private readonly config: AuditConfig;
 
   // In-memory audit trail (ring buffer)
@@ -57,7 +70,7 @@ export class AuditMiddleware {
 
   constructor(
     logger: ILogger,
-    metrics: MetricsCollector,
+    metrics: IMetricsCollector,
     config?: Partial<AuditConfig>
   ) {
     this.logger = logger;
@@ -74,13 +87,13 @@ export class AuditMiddleware {
   /**
    * Pre-request audit hook
    */
-  public auditPreRequest = async (context: Context): Promise<void> => {
+  public auditPreRequest = async (context: AuditContext): Promise<void> => {
     const startTime = performance.now();
     try {
       if (this.shouldSkipAudit(context.path)) return;
       const requestId = this.generateRequestId();
-      (context as any).requestId = requestId;
-      (context as any).auditStartTime = startTime;
+      context.requestId = requestId;
+      context.auditStartTime = startTime;
       await this.logRequestStart(context, requestId, startTime);
       this.metrics.recordTimer(
         "audit_pre_request_duration",
@@ -97,17 +110,17 @@ export class AuditMiddleware {
    * Post-request audit hook
    */
   public auditPostRequest = async (
-    context: Context,
-    response: any
+    context: AuditContext,
+    response: unknown
   ): Promise<void> => {
     const endTime = performance.now();
     try {
       if (this.shouldSkipAudit(context.path)) return;
-      const startTime = (context as any).auditStartTime || endTime;
-      const requestId = (context as any).requestId;
+      const startTime = context.auditStartTime ?? endTime;
+      const requestId = context.requestId;
       const duration = endTime - startTime;
       const auditEvent = await this.createAuditEvent(context, response, {
-        requestId,
+        requestId: requestId ?? undefined,
         duration,
         timestamp: new Date().toISOString(),
       });
@@ -128,15 +141,18 @@ export class AuditMiddleware {
   /**
    * Audit error handler
    */
-  public auditError = async (context: Context, error: any): Promise<void> => {
+  public auditError = async (
+    context: AuditContext,
+    error: unknown
+  ): Promise<void> => {
     const errorTime = performance.now();
     try {
       if (this.shouldSkipAudit(context.path)) return;
-      const startTime = (context as any).auditStartTime || errorTime;
-      const requestId = (context as any).requestId;
+      const startTime = context.auditStartTime ?? errorTime;
+      const requestId = context.requestId;
       const duration = errorTime - startTime;
       const auditEvent = await this.createAuditEvent(context, null, {
-        requestId,
+        requestId: requestId ?? undefined,
         duration,
         timestamp: new Date().toISOString(),
         error: error instanceof Error ? error.message : "Unknown error",
@@ -176,7 +192,7 @@ export class AuditMiddleware {
    * Log request start
    */
   private async logRequestStart(
-    context: Context,
+    context: AuditContext,
     requestId: string,
     startTime: number
   ): Promise<void> {
@@ -185,7 +201,7 @@ export class AuditMiddleware {
     }
 
     const { path, request } = context;
-    const authContext = (context as any).auth;
+    const authContext = context.auth;
 
     this.logger.info("Request started", {
       requestId,
@@ -202,19 +218,19 @@ export class AuditMiddleware {
    * Create comprehensive audit event
    */
   private async createAuditEvent(
-    context: Context,
-    response: any,
+    context: AuditContext,
+    response: unknown,
     metadata: {
-      requestId?: string;
-      duration?: number;
+      requestId?: string | undefined;
+      duration?: number | undefined;
       timestamp: string;
-      error?: string;
-      success?: boolean;
+      error?: string | undefined;
+      success?: boolean | undefined;
     }
   ): Promise<AuditEvent> {
     const { path, request } = context;
-    const authContext = (context as any).auth;
-    const validatedBody = (context as any).validatedBody;
+    const authContext = context.auth;
+    const validatedBody = context.validatedBody;
 
     // Parallelize independent data fetches for performance
     const [requestSize, responseSize] = await Promise.all([
@@ -228,8 +244,8 @@ export class AuditMiddleware {
       request.method
     );
 
-    let sanitizedRequestBody: any = undefined;
-    let sanitizedResponseBody: any = undefined;
+    let sanitizedRequestBody: unknown = undefined;
+    let sanitizedResponseBody: unknown = undefined;
     if (this.config.logRequestBodies && validatedBody) {
       try {
         sanitizedRequestBody = this.sanitizeData(validatedBody);
@@ -252,7 +268,12 @@ export class AuditMiddleware {
       resource,
       method: request.method,
       path,
-      statusCode: response?.status || context.set?.status,
+      statusCode:
+        typeof (response as { status?: number })?.status === "number"
+          ? (response as { status: number }).status
+          : typeof context.set?.status === "number"
+          ? (context.set.status as number)
+          : undefined,
       duration: metadata.duration,
       requestSize,
       responseSize,
@@ -262,13 +283,16 @@ export class AuditMiddleware {
       sessionId: this.extractSessionId(request),
       success:
         metadata.success !== false &&
-        (!response?.status || response.status < 400),
+        (!(response as { status?: number })?.status ||
+          (response as { status?: number }).status! < 400),
       error: metadata.error,
       metadata: {
-        cartId: validatedBody?.cartId,
-        modelName: validatedBody?.modelName,
-        batchSize: validatedBody?.requests?.length,
-        forceRecompute: validatedBody?.forceRecompute,
+        cartId: (validatedBody as { cartId?: string })?.cartId,
+        modelName: (validatedBody as { modelName?: string })?.modelName,
+        batchSize: (validatedBody as { requests?: unknown[] })?.requests
+          ?.length,
+        forceRecompute: (validatedBody as { forceRecompute?: boolean })
+          ?.forceRecompute,
         requestBody: sanitizedRequestBody,
         responseBody: sanitizedResponseBody,
         authMethod: authContext?.apiKey ? "api_key" : "token",
@@ -345,15 +369,17 @@ export class AuditMiddleware {
   /**
    * Get request size
    */
-  private async getRequestSize(context: Context): Promise<number> {
+  private async getRequestSize(context: AuditContext): Promise<number> {
     try {
       const contentLength = context.request.headers.get("content-length");
       if (contentLength) {
         return parseInt(contentLength, 10);
       }
-      const body = (context as any).validatedBody;
+      const body = context.validatedBody;
       if (body) {
-        if (typeof body === "string") return body.length;
+        if (typeof body === "string") {
+          return (body as string).length;
+        }
         return JSON.stringify(body).length;
       }
       return 0;
@@ -365,13 +391,18 @@ export class AuditMiddleware {
   /**
    * Get response size
    */
-  private getResponseSize(response: any): number {
+  private getResponseSize(response: unknown): number {
     try {
       if (!response) return 0;
-      if (response.headers?.["content-length"]) {
-        return parseInt(response.headers["content-length"], 10);
+      const responseObj = response as {
+        headers?: { [key: string]: string };
+        body?: unknown;
+        data?: unknown;
+      };
+      if (responseObj.headers?.["content-length"]) {
+        return parseInt(responseObj.headers["content-length"], 10);
       }
-      const payload = response.body || response.data;
+      const payload = responseObj.body || responseObj.data;
       if (payload) {
         if (typeof payload === "string") return payload.length;
         return JSON.stringify(payload).length;
@@ -391,7 +422,8 @@ export class AuditMiddleware {
     const cfConnectingIp = request.headers.get("cf-connecting-ip");
 
     if (xForwardedFor) {
-      return xForwardedFor.split(",")[0].trim();
+      const firstIp = xForwardedFor.split(",")[0];
+      return firstIp ? firstIp.trim() : "unknown";
     }
     if (xRealIp) {
       return xRealIp;
@@ -482,7 +514,7 @@ export class AuditMiddleware {
    */
   private async logRequestError(
     auditEvent: AuditEvent,
-    error: any
+    error: unknown
   ): Promise<void> {
     this.logger.error("Request failed", error as Error, {
       requestId: auditEvent.requestId,
@@ -539,17 +571,18 @@ export class AuditMiddleware {
   /**
    * Sanitize data by removing sensitive fields (optimized)
    */
-  private sanitizeData(data: any): any {
+  private sanitizeData(data: unknown): unknown {
     if (!data || typeof data !== "object") return data;
     if (Array.isArray(data)) return data.map((item) => this.sanitizeData(item));
-    const sanitized: Record<string, any> = {};
-    for (const key in data) {
+    const sanitized: Record<string, unknown> = {};
+    const dataObj = data as Record<string, unknown>;
+    for (const key in dataObj) {
       if (this.config.sensitiveFields.includes(key)) {
         sanitized[key] = "[REDACTED]";
-      } else if (typeof data[key] === "object" && data[key] !== null) {
-        sanitized[key] = this.sanitizeData(data[key]);
+      } else if (typeof dataObj[key] === "object" && dataObj[key] !== null) {
+        sanitized[key] = this.sanitizeData(dataObj[key]);
       } else {
-        sanitized[key] = data[key];
+        sanitized[key] = dataObj[key];
       }
     }
     return sanitized;
@@ -642,7 +675,15 @@ export class AuditMiddleware {
   /**
    * Get audit statistics
    */
-  public getAuditStatistics(): any {
+  public getAuditStatistics(): {
+    totalEvents: number;
+    successfulRequests: number;
+    failedRequests: number;
+    successRate: number;
+    actionBreakdown: Record<string, number>;
+    resourceBreakdown: Record<string, number>;
+    maxEventHistory: number;
+  } {
     const events = this.getAuditTrail(this.config.maxEventHistory);
     const total = events.length;
     const successful = events.filter((e) => e.success).length;
@@ -669,7 +710,16 @@ export class AuditMiddleware {
   /**
    * Get audit middleware health status
    */
-  public async getHealthStatus(): Promise<any> {
+  public async getHealthStatus(): Promise<{
+    status: string;
+    eventsTracked: number;
+    maxEventHistory: number;
+    config: {
+      detailedLogging: boolean;
+      logRequestBodies: boolean;
+      logResponseBodies: boolean;
+    };
+  }> {
     return {
       status: "healthy",
       eventsTracked: this.getAuditTrail(this.config.maxEventHistory).length,

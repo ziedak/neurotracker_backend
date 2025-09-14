@@ -380,11 +380,12 @@ export class AdvancedElysiaServerBuilder {
       };
 
       try {
-        await chainMiddleware(context, () => {
+        await chainMiddleware(context, (): Promise<void> => {
           // Middleware chain completed successfully
           this.logger.debug("HTTP middleware chain executed successfully", {
             path: request.url,
           });
+          return Promise.resolve();
         });
 
         // Apply response modifications
@@ -397,8 +398,9 @@ export class AdvancedElysiaServerBuilder {
             set.headers[key] = value;
           });
         }
-  return;
-        // Return void to satisfy TypeScript
+
+        // Middleware chain completed successfully
+        return undefined;
       } catch (error) {
         this.logger.error("HTTP middleware chain failed", error as Error, {
           path: request.url,
@@ -408,7 +410,6 @@ export class AdvancedElysiaServerBuilder {
         return { error: "Internal server error" };
       }
     });
-  
   }
 
   /**
@@ -546,7 +547,7 @@ export class AdvancedElysiaServerBuilder {
    * Default WebSocket message handler (called after middleware chain)
    */
   private handleDefaultWebSocketMessage(
-    ws: any,
+    ws: ExtendedWebSocket,
     message: string | Buffer,
     connectionId: string
   ): void {
@@ -602,7 +603,10 @@ export class AdvancedElysiaServerBuilder {
     if (!this.rooms.has(room)) {
       this.rooms.set(room, new Set());
     }
-    this.rooms.get(room)!.add(connectionId);
+    const roomSet = this.rooms.get(room);
+    if (roomSet) {
+      roomSet.add(connectionId);
+    }
 
     this.logger.debug("Connection joined room", { connectionId, room });
   }
@@ -804,6 +808,15 @@ export class AdvancedElysiaServerBuilder {
    */
   public getConfig(): ServerConfig {
     return this.config;
+  }
+
+  /**
+   * Cleanup method for testing - clears all internal state
+   */
+  public cleanup(): void {
+    this.connections.clear();
+    this.rooms.clear();
+    this.userConnections.clear();
   }
 }
 

@@ -90,7 +90,7 @@ export class IpStrategy implements RateLimitStrategy {
       }
       // If IPv6 with port (e.g., [2001:db8::1]:12345)
       const match = ip.match(/^\[([0-9a-fA-F:]+)\](?::\d+)?$/);
-      if (match && match[1]) {
+      if (match?.[1]) {
         return match[1];
       }
     }

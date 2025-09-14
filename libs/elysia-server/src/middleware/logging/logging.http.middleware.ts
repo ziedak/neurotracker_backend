@@ -2,6 +2,17 @@ import { type IMetricsCollector } from "@libs/monitoring";
 import { BaseMiddleware, type HttpMiddlewareConfig } from "../base";
 import type { MiddlewareContext } from "../types";
 
+// Extended context for logging with startTime on request and body on set
+interface LoggingContext extends MiddlewareContext {
+  request: MiddlewareContext["request"] & {
+    startTime?: number;
+    ip?: string;
+  };
+  set: MiddlewareContext["set"] & {
+    body?: unknown;
+  };
+}
+
 /**
  * Logging middleware configuration interface
  * Extends HttpMiddlewareConfig with logging-specific options
@@ -30,10 +41,10 @@ export interface RequestLogData {
   userAgent?: string | undefined;
   ip?: string | undefined;
   readonly timestamp: string;
-  headers?: Record<string, any>;
-  body?: any;
-  query?: Record<string, any>;
-  params?: Record<string, any>;
+  headers?: Record<string, string>;
+  body?: unknown; // Body can be any serializable content
+  query?: Record<string, string>;
+  params?: Record<string, string>;
 }
 
 /**
@@ -44,8 +55,8 @@ export interface ResponseLogData {
   readonly statusCode?: number;
   readonly responseTime: number;
   contentLength?: number | undefined;
-  headers?: Record<string, any>;
-  body?: any;
+  headers?: Record<string, string>;
+  body?: unknown; // Response body can be any serializable content
   error?: string;
 }
 
@@ -100,10 +111,10 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
   ) {
     // Create complete configuration with validated defaults
     const completeConfig: LoggingHttpMiddlewareConfig = {
-      name: config.name || "logging",
+      name: config.name ?? "logging",
       enabled: config.enabled ?? true,
       priority: config.priority ?? DEFAULT_LOGGING_OPTIONS.PRIORITY,
-      skipPaths: config.skipPaths || [],
+      skipPaths: config.skipPaths ?? [],
       logLevel: config.logLevel ?? DEFAULT_LOGGING_OPTIONS.LOG_LEVEL,
       logRequestBody:
         config.logRequestBody ?? DEFAULT_LOGGING_OPTIONS.LOG_REQUEST_BODY,
@@ -150,18 +161,18 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
 
     try {
       // Log incoming request
-      await this.logRequest(context, requestId);
+      this.logRequest(context, requestId);
 
       // Store start time for response timing
       const requestStartTime = Date.now();
-      (context.request as any).startTime = requestStartTime;
+      (context as LoggingContext).request.startTime = requestStartTime;
 
       // Continue to next middleware
       await next();
 
       // Log successful response
       const responseTime = Date.now() - requestStartTime;
-      await this.logResponse(context, requestId, responseTime);
+      this.logResponse(context, requestId, responseTime);
 
       // Record successful logging metrics
       await this.recordLoggingMetrics("request_logged", {
@@ -171,7 +182,8 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
       });
     } catch (error) {
       // Log error response
-      const requestStartTime = (context.request as any).startTime || Date.now();
+      const requestStartTime =
+        (context as LoggingContext).request.startTime ?? Date.now();
       const responseTime = Date.now() - requestStartTime;
       await this.logErrorResponse(context, requestId, responseTime, error);
       throw error; // Re-throw to maintain error chain
@@ -187,10 +199,7 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
   /**
    * Log incoming request with comprehensive data capture
    */
-  private async logRequest(
-    context: MiddlewareContext,
-    requestId: string
-  ): Promise<void> {
+  private logRequest(context: MiddlewareContext, requestId: string): void {
     const path = this.extractPath(context);
 
     // Skip logging for excluded paths
@@ -223,12 +232,22 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
     }
 
     // Add query and params if available
-    if (context["query"] && Object.keys(context["query"]).length > 0) {
-      logData.query = this.sanitizeQuery(context["query"]);
+    if (
+      context["query"] &&
+      Object.keys(context["query"] as Record<string, unknown>).length > 0
+    ) {
+      logData.query = this.sanitizeQuery(
+        context["query"] as Record<string, unknown>
+      );
     }
 
-    if (context["params"] && Object.keys(context["params"]).length > 0) {
-      logData.params = context["params"];
+    if (
+      context["params"] &&
+      Object.keys(context["params"] as Record<string, unknown>).length > 0
+    ) {
+      logData.params = this.sanitizeParams(
+        context["params"] as Record<string, unknown>
+      );
     }
 
     this.logWithLevel(this.config.logLevel, "Incoming request", logData);
@@ -237,11 +256,11 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
   /**
    * Log successful response
    */
-  private async logResponse(
+  private logResponse(
     context: MiddlewareContext,
     requestId: string,
     responseTime: number
-  ): Promise<void> {
+  ): void {
     const path = this.extractPath(context);
 
     // Skip logging for excluded paths
@@ -262,8 +281,8 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
       logData.headers = this.sanitizeHeaders(context.set.headers);
     }
 
-    if (this.config.logResponseBody && (context.set as any).body) {
-      logData.body = this.sanitizeBody((context.set as any).body);
+    if (this.config.logResponseBody && (context as LoggingContext).set.body) {
+      logData.body = this.sanitizeBody((context as LoggingContext).set.body);
     }
 
     // Determine log level based on status code
@@ -360,7 +379,7 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
     }
 
     // Fallback to extracting IP from context
-    return (context.request as any).ip || "127.0.0.1";
+    return (context as LoggingContext).request.ip ?? "127.0.0.1";
   }
 
   /**
@@ -397,38 +416,18 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
   /**
    * Sanitize headers by removing or redacting sensitive ones
    */
-  private sanitizeHeaders(headers: Record<string, any>): Record<string, any> {
+  private sanitizeHeaders(
+    headers: Record<string, string>
+  ): Record<string, string> {
     if (!headers) return {};
 
-    const sanitized: Record<string, any> = {};
+    const sanitized: Record<string, string> = {};
     const excludeHeaders = this.config.excludeHeaders || [];
 
     for (const [key, value] of Object.entries(headers)) {
       const lowerKey = key.toLowerCase();
 
       if (excludeHeaders.includes(lowerKey)) {
-        sanitized[key] = "[REDACTED]";
-      } else {
-        sanitized[key] = Array.isArray(value) ? value[0] : value;
-      }
-    }
-
-    return sanitized;
-  }
-
-  /**
-   * Sanitize query parameters
-   */
-  private sanitizeQuery(query: Record<string, any>): Record<string, any> {
-    const sanitized: Record<string, any> = {};
-    const sensitiveFields = this.config.sensitiveFields || [];
-
-    for (const [key, value] of Object.entries(query)) {
-      const lowerKey = key.toLowerCase();
-
-      if (
-        sensitiveFields.some((field) => lowerKey.includes(field.toLowerCase()))
-      ) {
         sanitized[key] = "[REDACTED]";
       } else {
         sanitized[key] = value;
@@ -439,13 +438,63 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
   }
 
   /**
+   * Sanitize query parameters
+   */
+  private sanitizeQuery(
+    query: Record<string, unknown>
+  ): Record<string, string> {
+    const sanitized: Record<string, string> = {};
+    const sensitiveFields = this.config.sensitiveFields ?? [];
+
+    for (const [key, value] of Object.entries(query)) {
+      const lowerKey = key.toLowerCase();
+
+      if (
+        sensitiveFields.some((field) => lowerKey.includes(field.toLowerCase()))
+      ) {
+        sanitized[key] = "[REDACTED]";
+      } else {
+        // Convert unknown value to string safely
+        sanitized[key] = typeof value === "string" ? value : String(value);
+      }
+    }
+
+    return sanitized;
+  }
+
+  /**
+   * Sanitize URL parameters
+   */
+  private sanitizeParams(
+    params: Record<string, unknown>
+  ): Record<string, string> {
+    const sanitized: Record<string, string> = {};
+    const sensitiveFields = this.config.sensitiveFields ?? [];
+
+    for (const [key, value] of Object.entries(params)) {
+      const lowerKey = key.toLowerCase();
+
+      if (
+        sensitiveFields.some((field) => lowerKey.includes(field.toLowerCase()))
+      ) {
+        sanitized[key] = "[REDACTED]";
+      } else {
+        // Convert unknown value to string safely
+        sanitized[key] = typeof value === "string" ? value : String(value);
+      }
+    }
+
+    return sanitized;
+  }
+
+  /**
    * Sanitize body by removing sensitive fields and limiting size
    */
-  private sanitizeBody(body: any): any {
+  private sanitizeBody(body: unknown): unknown {
     if (!body) return body;
 
     try {
-      let sanitized = this.deepSanitize(
+      const sanitized = this.deepSanitize(
         body,
         this.config.sensitiveFields || []
       );
@@ -468,7 +517,10 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
   /**
    * Deep sanitize object by removing sensitive fields recursively
    */
-  private deepSanitize(obj: any, sensitiveFields: readonly string[]): any {
+  private deepSanitize(
+    obj: unknown,
+    sensitiveFields: readonly string[]
+  ): unknown {
     if (typeof obj !== "object" || obj === null) {
       return obj;
     }
@@ -477,9 +529,11 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
       return obj.map((item) => this.deepSanitize(item, sensitiveFields));
     }
 
-    const sanitized: any = {};
+    // At this point we know it's a non-null object
+    const sanitized: Record<string, unknown> = {};
+    const objectRecord = obj as Record<string, unknown>;
 
-    for (const [key, value] of Object.entries(obj)) {
+    for (const [key, value] of Object.entries(objectRecord)) {
       const lowerKey = key.toLowerCase();
 
       if (
@@ -498,7 +552,7 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
    * Get content length from response context
    */
   private getContentLength(context: MiddlewareContext): number | undefined {
-    const headers = context.set.headers;
+    const { headers } = context.set;
     if (headers?.["content-length"]) {
       const length = Array.isArray(headers["content-length"])
         ? headers["content-length"][0]
@@ -506,9 +560,9 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
       return parseInt(length as string, 10);
     }
 
-    if ((context.set as any).body) {
+    if ((context as LoggingContext).set.body) {
       try {
-        return JSON.stringify((context.set as any).body).length;
+        return JSON.stringify((context as LoggingContext).set.body).length;
       } catch {
         return undefined;
       }
@@ -535,7 +589,7 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
   private logWithLevel(
     level: "debug" | "info" | "warn" | "error" | undefined,
     message: string,
-    data: any
+    data: unknown
   ): void {
     const logLevel = level || "info";
 
@@ -582,15 +636,15 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
       throw new Error("Logging maxBodySize must be a non-negative integer");
     }
 
-    if (excludePaths && excludePaths.some((path) => !path.startsWith("/"))) {
+    if (excludePaths?.some((path) => !path.startsWith("/"))) {
       throw new Error("Logging excludePaths must start with '/'");
     }
 
-    if (excludeHeaders && excludeHeaders.some((header) => !header.trim())) {
+    if (excludeHeaders?.some((header) => !header.trim())) {
       throw new Error("Logging excludeHeaders cannot contain empty strings");
     }
 
-    if (sensitiveFields && sensitiveFields.some((field) => !field.trim())) {
+    if (sensitiveFields?.some((field) => !field.trim())) {
       throw new Error("Logging sensitiveFields cannot contain empty strings");
     }
   }

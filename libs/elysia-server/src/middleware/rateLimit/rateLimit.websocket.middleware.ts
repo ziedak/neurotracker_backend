@@ -4,6 +4,7 @@ import {
   type WebSocketMiddlewareConfig,
 } from "../base/BaseWebSocketMiddleware";
 import type { WebSocketContext } from "../types";
+import { asWebSocket } from "../types";
 import {
   RateLimitingCacheAdapter,
   type RateLimitAlgorithm,
@@ -78,7 +79,7 @@ class WebSocketIpStrategy implements RateLimitWebSocketStrategy {
 
 class WebSocketUserStrategy implements RateLimitWebSocketStrategy {
   generateKey(context: WebSocketContext): string {
-    return context.userId || context.connectionId || "anonymous";
+    return (context.userId ?? context.connectionId) || "anonymous";
   }
 }
 
@@ -144,11 +145,11 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
   ) {
     // Create complete configuration with validated defaults
     const completeConfig = {
-      name: config.name || "websocket-rate-limit",
+      name: config.name ?? "websocket-rate-limit",
       enabled: config.enabled ?? true,
       priority:
         config.priority ?? DEFAULT_WEBSOCKET_RATE_LIMIT_OPTIONS.PRIORITY,
-      skipMessageTypes: config.skipMessageTypes || [],
+      skipMessageTypes: config.skipMessageTypes ?? [],
       algorithm:
         config.algorithm ?? DEFAULT_WEBSOCKET_RATE_LIMIT_OPTIONS.ALGORITHM,
       maxMessagesPerMinute:
@@ -376,7 +377,7 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
 
       const result = await this.connectionLimiter.checkRateLimit(
         ipKey,
-        this.config.maxConnectionsPerIP!,
+        this.config.maxConnectionsPerIP,
         this.config.windowMs,
         this.config.algorithm
       );
@@ -423,29 +424,29 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
         ? adapterResult.resetTime
         : (adapterResult.resetTime as Date).getTime();
 
-    const windowStart = (adapterResult as any).windowStart
-      ? typeof (adapterResult as any).windowStart === "number"
-        ? (adapterResult as any).windowStart
-        : ((adapterResult as any).windowStart as Date).getTime()
+    const windowStart = adapterResult.windowStart
+      ? typeof adapterResult.windowStart === "number"
+        ? adapterResult.windowStart
+        : (adapterResult.windowStart as Date).getTime()
       : Date.now() - this.config.windowMs;
 
-    const windowEnd = (adapterResult as any).windowEnd
-      ? typeof (adapterResult as any).windowEnd === "number"
-        ? (adapterResult as any).windowEnd
-        : ((adapterResult as any).windowEnd as Date).getTime()
+    const windowEnd = adapterResult.windowEnd
+      ? typeof adapterResult.windowEnd === "number"
+        ? adapterResult.windowEnd
+        : (adapterResult.windowEnd as Date).getTime()
       : resetTime;
 
     const result: RateLimitWebSocketResult = {
       allowed: adapterResult.allowed,
-      totalHits: (adapterResult as any).totalHits || 0,
+      totalHits: adapterResult.totalHits || 0,
       remaining: adapterResult.remaining,
       resetTime,
       algorithm: adapterResult.algorithm,
       windowStart,
       windowEnd,
-      limit: (adapterResult as any).limit || this.config.maxMessagesPerMinute,
-      cached: (adapterResult as any).cached || false,
-      responseTime: (adapterResult as any).responseTime || 0,
+      limit: adapterResult.limit || this.config.maxMessagesPerMinute,
+      cached: adapterResult.cached || false,
+      responseTime: adapterResult.responseTime || 0,
     };
 
     // Add retryAfter only if rate limited
@@ -500,7 +501,7 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
         ? this.config.message.connectionLimitExceeded
         : this.config.message.rateLimitExceeded;
 
-    await this.sendErrorMessage(context, {
+    this.sendErrorMessage(context, {
       type: "rate_limit_exceeded",
       error: errorMessage,
       limitType,
@@ -521,7 +522,15 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
       });
 
       try {
-        context.ws.close(1008, `Rate limit exceeded: ${errorMessage}`);
+        const closeResult = asWebSocket(context.ws).close(
+          1008,
+          `Rate limit exceeded: ${errorMessage}`
+        );
+        if (closeResult && typeof closeResult.then === "function") {
+          closeResult.catch((err) =>
+            console.error("WebSocket close failed:", err)
+          );
+        }
       } catch (closeError) {
         this.logger.warn("Failed to close WebSocket connection", {
           error: closeError instanceof Error ? closeError.message : "unknown",
@@ -549,8 +558,8 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
     const usagePercentage =
       ((result.limit - result.remaining) / result.limit) * 100;
 
-    if (usagePercentage >= (this.config.warningThreshold || 80)) {
-      await this.sendWarningMessage(context, {
+    if (usagePercentage >= (this.config.warningThreshold ?? 80)) {
+      this.sendWarningMessage(context, {
         type: "rate_limit_warning",
         message: this.config.message.warningMessage,
         usagePercentage: Math.round(usagePercentage),
@@ -569,14 +578,21 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
   /**
    * Send error message to WebSocket client
    */
-  private async sendErrorMessage(
+  private sendErrorMessage(
     context: WebSocketContext,
-    errorData: any
-  ): Promise<void> {
+    errorData: Record<string, unknown>
+  ): void {
     try {
-      if (context.ws.readyState === 1) {
+      if (asWebSocket(context.ws).readyState === 1) {
         // WebSocket.OPEN
-        context.ws.send(JSON.stringify(errorData));
+        const sendResult = asWebSocket(context.ws).send(
+          JSON.stringify(errorData)
+        );
+        if (sendResult && typeof sendResult.then === "function") {
+          sendResult.catch((err) =>
+            console.error("WebSocket send failed:", err)
+          );
+        }
       }
     } catch (error) {
       this.logger.warn("Failed to send error message to WebSocket client", {
@@ -589,14 +605,21 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
   /**
    * Send warning message to WebSocket client
    */
-  private async sendWarningMessage(
+  private sendWarningMessage(
     context: WebSocketContext,
-    warningData: any
-  ): Promise<void> {
+    warningData: Record<string, unknown>
+  ): void {
     try {
-      if (context.ws.readyState === 1) {
+      if (asWebSocket(context.ws).readyState === 1) {
         // WebSocket.OPEN
-        context.ws.send(JSON.stringify(warningData));
+        const sendResult = asWebSocket(context.ws).send(
+          JSON.stringify(warningData)
+        );
+        if (sendResult && typeof sendResult.then === "function") {
+          sendResult.catch((err) =>
+            console.error("WebSocket send failed:", err)
+          );
+        }
       }
     } catch (error) {
       this.logger.warn("Failed to send warning message to WebSocket client", {
@@ -619,7 +642,9 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
           connectionId: context.connectionId,
         }
       );
-      return this.strategies.get("connectionId")!.generateKey(context);
+      return (
+        this.strategies.get("connectionId")?.generateKey(context) ?? "unknown"
+      );
     }
 
     const baseKey = strategy.generateKey(context);
@@ -778,12 +803,12 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
   }
 
   /**
-   * Get rate limit statistics
+   * Get rate limit statistics with proper typing
    */
-  public async getRateLimitStats(): Promise<{
-    messageStats: any;
-    connectionStats?: any;
-  }> {
+  public getRateLimitStats(): {
+    messageStats: import("@libs/ratelimit").RateLimitingStats | null;
+    connectionStats?: import("@libs/ratelimit").RateLimitingStats;
+  } {
     try {
       const messageStats = this.rateLimiter.getRateLimitingStats();
       const connectionStats = this.connectionLimiter?.getRateLimitingStats();
@@ -805,8 +830,8 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
    * Get adapter health status
    */
   public async getHealth(): Promise<{
-    messageRateLimiter: any;
-    connectionRateLimiter?: any;
+    messageRateLimiter: Record<string, unknown>;
+    connectionRateLimiter?: Record<string, unknown>;
   }> {
     try {
       const messageHealth = await this.rateLimiter.getHealth();

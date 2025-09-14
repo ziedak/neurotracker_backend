@@ -1,32 +1,32 @@
 import { MiddlewareContext } from "./context.types";
 
 /**
- * Core middleware function signature
+ * Core middleware function signature with proper return typing
  */
 export type MiddlewareFunction = (
   context: MiddlewareContext,
   next: () => Promise<void>
-) => Promise<void | any>;
+) => Promise<void> | void;
 
 /**
- * Configurable middleware factory function
+ * Configurable middleware factory function with generic constraints
  */
-export interface ConfigurableMiddleware<T = any> {
+export interface ConfigurableMiddleware<T = Record<string, unknown>> {
   (config?: T): MiddlewareFunction;
 }
 
 /**
- * Middleware execution result
+ * Middleware execution result with strict typing
  */
 export interface MiddlewareResult {
   success: boolean;
-  error?: string;
-  response?: any;
-  metadata?: Record<string, any>;
+  error?: Error | string;
+  response?: unknown;
+  metadata?: Record<string, unknown>;
 }
 
 /**
- * Middleware chain configuration
+ * Middleware chain configuration with enhanced error handling
  */
 export interface MiddlewareChainConfig {
   middlewares: Array<{
@@ -35,7 +35,8 @@ export interface MiddlewareChainConfig {
     priority?: number;
     enabled?: boolean;
   }>;
-  errorHandler?:
-    | ((error: Error, context: MiddlewareContext) => any)
-    | undefined;
+  errorHandler?: (
+    error: Error,
+    context: MiddlewareContext
+  ) => unknown | undefined;
 }

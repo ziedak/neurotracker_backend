@@ -8,15 +8,15 @@ export interface MiddlewareContext {
     method: string;
     url: string;
     headers: Record<string, string>;
-    body?: any;
-    query?: Record<string, any>;
-    params?: Record<string, any>;
+    body?: unknown;
+    query?: Record<string, unknown>;
+    params?: Record<string, unknown>;
     ip?: string;
   };
   response?: {
     status?: number;
     headers?: Record<string, string>;
-    body?: any;
+    body?: unknown;
   };
   set: {
     status?: number | undefined;
@@ -28,19 +28,19 @@ export interface MiddlewareContext {
     permissions?: string[];
     authenticated?: boolean;
     anonymous?: boolean;
-    [key: string]: any;
+    [key: string]: unknown;
   };
   session?: {
     id?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
   validated?: {
-    body?: any;
-    query?: any;
-    params?: any;
+    body?: unknown;
+    query?: unknown;
+    params?: unknown;
   };
   path?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 /**

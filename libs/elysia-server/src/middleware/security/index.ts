@@ -17,7 +17,7 @@ import {
   type SecurityHttpMiddlewareConfig,
 } from "./security.http.middleware";
 import type { SecurityWebSocketMiddlewareConfig } from "./security.websocket.middleware";
-import { SecurityWebSocketMiddleware } from "./examples";
+import { SecurityWebSocketMiddleware } from "./security.websocket.middleware";
 
 // Re-export everything for convenience
 export * from "./security.http.middleware";

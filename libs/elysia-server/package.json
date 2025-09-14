@@ -22,7 +22,8 @@
     "@libs/ratelimit": "workspace:*",
     "@libs/utils": "workspace:*",
     "elysia": "^1.4.4",
-    "lru-cache": "^10.4.3"
+    "lru-cache": "^10.4.3",
+    "zod": "^4.1.8"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",

@@ -4,8 +4,10 @@
 
 export interface WebSocketMessage {
   type: string;
-  payload?: any;
+  payload?: unknown;
   timestamp?: string;
+  error?: string;
+  code?: number;
   id?: string;
 }
 
@@ -19,8 +21,51 @@ export interface WebSocketConnectionMetadata {
   query: Record<string, string>;
 }
 
+/**
+ * Elysia's WebSocket structure as provided in handlers
+ * Reference: https://elysiajs.com/patterns/websocket.html#ws
+ */
+export interface ElysiaServerWebSocket {
+  readonly id: string; // uid for each connection
+  data: {
+    cookie: Record<string, unknown>;
+    request: Request;
+    [key: string]: unknown;
+  };
+  raw: {
+    send: (data: string | ArrayBufferLike, compress?: boolean) => void;
+    close: (code?: number, reason?: string) => void;
+    readyState: 0 | 1 | 2 | 3; // WebSocket ready states
+    remoteAddress?: string;
+    binaryType: "nodebuffer" | "arraybuffer" | "uint8array";
+    [key: string]: unknown;
+  };
+  send: (data: string | ArrayBufferLike, compress?: boolean) => void;
+  close: (code?: number, reason?: string) => void;
+  readyState: 0 | 1 | 2 | 3;
+  // Additional helper properties for compatibility
+  [key: string]: unknown;
+}
+
+/**
+ * Type guard and utility for Elysia WebSocket access
+ */
+export interface WebSocketLike {
+  send: (data: string | ArrayBufferLike) => void | Promise<void>;
+  close: (code?: number, reason?: string) => void | Promise<void>;
+  readyState: number;
+  [key: string]: unknown;
+}
+
+/**
+ * Safely cast unknown WebSocket to typed interface
+ */
+export function asWebSocket(ws: unknown): WebSocketLike {
+  return ws as WebSocketLike;
+}
+
 export interface WebSocketContext {
-  ws: any; // WebSocket instance
+  ws: unknown; // Actual Elysia WebSocket - type varies by version
   connectionId: string;
   message: WebSocketMessage;
   metadata: WebSocketConnectionMetadata;
@@ -29,13 +74,13 @@ export interface WebSocketContext {
   userRoles?: string[];
   userPermissions?: string[];
   rooms?: string[];
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export type WebSocketMiddlewareFunction = (
   context: WebSocketContext,
   next: () => Promise<void>
-) => Promise<void | any>;
+) => Promise<void | unknown>;
 
 export interface WebSocketMiddlewareOptions {
   name: string;
@@ -65,10 +110,10 @@ export interface WebSocketRateLimitConfig extends WebSocketMiddlewareOptions {
 }
 
 export interface WebSocketValidationConfig extends WebSocketMiddlewareOptions {
-  schemas: Record<string, any>; // Message type -> Joi/Zod schema
+  schemas: Record<string, unknown>; // Message type -> Zod schema
   validatePayload?: boolean;
   validateMetadata?: boolean;
-  onValidationError?: (context: WebSocketContext, error: any) => void;
+  onValidationError?: (context: WebSocketContext, error: Error) => void;
 }
 
 export interface WebSocketAuditConfig extends WebSocketMiddlewareOptions {

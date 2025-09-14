@@ -498,14 +498,16 @@ export class WebSocketMiddlewareChain {
     retryConfig?: RetryConfig
   ): Promise<void> {
     if (!retryConfig) {
-      return await middleware(context, async () => {});
+      await middleware(context, async () => {});
+      return;
     }
 
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= retryConfig.maxRetries; attempt++) {
       try {
-        return await middleware(context, async () => {});
+        await middleware(context, async () => {});
+        return;
       } catch (error) {
         lastError = error as Error;
 

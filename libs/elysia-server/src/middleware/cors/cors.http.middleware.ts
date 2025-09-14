@@ -182,7 +182,7 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
       context.set.headers = {};
     }
 
-    const headers = context.set.headers;
+    const {headers} = context.set;
 
     // Set origin header
     if (validationResult.allowed && origin) {
@@ -221,7 +221,7 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
       context.set.headers = {};
     }
 
-    const headers = context.set.headers;
+    const {headers} = context.set;
 
     // Set max age for preflight cache
     if (this.config.maxAge !== undefined) {
@@ -341,11 +341,11 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
       throw new Error("CORS methods array cannot be empty");
     }
 
-    if (allowedHeaders && allowedHeaders.some((header) => !header.trim())) {
+    if (allowedHeaders?.some((header) => !header.trim())) {
       throw new Error("CORS allowed headers cannot contain empty strings");
     }
 
-    if (exposedHeaders && exposedHeaders.some((header) => !header.trim())) {
+    if (exposedHeaders?.some((header) => !header.trim())) {
       throw new Error("CORS exposed headers cannot contain empty strings");
     }
 

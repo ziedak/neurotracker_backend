@@ -105,7 +105,7 @@ export abstract class BaseMiddleware<
         if (skipPath.endsWith("*")) {
           return path.startsWith(skipPath.slice(0, -1));
         }
-        return path === skipPath || path.startsWith(skipPath + "/");
+        return path === skipPath || path.startsWith(`${skipPath  }/`);
       }) || false
     );
   }
@@ -128,7 +128,7 @@ export abstract class BaseMiddleware<
    * Extract client IP from request context
    */
   protected getClientIp(context: MiddlewareContext): string {
-    const headers = context.request.headers;
+    const {headers} = context.request;
     return (
       headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
       headers["x-real-ip"] ||

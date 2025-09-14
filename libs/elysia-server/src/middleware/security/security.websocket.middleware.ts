@@ -24,22 +24,22 @@ import type { WebSocketContext } from "../types";
  */
 export interface SecurityWebSocketMiddlewareConfig
   extends WebSocketMiddlewareConfig {
-  readonly allowedOrigins?: readonly string[]; // Allowed origins for CORS
-  readonly maxConnectionsPerIP?: number; // Max connections per IP address
-  readonly maxMessageSize?: number; // Max message size in bytes
-  readonly allowedProtocols?: readonly string[]; // Allowed WebSocket protocols
-  readonly requireSecureConnection?: boolean; // Require WSS in production
-  readonly messageTypeWhitelist?: readonly string[]; // Allowed message types
-  readonly messageTypeBlacklist?: readonly string[]; // Forbidden message types
-  readonly rateLimitPerConnection?: {
-    readonly messagesPerMinute?: number;
-    readonly messagesPerHour?: number;
-    readonly bytesPerMinute?: number;
+  readonly allowedOrigins: readonly string[]; // Allowed origins for CORS
+  readonly maxConnectionsPerIP: number; // Max connections per IP address
+  readonly maxMessageSize: number; // Max message size in bytes
+  readonly allowedProtocols: readonly string[]; // Allowed WebSocket protocols
+  readonly requireSecureConnection: boolean; // Require WSS in production
+  readonly messageTypeWhitelist: readonly string[]; // Allowed message types
+  readonly messageTypeBlacklist: readonly string[]; // Forbidden message types
+  readonly rateLimitPerConnection: {
+    readonly messagesPerMinute: number;
+    readonly messagesPerHour: number;
+    readonly bytesPerMinute: number;
   };
   readonly sanitizePayload?: boolean; // Sanitize message payloads
   readonly blockSuspiciousConnections?: boolean; // Block suspicious behavior
-  readonly connectionTimeout?: number; // Connection timeout in ms
-  readonly heartbeatInterval?: number; // Heartbeat interval in ms
+  readonly connectionTimeout: number; // Connection timeout in ms
+  readonly heartbeatInterval: number; // Heartbeat interval in ms
   readonly validateHeaders?: boolean; // Validate WebSocket headers
   readonly customValidation?: (context: WebSocketContext) => boolean;
 }
@@ -57,17 +57,17 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
     metrics: IMetricsCollector,
     config: Partial<SecurityWebSocketMiddlewareConfig>
   ) {
-    const defaultConfig: SecurityWebSocketMiddlewareConfig = {
-      name: config.name || "security-websocket",
+    const baseConfig = {
+      name: config.name ?? "security-websocket",
       enabled: config.enabled ?? true,
       priority: config.priority ?? 100,
-      allowedOrigins: config.allowedOrigins || ["*"],
-      maxConnectionsPerIP: config.maxConnectionsPerIP || 10,
-      maxMessageSize: config.maxMessageSize || 1024 * 1024, // 1MB
-      allowedProtocols: config.allowedProtocols || [],
+      allowedOrigins: config.allowedOrigins ?? ["*"],
+      maxConnectionsPerIP: config.maxConnectionsPerIP ?? 10,
+      maxMessageSize: config.maxMessageSize ?? 1024 * 1024, // 1MB
+      allowedProtocols: config.allowedProtocols ?? [],
       requireSecureConnection: config.requireSecureConnection ?? true,
-      messageTypeWhitelist: config.messageTypeWhitelist || [],
-      messageTypeBlacklist: config.messageTypeBlacklist || [
+      messageTypeWhitelist: config.messageTypeWhitelist ?? [],
+      messageTypeBlacklist: config.messageTypeBlacklist ?? [
         "eval",
         "script",
         "admin",
@@ -81,20 +81,20 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
       },
       sanitizePayload: config.sanitizePayload ?? true,
       blockSuspiciousConnections: config.blockSuspiciousConnections ?? true,
-      connectionTimeout: config.connectionTimeout || 30000, // 30 seconds
-      heartbeatInterval: config.heartbeatInterval || 25000, // 25 seconds
+      connectionTimeout: config.connectionTimeout ?? 30000, // 30 seconds
+      heartbeatInterval: config.heartbeatInterval ?? 25000, // 25 seconds
       validateHeaders: config.validateHeaders ?? true,
-      skipMessageTypes: config.skipMessageTypes || [
+      skipMessageTypes: config.skipMessageTypes ?? [
         "ping",
         "pong",
         "heartbeat",
       ],
     };
 
-    // Only include customValidation if it's provided
-    if (config.customValidation) {
-      (defaultConfig as any).customValidation = config.customValidation;
-    }
+    const defaultConfig: SecurityWebSocketMiddlewareConfig =
+      config.customValidation
+        ? { ...baseConfig, customValidation: config.customValidation }
+        : baseConfig;
 
     super(metrics, defaultConfig);
 
@@ -170,11 +170,11 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
    */
   private async registerConnection(context: WebSocketContext): Promise<void> {
     const { connectionId, metadata } = context;
-    const clientIp = metadata.clientIp;
+    const { clientIp } = metadata;
 
     // Check IP connection limits
-    const currentCount = this.ipConnectionCounts.get(clientIp) || 0;
-    if (currentCount >= this.config.maxConnectionsPerIP!) {
+    const currentCount = this.ipConnectionCounts.get(clientIp) ?? 0;
+    if (currentCount >= this.config.maxConnectionsPerIP) {
       await this.recordMetric("websocket_security_ip_limit_exceeded", 1, {
         clientIp,
       });
@@ -192,7 +192,7 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
         totalBytes: 0,
         securityViolations: 0,
         origin: this.getOrigin(context),
-        userAgent: metadata.userAgent || "unknown",
+        userAgent: metadata.userAgent ?? "unknown",
       });
 
       this.ipConnectionCounts.set(clientIp, currentCount + 1);
@@ -204,17 +204,17 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
     }
 
     // Update last activity
-    const connectionInfo = this.connectionRegistry.get(connectionId)!;
-    connectionInfo.lastActivity = new Date();
-    connectionInfo.messageCount++;
+    const connectionInfo = this.connectionRegistry.get(connectionId);
+    if (connectionInfo) {
+      connectionInfo.lastActivity = new Date();
+      connectionInfo.messageCount++;
+    }
   }
 
   /**
    * Validate connection-level security
    */
-  private async validateConnectionSecurity(
-    context: WebSocketContext
-  ): Promise<void> {
+  private validateConnectionSecurity(context: WebSocketContext): void {
     // Validate origin
     if (!this.isOriginAllowed(context)) {
       throw new Error("Origin not allowed");
@@ -250,27 +250,26 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
   /**
    * Validate message-level security
    */
-  private async validateMessageSecurity(
-    context: WebSocketContext
-  ): Promise<void> {
+  private validateMessageSecurity(context: WebSocketContext): void {
     const { message } = context;
 
     // Check message size
     const messageSize = this.calculateMessageSize(message);
-    if (messageSize > this.config.maxMessageSize!) {
+    if (messageSize > this.config.maxMessageSize) {
       throw new Error(`Message too large: ${messageSize} bytes`);
     }
 
     // Check message type whitelist
     if (
-      this.config.messageTypeWhitelist!.length > 0 &&
-      !this.config.messageTypeWhitelist!.includes(message.type)
+      this.config.messageTypeWhitelist &&
+      this.config.messageTypeWhitelist.length > 0 &&
+      !this.config.messageTypeWhitelist.includes(message.type)
     ) {
       throw new Error(`Message type not in whitelist: ${message.type}`);
     }
 
     // Check message type blacklist
-    if (this.config.messageTypeBlacklist!.includes(message.type)) {
+    if (this.config.messageTypeBlacklist?.includes(message.type)) {
       throw new Error(`Message type blacklisted: ${message.type}`);
     }
 
@@ -284,10 +283,10 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
   /**
    * Apply rate limiting per connection
    */
-  private async applyRateLimit(context: WebSocketContext): Promise<void> {
+  private applyRateLimit(context: WebSocketContext): void {
     const { connectionId } = context;
     const now = Date.now();
-    const rateLimitConfig = this.config.rateLimitPerConnection!;
+    const rateLimitConfig = this.config.rateLimitPerConnection;
 
     // Get or create rate limit info
     let rateLimitInfo = this.messageRateLimits.get(connectionId);
@@ -317,19 +316,17 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
     // Check rate limits
     const messageSize = this.calculateMessageSize(context.message);
 
-    if (
-      rateLimitInfo.messagesThisMinute >= rateLimitConfig.messagesPerMinute!
-    ) {
+    if (rateLimitInfo.messagesThisMinute >= rateLimitConfig.messagesPerMinute) {
       throw new Error("Message rate limit exceeded (per minute)");
     }
 
-    if (rateLimitInfo.messagesThisHour >= rateLimitConfig.messagesPerHour!) {
+    if (rateLimitInfo.messagesThisHour >= rateLimitConfig.messagesPerHour) {
       throw new Error("Message rate limit exceeded (per hour)");
     }
 
     if (
       rateLimitInfo.bytesThisMinute + messageSize >
-      rateLimitConfig.bytesPerMinute!
+      rateLimitConfig.bytesPerMinute
     ) {
       throw new Error("Byte rate limit exceeded (per minute)");
     }
@@ -411,7 +408,7 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
    * Helper methods
    */
   private isOriginAllowed(context: WebSocketContext): boolean {
-    const allowedOrigins = this.config.allowedOrigins!;
+    const { allowedOrigins } = this.config;
     if (allowedOrigins.includes("*")) return true;
 
     const origin = this.getOrigin(context);
@@ -428,14 +425,18 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
   }
 
   private isProtocolAllowed(context: WebSocketContext): boolean {
-    if (this.config.allowedProtocols!.length === 0) return true;
+    if (
+      !this.config.allowedProtocols ||
+      this.config.allowedProtocols.length === 0
+    )
+      return true;
 
-    const protocol = context.metadata.headers["sec-websocket-protocol"] || "";
-    return this.config.allowedProtocols!.includes(protocol);
+    const protocol = context.metadata.headers["sec-websocket-protocol"] ?? "";
+    return this.config.allowedProtocols.includes(protocol);
   }
 
   private areHeadersValid(context: WebSocketContext): boolean {
-    const headers = context.metadata.headers;
+    const { headers } = context.metadata;
 
     // Check for required WebSocket headers
     if (!headers["sec-websocket-key"] || !headers["sec-websocket-version"]) {
@@ -459,13 +460,13 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
 
   private getOrigin(context: WebSocketContext): string {
     return (
-      context.metadata.headers["origin"] ||
-      context.metadata.headers["sec-websocket-origin"] ||
+      context.metadata.headers["origin"] ??
+      context.metadata.headers["sec-websocket-origin"] ??
       "unknown"
     );
   }
 
-  private calculateMessageSize(message: any): number {
+  private calculateMessageSize(message: unknown): number {
     return JSON.stringify(message).length;
   }
 
@@ -481,7 +482,7 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
 
   private cleanupStaleConnections(): void {
     const now = Date.now();
-    const timeout = this.config.connectionTimeout!;
+    const timeout = this.config.connectionTimeout;
 
     for (const [connectionId, info] of this.connectionRegistry.entries()) {
       if (now - info.lastActivity.getTime() > timeout) {
@@ -489,7 +490,7 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
         this.connectionRegistry.delete(connectionId);
 
         // Update IP connection count
-        const currentCount = this.ipConnectionCounts.get(info.clientIp) || 0;
+        const currentCount = this.ipConnectionCounts.get(info.clientIp) ?? 0;
         if (currentCount > 1) {
           this.ipConnectionCounts.set(info.clientIp, currentCount - 1);
         } else {
@@ -536,7 +537,7 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
           return messageType.startsWith(skipType.slice(0, -1));
         }
         return messageType === skipType;
-      }) || false
+      }) ?? false
     );
   }
 

@@ -42,6 +42,7 @@ const createMockContext = (
   ws: {
     send: jest.fn(),
     close: jest.fn(),
+    readyState: 0,
   },
   connectionId: "conn_123",
   message: { type: "test", payload: {} },
@@ -70,6 +71,7 @@ const createAuthConfig = (): {
   apiKeyHeader: string;
   messagePermissions: Record<string, string[]>;
   messageRoles: Record<string, string[]>;
+  enableCleanupTimer: boolean;
 } => ({
   name: "test-auth",
   requireAuth: true,
@@ -84,9 +86,20 @@ const createAuthConfig = (): {
     test: ["user"],
     admin: ["admin"],
   },
+  enableCleanupTimer: false, // Disable cleanup timer in tests to prevent hanging async operations
 });
 
 describe("WebSocketAuthMiddleware Integration", () => {
+  beforeEach(() => {
+    // Clear all mocks before each test
+    jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    // Clear all timers to prevent hanging async operations
+    jest.clearAllTimers();
+  });
+
   it("should instantiate middleware", () => {
     const config = createAuthConfig();
     const middleware = new AuthWebSocketMiddleware(

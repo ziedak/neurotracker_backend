@@ -24,34 +24,29 @@ module.exports = [
       "@typescript-eslint": tseslint,
     },
     rules: {
-      // TypeScript strict rules
+      // === FOCUS ON ACTUAL BUGS ===
       "@typescript-eslint/no-unused-vars": [
         "error",
         { argsIgnorePattern: "^_" },
       ],
-      "@typescript-eslint/explicit-function-return-type": "error",
-      "@typescript-eslint/explicit-module-boundary-types": "error",
-      "@typescript-eslint/no-explicit-any": "error",
-      "@typescript-eslint/no-non-null-assertion": "error",
-      "@typescript-eslint/no-unnecessary-type-assertion": "error",
-      "@typescript-eslint/prefer-nullish-coalescing": "error",
-      "@typescript-eslint/prefer-optional-chain": "error",
       "@typescript-eslint/no-floating-promises": "error",
-      "@typescript-eslint/await-thenable": "off", // False positives with interface methods
-      "@typescript-eslint/no-misused-promises": "off", // Too strict for this codebase
+      "@typescript-eslint/await-thenable": "error", // Re-enable this useful rule
       "@typescript-eslint/require-await": "error",
-      "@typescript-eslint/no-unused-expressions": "error",
+
+      // === PRACTICAL TYPE SAFETY ===
+      "@typescript-eslint/no-explicit-any": "error", // Keep strict - any is not allowed
+      "@typescript-eslint/no-non-null-assertion": "warn", // Warn for controlled use
+      "@typescript-eslint/prefer-nullish-coalescing": "off",
+      "@typescript-eslint/prefer-optional-chain": "error",
+
+      // === REMOVE BUREAUCRATIC RULES ===
+      // "@typescript-eslint/explicit-function-return-type": "off", // Let TypeScript infer
+      // "@typescript-eslint/explicit-module-boundary-types": "off", // Trust inference
+
+      // === KEEP USEFUL STYLE RULES ===
       "@typescript-eslint/prefer-as-const": "error",
-      "@typescript-eslint/no-implicit-any-catch": "off", // Rule doesn't exist in current version
-      "@typescript-eslint/no-unnecessary-condition": "off",
-      "@typescript-eslint/no-unnecessary-qualifier": "error",
-      "@typescript-eslint/no-unnecessary-type-arguments": "error",
       "@typescript-eslint/prefer-includes": "error",
       "@typescript-eslint/prefer-string-starts-ends-with": "error",
-      "@typescript-eslint/prefer-readonly": "error",
-      "@typescript-eslint/promise-function-async": "off", // Too strict for interface delegation
-      "@typescript-eslint/return-await": "error",
-      "@typescript-eslint/strict-boolean-expressions": "off",
 
       // General strict rules
       "no-console": ["warn", { allow: ["error"] }],

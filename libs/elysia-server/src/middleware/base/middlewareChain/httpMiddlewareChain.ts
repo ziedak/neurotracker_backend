@@ -102,7 +102,7 @@ export class HttpMiddlewareChain {
 
         const current = this.middlewares[currentIndex++];
 
-        if (!current || !current.enabled) {
+        if (!current?.enabled) {
           return next(); // Skip disabled middleware
         }
 

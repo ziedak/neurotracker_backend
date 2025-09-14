@@ -3,8 +3,9 @@ export * from "./plugins";
 export * from "./middleware";
 
 // Production utilities
-export * from "./utils/TimerManager";
-export * from "./utils/InputValidator";
+// Note: TimerManager removed - use @libs/utils/Scheduler instead
+export * from "./utils/InputValidator"; // DEPRECATED - use UnifiedInputValidator
+export * from "./utils/UnifiedInputValidator"; // NEW: Consolidated Zod-based validation
 export * from "./utils/ConnectionManager";
 
 // Re-export common types and utilities

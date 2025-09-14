@@ -28,6 +28,7 @@ export { WebSocketMiddlewareChain } from "./base/middlewareChain/WebSocketMiddle
 // =============================================================================
 // HTTP MIDDLEWARE CLASSES
 // =============================================================================
+export { AuditHttpMiddleware } from "./audit/audit.http.middleware";
 export { AuthHttpMiddleware } from "./auth/auth.http.middleware";
 export { CorsHttpMiddleware } from "./cors/cors.http.middleware";
 export { RateLimitHttpMiddleware } from "./rateLimit/rateLimit.http.Middleware";
@@ -39,6 +40,7 @@ export { PrometheusHttpMiddleware } from "./prometheus/prometheus.http.middlewar
 // =============================================================================
 // WEBSOCKET MIDDLEWARE CLASSES
 // =============================================================================
+export { AuditWebSocketMiddleware } from "./audit/audit.websocket.middleware";
 export { AuthWebSocketMiddleware } from "./auth/auth.websocket.middleware";
 export { CorsWebSocketMiddleware } from "./cors/cors.websocket.middleware";
 export { RateLimitWebSocketMiddleware } from "./rateLimit/rateLimit.websocket.middleware";
@@ -50,6 +52,7 @@ export { PrometheusWebSocketMiddleware } from "./prometheus/prometheus.websocket
 // =============================================================================
 // CONFIGURATION TYPES
 // =============================================================================
+export type { AuditHttpMiddlewareConfig } from "./audit/audit.http.middleware";
 export type { AuthHttpMiddlewareConfig } from "./auth/auth.http.middleware";
 export type { AuthWebSocketMiddlewareConfig } from "./auth/auth.websocket.middleware";
 export type { CorsHttpMiddlewareConfig } from "./cors/cors.http.middleware";
@@ -73,6 +76,7 @@ export { ElysiaMiddlewareAdapter } from "./adapters/ElysiaMiddlewareAdapter";
 // =============================================================================
 // MODULE EXPORTS (for compatibility)
 // =============================================================================
+export * from "./audit";
 export * from "./auth";
 export * from "./cors";
 export * from "./error";
@@ -80,4 +84,3 @@ export * from "./logging";
 export * from "./prometheus";
 export * from "./rateLimit";
 export * from "./security";
-export * from "./audit";

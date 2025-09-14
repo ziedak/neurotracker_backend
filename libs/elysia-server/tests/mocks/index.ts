@@ -105,29 +105,15 @@ interface MockElysiaContext {
   store: Record<string, unknown>;
 }
 
-// Mock timer manager interface
-interface MockTimerManager {
-  setTimeout: jest.MockedFunction<
-    (callback: () => void, delay?: number) => NodeJS.Timeout
-  >;
-  clearTimeout: jest.MockedFunction<(timeoutId: NodeJS.Timeout) => void>;
-  setInterval: jest.MockedFunction<
-    (callback: () => void, delay?: number) => NodeJS.Timeout
-  >;
-  clearInterval: jest.MockedFunction<(intervalId: NodeJS.Timeout) => void>;
-  getActiveTimers: jest.MockedFunction<() => unknown[]>;
-  cleanup: jest.MockedFunction<() => void>;
-}
-
-// Mock scheduler interface
+// Mock scheduler interface (replacing TimerManager)
 interface MockScheduler {
-  setTimeout: jest.MockedFunction<
-    (callback: () => void, delay: number) => unknown
-  >;
   setInterval: jest.MockedFunction<
-    (callback: () => void, delay: number) => unknown
+    (key: string, ms: number, callback: () => void) => void
   >;
-  clear: jest.MockedFunction<(id: unknown) => void>;
+  setTimeout: jest.MockedFunction<
+    (key: string, ms: number, callback: () => void) => void
+  >;
+  clear: jest.MockedFunction<(key: string) => void>;
   clearAll: jest.MockedFunction<() => void>;
 }
 
@@ -446,20 +432,10 @@ export const createMockLogger = (): ILogger => ({
   setLevel: jest.fn(),
 });
 
-// Mock timer manager
-export const createMockTimerManager = (): MockTimerManager => ({
-  setTimeout: jest.fn().mockReturnValue({} as NodeJS.Timeout),
-  clearTimeout: jest.fn(),
-  setInterval: jest.fn().mockReturnValue({} as NodeJS.Timeout),
-  clearInterval: jest.fn(),
-  getActiveTimers: jest.fn().mockReturnValue([]),
-  cleanup: jest.fn(),
-});
-
-// Mock scheduler
+// Mock scheduler (replacing timer manager)
 export const createMockScheduler = (): MockScheduler => ({
-  setTimeout: jest.fn(),
   setInterval: jest.fn(),
+  setTimeout: jest.fn(),
   clear: jest.fn(),
   clearAll: jest.fn(),
 });

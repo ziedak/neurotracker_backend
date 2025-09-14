@@ -8,7 +8,7 @@ import {
   createAdvancedElysiaServer,
   createProductionServer,
   createDevelopmentServer,
-} from "../src/advanced-server";
+} from "../src/server";
 import { ServerConfig } from "../src/config";
 import {
   createMockWebSocket,
@@ -16,13 +16,14 @@ import {
   createMockMetricsCollector,
   resetAllMocks,
   setupCommonMocks,
+  type IMetricsCollector,
 } from "./mocks";
 
 describe("AdvancedElysiaServerBuilder", () => {
   let mockConfig: ServerConfig;
-  let mockMetrics: any;
+  let mockMetrics: IMetricsCollector;
   let builder: AdvancedElysiaServerBuilder;
-  let mockWs: any;
+  let mockWs: MockWebSocket;
 
   beforeEach(() => {
     setupCommonMocks();
@@ -42,6 +43,8 @@ describe("AdvancedElysiaServerBuilder", () => {
   afterEach(() => {
     jest.clearAllTimers();
     jest.clearAllMocks();
+    // Cleanup builder state to prevent test interference
+    builder.cleanup();
   });
 
   describe("Constructor", () => {
@@ -151,8 +154,14 @@ describe("AdvancedElysiaServerBuilder", () => {
 
     it("should handle invalid factory pattern gracefully", () => {
       const middlewareConfig = {
-        http: { enabled: true, factoryPattern: "INVALID_PATTERN" as any },
-        websocket: { enabled: true, factoryPattern: "INVALID_PATTERN" as any },
+        http: {
+          enabled: true,
+          factoryPattern: "NON_EXISTENT_PATTERN" as "PRODUCTION_HTTP",
+        },
+        websocket: {
+          enabled: true,
+          factoryPattern: "NON_EXISTENT_PATTERN" as "PRODUCTION_WS",
+        },
       };
 
       expect(() => {
@@ -519,7 +528,11 @@ describe("AdvancedElysiaServerBuilder", () => {
     });
 
     it("should handle toggle of non-existent middleware type", () => {
-      const result = builder.toggleMiddleware("invalid" as any, "test", true);
+      const result = builder.toggleMiddleware(
+        "invalid" as "http",
+        "test",
+        true
+      );
       expect(result).toBe(false);
     });
   });
@@ -582,7 +595,7 @@ describe("AdvancedElysiaServerBuilder", () => {
   describe("Error Handling", () => {
     it("should handle middleware chain initialization errors", () => {
       const invalidConfig = {
-        http: { enabled: true, factoryPattern: "INVALID" as any },
+        http: { enabled: true, factoryPattern: "INVALID" as "PRODUCTION_HTTP" },
       };
 
       expect(() => {

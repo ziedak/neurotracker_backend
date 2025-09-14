@@ -26,11 +26,11 @@ export interface AuthConfig extends MiddlewareOptions {
  */
 
 /**
- * Validation configuration
+ * Validation configuration with strict typing
  */
 export interface ValidationConfig extends MiddlewareOptions {
   engine: "zod" | "rules";
-  schemas?: Record<string, any>;
+  schemas?: Record<string, unknown>;
   maxRequestSize?: number;
   sanitizeInputs?: boolean;
   strictMode?: boolean;
@@ -40,7 +40,7 @@ export interface ValidationConfig extends MiddlewareOptions {
 }
 
 /**
- * Audit configuration
+ * Audit configuration with strict storage typing
  */
 export interface AuditConfig extends MiddlewareOptions {
   enableDetailedLogging?: boolean;
@@ -78,13 +78,13 @@ export interface LoggingConfig extends MiddlewareOptions {
 }
 
 /**
- * Error handling configuration
+ * Error handling configuration with proper error mapping
  */
 export interface ErrorConfig extends MiddlewareOptions {
   includeStack?: boolean;
   logErrors?: boolean;
   exposeInternalErrors?: boolean;
-  customErrorMapper?: (error: Error) => any;
+  customErrorMapper?: (error: Error) => unknown;
 }
 
 /**
@@ -101,12 +101,12 @@ export interface CorsConfig extends MiddlewareOptions {
 }
 
 /**
- * Security configuration
+ * Security configuration with proper CSP typing
  */
 export interface SecurityConfig extends MiddlewareOptions {
   enableHelmet?: boolean;
   rateLimiting?: boolean;
-  contentSecurityPolicy?: Record<string, any>;
+  contentSecurityPolicy?: Record<string, unknown>;
   xssProtection?: boolean;
   noSniff?: boolean;
   frameguard?: boolean;
@@ -124,7 +124,7 @@ export interface PrometheusConfig extends MiddlewareOptions {
 }
 
 /**
- * Advanced middleware configuration for the server
+ * Advanced middleware configuration for the server with strict typing
  */
 export interface AdvancedMiddlewareConfig {
   // HTTP/WebSocket chain enablement
@@ -137,19 +137,19 @@ export interface AdvancedMiddlewareConfig {
     factoryPattern?: "PRODUCTION_WS" | "BASIC_WS_SECURITY" | "DEVELOPMENT";
   };
 
-  // Custom middleware chains
-  customHttpChain?: any[]; // HttpChainItem[] - avoiding circular dependency
-  customWsChain?: any[]; // WebSocketChainItem[] - avoiding circular dependency
+  // Custom middleware chains - using unknown instead of any
+  customHttpChain?: unknown[]; // HttpChainItem[] - avoiding circular dependency
+  customWsChain?: unknown[]; // WebSocketChainItem[] - avoiding circular dependency
 
-  // Individual middleware configs with config property
-  auth?: AuthConfig & { config?: any };
-  cors?: CorsConfig & { config?: any };
-  rateLimit?: MiddlewareOptions & { config?: any };
-  security?: SecurityConfig & { config?: any };
-  logging?: LoggingConfig & { config?: any };
-  prometheus?: PrometheusConfig & { config?: any };
-  metrics?: PrometheusConfig & { config?: any }; // alias for prometheus
-  error?: ErrorConfig & { config?: any };
-  audit?: AuditConfig & { config?: any };
-  validation?: ValidationConfig & { config?: any };
+  // Individual middleware configs with strict config property typing
+  auth?: AuthConfig & { config?: Record<string, unknown> };
+  cors?: CorsConfig & { config?: Record<string, unknown> };
+  rateLimit?: MiddlewareOptions & { config?: Record<string, unknown> };
+  security?: SecurityConfig & { config?: Record<string, unknown> };
+  logging?: LoggingConfig & { config?: Record<string, unknown> };
+  prometheus?: PrometheusConfig & { config?: Record<string, unknown> };
+  metrics?: PrometheusConfig & { config?: Record<string, unknown> }; // alias for prometheus
+  error?: ErrorConfig & { config?: Record<string, unknown> };
+  audit?: AuditConfig & { config?: Record<string, unknown> };
+  validation?: ValidationConfig & { config?: Record<string, unknown> };
 }

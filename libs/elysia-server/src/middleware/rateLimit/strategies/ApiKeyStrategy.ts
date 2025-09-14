@@ -95,7 +95,8 @@ export class ApiKeyStrategy implements RateLimitStrategy {
    * Extract API key from user context
    */
   private extractFromUser(context: MiddlewareContext): string | null {
-    return context.user?.["apiKey"] || null;
+    const apiKey = context.user?.["apiKey"] as string | undefined;
+    return apiKey || null;
   }
 
   /**

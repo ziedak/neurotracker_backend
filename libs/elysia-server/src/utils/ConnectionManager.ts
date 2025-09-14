@@ -101,6 +101,9 @@ export class ConnectionManager extends EventEmitter {
   constructor(config: Partial<ConnectionManagerConfig> = {}) {
     super();
 
+    // Set max listeners to prevent memory leak warnings
+    this.setMaxListeners(50);
+
     this.config = {
       maxConnections: 10000,
       connectionTtl: 30 * 60 * 1000, // 30 minutes
@@ -246,6 +249,7 @@ export class ConnectionManager extends EventEmitter {
         if (userConns.size === 0) {
           this.userConnections.delete(connection.userId);
           // Return the empty set to the pool
+          userConns.clear();
           this.stringSetPool.release(userConns);
         }
       }
@@ -255,6 +259,9 @@ export class ConnectionManager extends EventEmitter {
     for (const roomId of connection.rooms) {
       this.leaveRoom(connectionId, roomId);
     }
+
+    // Cleanup connection resources before cache removal
+    this.cleanupConnectionResources(connection);
 
     // Remove from connections cache (this will trigger disposal)
     this.connections.delete(connectionId);
@@ -271,6 +278,55 @@ export class ConnectionManager extends EventEmitter {
     });
 
     return true;
+  }
+
+  /**
+   * Clean up connection resources to prevent memory leaks
+   */
+  private cleanupConnectionResources(connection: Connection): void {
+    try {
+      // Close WebSocket connection safely
+      if (connection.socket) {
+        if (typeof connection.socket.close === "function") {
+          connection.socket.close(1000, "Connection removed");
+        }
+
+        // Remove any event listeners if the socket has them
+        if (
+          "removeAllListeners" in connection.socket &&
+          typeof connection.socket["removeAllListeners"] === "function"
+        ) {
+          try {
+            (connection.socket as unknown as { removeAllListeners(): void })[
+              "removeAllListeners"
+            ]();
+          } catch (listenerError) {
+            this.logger.debug(
+              "Could not remove socket listeners",
+              listenerError as Error
+            );
+          }
+        }
+      }
+
+      // Clear arrays and sets to prevent references
+      connection.permissions.length = 0;
+      connection.rooms.clear();
+
+      // Mark connection as cleaned up
+      Object.defineProperty(connection, "cleaned", {
+        value: true,
+        writable: false,
+      });
+    } catch (error) {
+      this.logger.error(
+        "Error cleaning up connection resources",
+        error as Error,
+        {
+          connectionId: connection.id,
+        }
+      );
+    }
   }
 
   /**
@@ -520,15 +576,46 @@ export class ConnectionManager extends EventEmitter {
    * Handle connection disposal from LRU cache
    */
   private handleConnectionDisposal(connection: Connection): void {
-    // Return pooled objects
-    this.stringSetPool.release(connection.rooms);
-    this.metadataPool.release(connection.metadata);
+    try {
+      // Safely close WebSocket connection
+      if (connection.socket && typeof connection.socket.close === "function") {
+        try {
+          connection.socket.close(1000, "Connection disposed by cache");
+        } catch (closeError) {
+          this.logger.warn(
+            "Error closing WebSocket during disposal",
+            closeError as Error
+          );
+        }
+      }
 
-    this.emit("connection:disposed", connection);
-    this.logger.debug("Connection disposed by LRU cache", {
-      connectionId: connection.id,
-      userId: connection.userId,
-    });
+      // Clear circular references
+      if (connection.rooms) {
+        connection.rooms.clear();
+        this.stringSetPool.release(connection.rooms);
+      }
+
+      if (connection.metadata) {
+        // Clear all properties to break potential circular references
+        Object.keys(connection.metadata).forEach((key) => {
+          delete connection.metadata[key as keyof ConnectionMetadata];
+        });
+        this.metadataPool.release(connection.metadata);
+      }
+
+      // Clear permissions array
+      connection.permissions.length = 0;
+
+      this.emit("connection:disposed", connection);
+      this.logger.debug("Connection disposed by LRU cache", {
+        connectionId: connection.id,
+        userId: connection.userId,
+      });
+    } catch (error) {
+      this.logger.error("Error during connection disposal", error as Error, {
+        connectionId: connection.id,
+      });
+    }
   }
 
   /**
@@ -538,16 +625,32 @@ export class ConnectionManager extends EventEmitter {
     connectionSet: Set<string>,
     userId: string
   ): void {
-    this.stringSetPool.release(connectionSet);
-    this.logger.debug("User connections disposed by LRU cache", { userId });
+    try {
+      connectionSet.clear();
+      this.stringSetPool.release(connectionSet);
+      this.logger.debug("User connections disposed by LRU cache", { userId });
+    } catch (error) {
+      this.logger.error(
+        "Error during user connections disposal",
+        error as Error,
+        { userId }
+      );
+    }
   }
 
   /**
    * Handle room disposal
    */
   private handleRoomDisposal(memberSet: Set<string>, roomId: string): void {
-    this.stringSetPool.release(memberSet);
-    this.emit("room:disposed", roomId);
-    this.logger.debug("Room disposed by LRU cache", { roomId });
+    try {
+      memberSet.clear();
+      this.stringSetPool.release(memberSet);
+      this.emit("room:disposed", roomId);
+      this.logger.debug("Room disposed by LRU cache", { roomId });
+    } catch (error) {
+      this.logger.error("Error during room disposal", error as Error, {
+        roomId,
+      });
+    }
   }
 }
