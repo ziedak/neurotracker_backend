@@ -143,7 +143,7 @@ export class MetricsCollector implements IMetricsCollector {
     value = 1,
     labels?: Record<string, string>
   ): Promise<void> {
-    this.collector.recordCounter(name, value, labels);
+    await this.collector.recordCounter(name, value, labels);
   }
 
   async recordTimer(
@@ -151,7 +151,7 @@ export class MetricsCollector implements IMetricsCollector {
     value: number,
     labels?: Record<string, string>
   ): Promise<void> {
-    this.collector.recordTimer(name, value, labels);
+    await this.collector.recordTimer(name, value, labels);
   }
 
   async recordGauge(
@@ -159,7 +159,7 @@ export class MetricsCollector implements IMetricsCollector {
     value: number,
     labels?: Record<string, string>
   ): Promise<void> {
-    this.collector.recordGauge(name, value, labels);
+    await this.collector.recordGauge(name, value, labels);
   }
 
   async recordHistogram(
@@ -168,7 +168,7 @@ export class MetricsCollector implements IMetricsCollector {
     labels?: Record<string, string>,
     buckets?: number[]
   ): Promise<void> {
-    this.collector.recordHistogram(name, value, labels, buckets);
+    await this.collector.recordHistogram(name, value, labels, buckets);
   }
 
   async recordSummary(
@@ -176,7 +176,7 @@ export class MetricsCollector implements IMetricsCollector {
     value: number,
     labels?: Record<string, string>
   ): Promise<void> {
-    this.collector.recordSummary(name, value, labels);
+    await this.collector.recordSummary(name, value, labels);
   }
 
   async getMetrics(): Promise<string> {

@@ -49,7 +49,7 @@ module.exports = [
       "@typescript-eslint/prefer-string-starts-ends-with": "error",
 
       // General strict rules
-      "no-console": ["warn", { allow: ["error"] }],
+      "no-console": ["warn", { allow: ["error", "warn", "info"] }],
       "no-debugger": "error",
       "no-alert": "error",
       "no-eval": "error",

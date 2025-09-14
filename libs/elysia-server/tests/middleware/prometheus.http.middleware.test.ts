@@ -19,6 +19,15 @@ const mockMetricsCollector = {
   recordCounter: jest.fn(),
   recordTimer: jest.fn(),
   recordGauge: jest.fn(),
+  recordHistogram: jest.fn(),
+  recordSummary: jest.fn(),
+  getMetrics: jest.fn().mockResolvedValue("# Test metrics"),
+  recordApiRequest: jest.fn(),
+  recordDatabaseOperation: jest.fn(),
+  recordAuthOperation: jest.fn(),
+  recordWebSocketActivity: jest.fn(),
+  recordNodeMetrics: jest.fn(),
+  measureEventLoopLag: jest.fn(),
 } as jest.Mocked<IMetricsCollector>;
 
 describe("PrometheusHttpMiddleware", () => {
@@ -495,26 +504,43 @@ describe("PrometheusHttpMiddleware", () => {
 
   describe("Default Metrics Collection", () => {
     it("should collect default Node.js metrics when enabled", async () => {
-      // Mock the default metrics collection
-      const registerSpy = jest.spyOn(require("prom-client"), "register");
-
       const defaultMetricsMiddleware = new PrometheusHttpMiddleware(
         mockMetricsCollector,
         {
+          name: "test-default-metrics",
+          enabled: true,
+          priority: 60,
           collectDefaultMetrics: true,
+          enableNodeMetrics: true,
+          nodeMetricsSampleRate: 1.0, // Ensure it always samples
         }
       );
 
       await defaultMetricsMiddleware["execute"](mockContext, nextFunction);
 
-      // Verify that default metrics are being collected
-      expect(registerSpy).toHaveBeenCalled();
+      // Verify that runtime metrics collection was attempted
+      // Should record memory metrics with runtime label
+      expect(mockMetricsCollector.recordGauge).toHaveBeenCalledWith(
+        "elysia_runtime_memory_usage_bytes",
+        expect.any(Number),
+        expect.objectContaining({
+          service: "http-service",
+          runtime: "nodejs",
+          type: "rss",
+        })
+      );
+
+      // Event loop lag may be recorded asynchronously, so we don't assert it specifically
+      // but we can check that some runtime metrics were recorded
     });
 
     it("should skip default metrics when disabled", async () => {
       const noDefaultMiddleware = new PrometheusHttpMiddleware(
         mockMetricsCollector,
         {
+          name: "test-no-default",
+          enabled: true,
+          priority: 60,
           collectDefaultMetrics: false,
         }
       );
@@ -560,6 +586,9 @@ describe("PrometheusHttpMiddleware", () => {
     it("should reject invalid buckets", () => {
       expect(() => {
         new PrometheusHttpMiddleware(mockMetricsCollector, {
+          name: "test-invalid-buckets",
+          enabled: true,
+          priority: 60,
           buckets: [0.1, -0.5, 1],
         });
       }).toThrow("Prometheus buckets must contain only positive numbers");
@@ -568,6 +597,9 @@ describe("PrometheusHttpMiddleware", () => {
     it("should reject invalid excludePaths", () => {
       expect(() => {
         new PrometheusHttpMiddleware(mockMetricsCollector, {
+          name: "test-invalid-paths",
+          enabled: true,
+          priority: 60,
           excludePaths: ["invalid-path"],
         });
       }).toThrow("Prometheus excludePaths must start with '/'");
@@ -576,6 +608,9 @@ describe("PrometheusHttpMiddleware", () => {
     it("should reject invalid metricPrefix", () => {
       expect(() => {
         new PrometheusHttpMiddleware(mockMetricsCollector, {
+          name: "test-invalid-prefix",
+          enabled: true,
+          priority: 60,
           metricPrefix: "invalid-prefix-with-dashes",
         });
       }).toThrow(
@@ -664,7 +699,10 @@ describe("PrometheusHttpMiddleware", () => {
       const registryMiddleware = new PrometheusHttpMiddleware(
         mockMetricsCollector,
         {
-          registry: mockRegistry as any,
+          name: "test-registry",
+          enabled: true,
+          priority: 60,
+          registry: mockRegistry,
         }
       );
 
@@ -681,7 +719,10 @@ describe("PrometheusHttpMiddleware", () => {
       const registryMiddleware = new PrometheusHttpMiddleware(
         mockMetricsCollector,
         {
-          registry: mockRegistry as any,
+          name: "test-registry-ops",
+          enabled: true,
+          priority: 60,
+          registry: mockRegistry,
         }
       );
 

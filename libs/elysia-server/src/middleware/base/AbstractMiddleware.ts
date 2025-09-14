@@ -109,7 +109,9 @@ export abstract class AbstractMiddleware<
    * Override in subclasses for protocol-specific information
    * @param context - Protocol-specific context
    */
-  protected abstract extractContextInfo(context: TContext): Record<string, unknown>;
+  protected abstract extractContextInfo(
+    context: TContext
+  ): Record<string, unknown>;
 
   /**
    * Record a metric counter with consistent tagging
@@ -190,6 +192,32 @@ export abstract class AbstractMiddleware<
   }
 
   /**
+   * Record a gauge metric with consistent tagging
+   * @param name - Metric name
+   * @param value - Metric value
+   * @param tags - Additional tags
+   */
+  protected async recordGauge(
+    name: string,
+    value: number,
+    tags?: Record<string, string>
+  ): Promise<void> {
+    if (!this.metrics) return;
+
+    try {
+      await this.metrics.recordGauge(name, value, {
+        middleware: this.config.name,
+        ...tags,
+      });
+    } catch (error) {
+      this.logger.warn("Failed to record gauge", {
+        name,
+        error: (error as Error).message,
+      });
+    }
+  }
+
+  /**
    * Sanitize object by removing or masking sensitive fields
    * @param obj - Object to sanitize
    * @param sensitiveFields - Additional sensitive field patterns
@@ -219,7 +247,9 @@ export abstract class AbstractMiddleware<
 
     // Handle arrays
     if (Array.isArray(obj)) {
-      return obj.map((item) => this.sanitizeObject(item, sensitiveFields, visited));
+      return obj.map((item) =>
+        this.sanitizeObject(item, sensitiveFields, visited)
+      );
     }
 
     // Handle plain objects
@@ -229,7 +259,7 @@ export abstract class AbstractMiddleware<
 
     // Pre-compile regex for faster matching (union of patterns)
     const sensitiveRegex = new RegExp(
-      allSensitive.map(field => field.toLowerCase()).join("|"),
+      allSensitive.map((field) => field.toLowerCase()).join("|"),
       "i"
     );
 
