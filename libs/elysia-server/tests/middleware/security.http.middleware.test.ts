@@ -548,10 +548,15 @@ describe("SecurityHttpMiddleware", () => {
         mockMetricsCollector,
         {}
       );
-      const originalSetSecurityHeaders = errorMiddleware["setSecurityHeaders"];
-      errorMiddleware["setSecurityHeaders"] = jest
-        .fn()
-        .mockRejectedValue(new Error("Header error"));
+
+      // Spy on the private method and mock it to throw
+      const setSecurityHeadersSpy = jest.spyOn(
+        errorMiddleware as unknown as { setSecurityHeaders: () => void },
+        "setSecurityHeaders"
+      );
+      setSecurityHeadersSpy.mockImplementation(() => {
+        throw new Error("Header error");
+      });
 
       await expect(
         errorMiddleware["execute"](mockContext, nextFunction)
@@ -561,6 +566,9 @@ describe("SecurityHttpMiddleware", () => {
         "security_middleware_error_duration",
         expect.any(Number)
       );
+
+      // Restore the spy
+      setSecurityHeadersSpy.mockRestore();
     });
 
     it("should continue processing even if header setting fails", async () => {

@@ -218,6 +218,7 @@ export class ConnectionManager extends EventEmitter {
 
     // Update metrics
     this.metrics.connectionsCreated++;
+    this.metrics.totalConnections++;
     this.metrics.activeConnections = this.connections.size;
     this.metrics.connectionsByUser = this.userConnections.size;
     this.updateMemoryMetrics();
@@ -482,6 +483,12 @@ export class ConnectionManager extends EventEmitter {
     // Clear object pools
     this.stringSetPool.clear();
     this.metadataPool.clear();
+
+    // Reset metrics after shutdown
+    this.metrics.activeConnections = 0;
+    this.metrics.connectionsByUser = 0;
+    this.metrics.roomCount = 0;
+    this.updateMemoryMetrics();
 
     this.logger.info("Connection manager shutdown complete");
   }

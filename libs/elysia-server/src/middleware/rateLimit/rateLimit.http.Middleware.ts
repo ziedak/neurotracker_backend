@@ -200,9 +200,18 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
     next: () => Promise<void>
   ): Promise<void> {
     const startTime = performance.now();
-    const requestId = this.generateRequestId();
+    const requestId = this.getRequestId(context);
 
     try {
+      // Check if request should be skipped based on path
+      if (this.shouldSkip(context)) {
+        this.logger.debug("Path matched skip pattern, skipping rate limiting", {
+          path: context.request.url,
+        });
+        await next();
+        return;
+      }
+
       // Generate rate limit key
       const key = this.generateKey(context);
 
@@ -233,12 +242,18 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
         throw error;
       } finally {
         // Update metrics based on success/failure rules
-        await this.updateRequestMetrics(key, requestSuccessful, statusCode);
+        await this.updateRequestMetrics(
+          key,
+          requestSuccessful,
+          statusCode,
+          result
+        );
 
         // Update headers with final count if needed
         if (this.config.standardHeaders) {
-          const updatedResult = await this.getRateLimitStatus(key);
-          this.setRateLimitHeaders(context, updatedResult);
+          // Use the original result instead of calling checkRateLimit again
+          // to avoid double counting the request
+          this.setRateLimitHeaders(context, result);
         }
       }
 
@@ -250,14 +265,42 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
       });
     } catch (error) {
       const duration = performance.now() - startTime;
-      await this.recordMetric("rate_limit_error_duration", duration, {
+      await this.recordTimer("rate_limit_error_duration", duration, {
         error_type: error instanceof Error ? error.constructor.name : "unknown",
       });
+
+      // Record error counter for validation errors and rate limiter errors
+      if (error instanceof Error) {
+        // Record metrics for validation errors
+        if (
+          error.message === "User not authenticated" ||
+          error.message === "API key not provided"
+        ) {
+          await this.recordMetric("rate_limit_error", 1, {
+            error_type: error.message,
+          });
+        }
+        // Record metrics for rate limiter errors (when configured to fail open)
+        else if (this.config.skipOnError) {
+          await this.recordMetric("rate_limit_error", 1, {
+            error_type: "rate_limiter_error",
+          });
+        }
+      }
 
       this.logger.error("Rate limit middleware error", error as Error, {
         requestId,
         duration: Math.round(duration),
       });
+
+      // Re-throw validation errors for missing authentication data
+      if (
+        error instanceof Error &&
+        (error.message === "User not authenticated" ||
+          error.message === "API key not provided")
+      ) {
+        throw error;
+      }
 
       // Fail open - allow request on error if configured
       if (this.config.skipOnError) {
@@ -271,7 +314,7 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
       }
     } finally {
       const executionTime = performance.now() - startTime;
-      await this.recordMetric("rate_limit_execution_time", executionTime, {
+      await this.recordTimer("rate_limit_execution_time", executionTime, {
         algorithm: this.config.algorithm,
         keyStrategy: this.config.keyStrategy,
       });
@@ -356,14 +399,52 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
       if (!ipStrategy) {
         throw new Error("IP strategy not found - rate limiting cannot proceed");
       }
-      return ipStrategy.generateKey(context);
+      const baseKey = ipStrategy.generateKey(context);
+      const prefix =
+        this.config.redis?.keyPrefix ??
+        DEFAULT_RATE_LIMIT_OPTIONS.REDIS_KEY_PREFIX;
+      return `${prefix}ip:${baseKey}`;
+    }
+
+    // Validate required data for specific strategies
+    if (this.config.keyStrategy === "user") {
+      const userId = this.extractUserId(context);
+      if (!userId) {
+        throw new Error("User not authenticated");
+      }
+    }
+
+    if (this.config.keyStrategy === "apiKey") {
+      const apiKey = this.extractApiKey(context);
+      if (!apiKey) {
+        throw new Error("API key not provided");
+      }
     }
 
     const baseKey = strategy.generateKey(context);
     const prefix =
       this.config.redis?.keyPrefix ??
       DEFAULT_RATE_LIMIT_OPTIONS.REDIS_KEY_PREFIX;
-    return `${prefix}${this.config.keyStrategy}:${baseKey}`;
+    const strategyPrefix = this.getStrategyPrefix(this.config.keyStrategy);
+    return `${prefix}${strategyPrefix}:${baseKey}`;
+  }
+
+  /**
+   * Get the appropriate prefix for a strategy type
+   */
+  private getStrategyPrefix(strategy: string): string {
+    switch (strategy) {
+      case "ip":
+        return "ip";
+      case "user":
+        return "user";
+      case "apiKey":
+        return "apiKey";
+      case "custom":
+        return "custom";
+      default:
+        return strategy;
+    }
   }
 
   /**
@@ -418,21 +499,6 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
   }
 
   /**
-   * Get current rate limit status without incrementing
-   */
-  private async getRateLimitStatus(key: string): Promise<RateLimitResult> {
-    // Note: The adapter's checkRateLimit method increments the counter
-    // For getting status without incrementing, we'd need a separate method
-    // For now, we'll use the same method as it's atomic
-    return this.rateLimiter.checkRateLimit(
-      key,
-      this.config.maxRequests,
-      this.config.windowMs,
-      this.config.algorithm
-    );
-  }
-
-  /**
    * Set standard rate limit headers
    */
   private setRateLimitHeaders(
@@ -458,7 +524,8 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
   private async updateRequestMetrics(
     key: string,
     successful: boolean,
-    statusCode: number
+    statusCode: number,
+    rateLimitResult: RateLimitResult
   ): Promise<void> {
     const shouldCount = this.shouldCountRequest(successful, statusCode);
 
@@ -466,20 +533,15 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
       await this.recordRateLimitMetrics("request_counted", {
         successful: successful.toString(),
         statusCode: statusCode.toString(),
+        key, // Include the rate limit key for tracking
       });
 
-      // Warning if approaching limit
-      try {
-        const status = await this.getRateLimitStatus(key);
-        if (status.remaining < this.config.maxRequests * 0.2) {
-          await this.recordRateLimitMetrics("approaching_limit", {
-            remaining: status.remaining.toString(),
-            limit: status.limit.toString(),
-          });
-        }
-      } catch (error) {
-        this.logger.warn("Failed to check rate limit status for warning", {
-          error: error instanceof Error ? error.message : "unknown",
+      // Warning if approaching limit - use the existing result to avoid double calls
+      if (rateLimitResult.remaining < this.config.maxRequests * 0.2) {
+        await this.recordRateLimitMetrics("approaching_limit", {
+          remaining: rateLimitResult.remaining.toString(),
+          limit: rateLimitResult.limit.toString(),
+          key, // Include the rate limit key for tracking
         });
       }
     }
@@ -501,10 +563,101 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
   }
 
   /**
-   * Generate unique request ID
+   * Check if the current request should skip rate limiting
    */
-  private generateRequestId(): string {
-    return `req_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+  protected override shouldSkip(context: MiddlewareContext): boolean {
+    // Check skipPaths configuration
+    if (this.config.skipPaths?.length) {
+      // Get the path from context.path first (test compatibility), then request.url
+      const path =
+        (context as MiddlewareContext & { path?: string }).path?.split(
+          "?"
+        )[0] ||
+        context.request.url?.split("?")[0] ||
+        "";
+
+      return this.config.skipPaths.some((skipPath) => {
+        if (skipPath.endsWith("*")) {
+          return path.startsWith(skipPath.slice(0, -1));
+        }
+        return path === skipPath || path.startsWith(`${skipPath}/`);
+      });
+    }
+
+    return false;
+  }
+  private extractUserId(context: MiddlewareContext): string | null {
+    // Check context.user (most common pattern)
+    if (context.user?.id && !context.user?.anonymous) {
+      return String(context.user.id);
+    }
+
+    // Check context.userId (alternative pattern)
+    if (context["userId"] && context["userId"] !== "anonymous") {
+      return String(context["userId"]);
+    }
+
+    // Check JWT payload (if JWT is used)
+    const jwt = context["jwt"] as
+      | { payload?: { sub?: string; user_id?: string } }
+      | undefined;
+    if (jwt?.payload?.sub) {
+      return String(jwt.payload.sub);
+    }
+
+    // Check JWT payload user_id (alternative JWT pattern)
+    if (jwt?.payload?.user_id) {
+      return String(jwt.payload.user_id);
+    }
+
+    // Check authentication object
+    const auth = context["auth"] as { userId?: string } | undefined;
+    if (auth?.userId) {
+      return String(auth.userId);
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract API key from context for validation
+   */
+  private extractApiKey(context: MiddlewareContext): string | null {
+    const { request } = context;
+    const { headers } = request;
+
+    // Try standard API key headers
+    const apiKey = headers["x-api-key"] || headers["api-key"];
+    if (apiKey) return String(apiKey);
+
+    // Try Authorization header
+    const authHeader = headers["authorization"];
+    if (authHeader) {
+      const apiKeyMatch = authHeader.match(/^ApiKey\s+(.+)$/i);
+      if (apiKeyMatch) return apiKeyMatch[1] || null;
+
+      const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+      if (bearerMatch?.[1] && this.looksLikeApiKey(bearerMatch[1])) {
+        return bearerMatch[1];
+      }
+    }
+
+    // Try user context
+    const userKey = context.user?.["apiKey"] as string | undefined;
+    if (userKey) return userKey;
+
+    return null;
+  }
+
+  /**
+   * Check if a string looks like an API key
+   */
+  private looksLikeApiKey(token: string): boolean {
+    return (
+      token.length >= 20 &&
+      !token.includes(".") &&
+      /^[a-zA-Z0-9_-]+$/.test(token)
+    );
   }
 
   /**

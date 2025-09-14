@@ -760,7 +760,7 @@ export class AuditWebSocketMiddleware extends BaseWebSocketMiddleware<AuditWebSo
 
   private extractResourceId(context: WebSocketContext): string | undefined {
     // Try to extract resource ID from message payload
-    const {payload} = context.message;
+    const { payload } = context.message;
     if (payload && typeof payload === "object") {
       const payloadObj = payload as Record<string, unknown>;
       return (
@@ -945,7 +945,7 @@ export class AuditWebSocketMiddleware extends BaseWebSocketMiddleware<AuditWebSo
   /**
    * Cleanup method - call when shutting down
    */
-  async cleanup(): Promise<void> {
+  override async cleanup(): Promise<void> {
     // Clear batch timer
     if (this.batchFlushTimer) {
       clearInterval(this.batchFlushTimer);

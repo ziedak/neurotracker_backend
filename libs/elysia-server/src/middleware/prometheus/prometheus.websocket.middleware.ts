@@ -104,7 +104,7 @@ export class PrometheusWebSocketMiddleware extends BaseWebSocketMiddleware<Prome
 
     try {
       // Update connection activity
-      await this.updateConnectionActivity(context);
+      this.updateConnectionActivity(context);
 
       // Record message metrics
       if (this.config.enableMessageMetrics) {
@@ -283,9 +283,7 @@ export class PrometheusWebSocketMiddleware extends BaseWebSocketMiddleware<Prome
   /**
    * Update connection activity and message tracking
    */
-  private async updateConnectionActivity(
-    context: WebSocketContext
-  ): Promise<void> {
+  private updateConnectionActivity(context: WebSocketContext): void {
     const connectionMetrics = this.connections.get(context.connectionId);
     if (!connectionMetrics) {
       return;
@@ -376,7 +374,7 @@ export class PrometheusWebSocketMiddleware extends BaseWebSocketMiddleware<Prome
   /**
    * Calculate message size in bytes
    */
-  private getMessageSize(message: any): number {
+  private getMessageSize(message: unknown): number {
     try {
       if (typeof message === "string") {
         return Buffer.byteLength(message, "utf8");
@@ -528,7 +526,7 @@ export class PrometheusWebSocketMiddleware extends BaseWebSocketMiddleware<Prome
   /**
    * Cleanup resources when middleware is destroyed
    */
-  public async cleanup(): Promise<void> {
+  public override async cleanup(): Promise<void> {
     if (this.metricsFlushTimer) {
       clearInterval(this.metricsFlushTimer);
       this.metricsFlushTimer = undefined;

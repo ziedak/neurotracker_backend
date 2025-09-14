@@ -20,15 +20,13 @@ export class ApiKeyStrategy implements RateLimitStrategy {
     const headers = this.cacheHeaders(context.request.headers);
     const apiKey = this.extractApiKey(headers, context);
     if (apiKey) {
-      // Use first 10 characters of API key for privacy
-      const keyPrefix = apiKey.substring(0, 10);
-      return `api:${keyPrefix}`;
+      return apiKey;
     }
     // Fallback to IP-based strategy
     const ip = ApiKeyStrategy.extractClientIp(headers, context);
     // Example logging usage of maskApiKey (if logger available)
     // logger?.warn(`API key missing, falling back to IP: ${ApiKeyStrategy.maskApiKey(ip)}`);
-    return `api_fallback:${ip}`;
+    return `fallback:${ip}`;
   }
 
   /**

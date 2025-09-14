@@ -58,7 +58,7 @@ export interface WebSocketMessageLogData {
   readonly authenticated: boolean;
   messageSize?: number | undefined;
   processingTime?: number;
-  payload?: Record<string, unknown> | string | number | boolean | null;
+  payload?: unknown;
   metadata?: WebSocketConnectionMetadata;
   error?: string;
 }

@@ -29,9 +29,9 @@ afterAll(async () => {
     global.gc();
   }
 
-  // Wait a bit for any pending async operations
-  await new Promise((resolve) => setTimeout(resolve, 100));
-});
+  // Shorter wait for any pending async operations
+  await new Promise((resolve) => setTimeout(resolve, 50));
+}, 5000); // Increase timeout to 5 seconds
 
 describe("AdvancedElysiaServerBuilder", () => {
   let mockConfig: ServerConfig;
@@ -370,7 +370,7 @@ describe("AdvancedElysiaServerBuilder", () => {
     it("should handle malformed JSON messages", () => {
       const mockWs = { ...createMockWebSocket(), data: {} };
       const connectionId = "test-conn-123";
-      const malformedMessage = "{ invalid json }";
+      const malformedMessage = '{"type": "test", "invalid": json}'; // Missing quotes around "json"
 
       expect(() => {
         wsBuilder["handleDefaultWebSocketMessage"](
@@ -627,7 +627,7 @@ describe("AdvancedElysiaServerBuilder", () => {
     it("should handle WebSocket message parsing errors", () => {
       const mockWs = { ...createMockWebSocket(), data: {} };
       const connectionId = "test-conn-123";
-      const invalidMessage = '{ "type": "test", "invalid": json }';
+      const invalidMessage = '{"type": "test", "data": unquoted}'; // Missing quotes around "unquoted"
 
       expect(() => {
         builder["handleDefaultWebSocketMessage"](

@@ -4,7 +4,7 @@
 
 export interface WebSocketMessage {
   type: string;
-  payload?: Record<string, unknown>;
+  payload?: unknown;
   timestamp?: string;
   error?: string;
   code?: number;

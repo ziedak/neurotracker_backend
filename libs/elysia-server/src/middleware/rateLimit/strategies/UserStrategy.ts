@@ -33,7 +33,7 @@ export class UserStrategy implements RateLimitStrategy {
     // Primary: Use authenticated user ID
     const userId = this.extractUserId(context);
     if (userId) {
-      return `user:${userId}`;
+      return userId;
     }
 
     // Secondary: Use session ID for anonymous users (if enabled and available)
@@ -153,7 +153,7 @@ export class UserStrategy implements RateLimitStrategy {
    */
   private extractClientIp(context: MiddlewareContext): string {
     // Check common forwarded headers
-    const {headers} = context.request;
+    const { headers } = context.request;
 
     // X-Forwarded-For (most common)
     const xForwardedFor = headers["x-forwarded-for"];

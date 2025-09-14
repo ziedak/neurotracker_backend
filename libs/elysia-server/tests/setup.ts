@@ -1,31 +1,5 @@
 /**
- * Jest Setup Fconst detectBurstPattern = (content: string): boolean => {
-  // Detect actual burst patterns in content
-  console.error("DEBUG: detectBurstPattern called with:", content);
-
-  const burstIndicators = [
-    /burst/i,  // Include "burst" for test compatibility
-    /extreme_burst/i,
-    /flood_attack/i,
-    /massive_spam/i,
-    /ddos/i,
-    /overwhelm/i
-  ];
-
-  // For test compatibility, detect "burst" with reasonable length threshold
-  const hasBurstPattern = burstIndicators.some(pattern => {
-    const matches = pattern.test(content);
-    console.error("DEBUG: Testing pattern", pattern, "against", content, "result:", matches);
-    return matches;
-  });
-
-  const hasMinLength = content.length > 10;
-  const result = hasBurstPattern && hasMinLength;
-
-  console.error("DEBUG: detectBurstPattern final - content:", content, "hasBurstPattern:", hasBurstPattern, "hasMinLength:", hasMinLength, "result:", result);
-
-  return result;
-};l test configuration and utilities
+ * Jest Setup File - Test configuration and utilities
  */
 
 // Add production simulation helper functions

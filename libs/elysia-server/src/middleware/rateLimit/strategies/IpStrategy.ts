@@ -19,7 +19,7 @@ export class IpStrategy implements RateLimitStrategy {
     if (!this.isValidIp(ip)) {
       ip = "unknown";
     }
-    return `ip:${ip}`;
+    return ip;
   }
 
   /**

@@ -1021,7 +1021,7 @@ export class AuthWebSocketMiddleware extends BaseWebSocketMiddleware<AuthWebSock
   /**
    * Cleanup middleware resources - prevents memory leaks
    */
-  public cleanup(): void {
+  public override cleanup(): void {
     this.scheduler.clear(AuthWebSocketMiddleware.CLEANUP_TIMER_KEY);
     this.authenticatedConnections.clear();
   }
