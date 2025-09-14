@@ -330,7 +330,10 @@ export class AdvancedElysiaServerBuilder {
 
     // Setup WebSocket with middleware chain
     if (this.config.websocket?.enabled && this.wsChain) {
-      this.setupWebSocketWithMiddleware();
+      this.setupWebSocketWithMiddleware().catch((error) => {
+        this.logger.error("Failed to setup WebSocket with middleware", error);
+        this.logger.error("Failed to setup WebSocket with middleware", error);
+      });
     }
 
     // Health check endpoint
@@ -430,9 +433,7 @@ export class AdvancedElysiaServerBuilder {
         this.logger.info("WebSocket connection opened", { connectionId });
 
         // Record metric if available
-        if ("recordMetric" in this.metrics) {
-          await this.metrics.recordCounter("websocket_connections_opened", 1);
-        }
+        await this.metrics.recordCounter("websocket_connections_opened", 1);
       },
 
       message: async (ws, message) => {
@@ -535,9 +536,7 @@ export class AdvancedElysiaServerBuilder {
           this.logger.info("WebSocket connection closed", { connectionId });
 
           // Record metric if available
-          if ("recordMetric" in this.metrics) {
-            await this.metrics.recordCounter("websocket_connections_closed", 1);
-          }
+          await this.metrics.recordCounter("websocket_connections_closed", 1);
         }
       },
     });
