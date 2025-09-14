@@ -28,7 +28,7 @@ export const PROMETHEUS_PRESETS = {
       name: "prometheus-dev",
       enabled: true,
       priority: 100,
-      endpoint: "/metrics",
+      metricsEndpoint: "/metrics",
       enableDetailedMetrics: true,
       serviceName: "dev-service",
       enableNodeMetrics: true,
@@ -37,8 +37,6 @@ export const PROMETHEUS_PRESETS = {
       includeResponseBody: true,
       maxBodySize: 1024 * 10, // 10KB
       trackUserMetrics: true,
-      enableCustomMetrics: true,
-      skipPaths: ["/health", "/favicon.ico"],
     };
   },
 
@@ -51,7 +49,7 @@ export const PROMETHEUS_PRESETS = {
       name: "prometheus-prod",
       enabled: true,
       priority: 100,
-      endpoint: "/metrics",
+      metricsEndpoint: "/metrics",
       enableDetailedMetrics: true,
       serviceName: "prod-service",
       enableNodeMetrics: true,
@@ -60,13 +58,9 @@ export const PROMETHEUS_PRESETS = {
       includeResponseBody: false,
       maxBodySize: 1024, // 1KB
       trackUserMetrics: true,
-      enableCustomMetrics: true,
-      skipPaths: ["/health", "/metrics", "/favicon.ico"],
     };
   },
-
-  /**
-   * High-performance preset
+  /* High-performance preset
    * Minimal overhead for high-throughput systems
    */
   highPerformance(): Partial<PrometheusHttpMiddlewareConfig> {
@@ -74,7 +68,7 @@ export const PROMETHEUS_PRESETS = {
       name: "prometheus-perf",
       enabled: true,
       priority: 100,
-      endpoint: "/metrics",
+      metricsEndpoint: "/metrics",
       enableDetailedMetrics: false,
       serviceName: "perf-service",
       enableNodeMetrics: false,
@@ -83,8 +77,6 @@ export const PROMETHEUS_PRESETS = {
       includeResponseBody: false,
       maxBodySize: 512, // 512 bytes
       trackUserMetrics: false,
-      enableCustomMetrics: false,
-      skipPaths: ["/health", "/metrics", "/favicon.ico", "/static"],
     };
   },
 
@@ -97,7 +89,7 @@ export const PROMETHEUS_PRESETS = {
       name: "prometheus-gateway",
       enabled: true,
       priority: 100,
-      endpoint: "/metrics",
+      metricsEndpoint: "/metrics",
       enableDetailedMetrics: true,
       serviceName: "api-gateway",
       enableNodeMetrics: true,
@@ -106,8 +98,6 @@ export const PROMETHEUS_PRESETS = {
       includeResponseBody: false,
       maxBodySize: 1024 * 2, // 2KB
       trackUserMetrics: true,
-      enableCustomMetrics: true,
-      skipPaths: ["/health", "/metrics", "/favicon.ico", "/docs", "/swagger"],
     };
   },
 
@@ -120,7 +110,7 @@ export const PROMETHEUS_PRESETS = {
       name: "prometheus-microservice",
       enabled: true,
       priority: 100,
-      endpoint: "/metrics",
+      metricsEndpoint: "/metrics",
       enableDetailedMetrics: true,
       serviceName: "microservice",
       enableNodeMetrics: true,
@@ -129,8 +119,6 @@ export const PROMETHEUS_PRESETS = {
       includeResponseBody: false,
       maxBodySize: 1024 * 5, // 5KB
       trackUserMetrics: true,
-      enableCustomMetrics: true,
-      skipPaths: ["/health", "/metrics"],
     };
   },
 
@@ -143,7 +131,7 @@ export const PROMETHEUS_PRESETS = {
       name: "prometheus-debug",
       enabled: true,
       priority: 100,
-      endpoint: "/metrics",
+      metricsEndpoint: "/metrics",
       enableDetailedMetrics: true,
       serviceName: "debug-service",
       enableNodeMetrics: true,
@@ -152,8 +140,6 @@ export const PROMETHEUS_PRESETS = {
       includeResponseBody: true,
       maxBodySize: 1024 * 100, // 100KB
       trackUserMetrics: true,
-      enableCustomMetrics: true,
-      skipPaths: [],
     };
   },
 } as const;
@@ -525,124 +511,6 @@ export const PROMETHEUS_WS_FACTORIES = {
       PROMETHEUS_WS_PRESETS.iotMonitoring,
       overrides
     );
-  },
-} as const;
-
-/**
- * Testing utilities for Prometheus middleware
- */
-export const PROMETHEUS_TESTING_UTILS = {
-  /**
-   * Create a mock Prometheus HTTP middleware for testing
-   */
-  createMockMiddleware(config: Partial<PrometheusHttpMiddlewareConfig> = {}) {
-    const mockMetrics = {
-      getMetrics: jest.fn().mockResolvedValue("# Mock metrics"),
-      recordApiRequest: jest.fn(),
-      recordNodeMetrics: jest.fn(),
-      measureEventLoopLag: jest.fn(),
-      recordCounter: jest.fn(),
-      recordTimer: jest.fn(),
-      recordHistogram: jest.fn(),
-    } as any;
-
-    const middleware = new PrometheusHttpMiddleware(mockMetrics, {
-      name: "test-prometheus",
-      enabled: true,
-      priority: 100,
-      ...config,
-    });
-
-    return {
-      middleware,
-      mocks: {
-        metrics: mockMetrics,
-      },
-    };
-  },
-
-  /**
-   * Create a mock Prometheus WebSocket middleware for testing
-   */
-  createMockWebSocketMiddleware(
-    config: Partial<PrometheusWebSocketMiddlewareConfig> = {}
-  ) {
-    const mockMetrics = {
-      recordCounter: jest.fn(),
-      recordTimer: jest.fn(),
-      recordHistogram: jest.fn(),
-    } as any;
-
-    const middleware = new PrometheusWebSocketMiddleware(mockMetrics, {
-      name: "test-prometheus-ws",
-      enabled: true,
-      priority: 100,
-      ...config,
-    });
-
-    return {
-      middleware,
-      mocks: {
-        metrics: mockMetrics,
-      },
-    };
-  },
-
-  /**
-   * Create a test HTTP context for Prometheus middleware
-   */
-  createTestHttpContext(overrides: any = {}) {
-    return {
-      request: {
-        method: "GET",
-        url: "http://localhost:3000/test",
-        headers: {
-          "user-agent": "test-agent",
-          "content-length": "100",
-        },
-        body: undefined,
-        ip: "127.0.0.1",
-        ...overrides.request,
-      },
-      response: {
-        status: 200,
-        headers: {},
-        body: "test response",
-        ...overrides.response,
-      },
-      requestId: "test-request-123",
-      ...overrides,
-    };
-  },
-
-  /**
-   * Create a test WebSocket context for Prometheus middleware
-   */
-  createTestWebSocketContext(overrides: any = {}) {
-    return {
-      ws: {
-        send: jest.fn(),
-        close: jest.fn(),
-      },
-      connectionId: "test-connection-123",
-      message: {
-        type: "test_message",
-        payload: { data: "test" },
-        timestamp: new Date().toISOString(),
-        ...overrides.message,
-      },
-      metadata: {
-        connectedAt: new Date(),
-        clientIp: "127.0.0.1",
-        headers: {
-          "user-agent": "test-agent",
-        },
-        ...overrides.metadata,
-      },
-      authenticated: false,
-      rooms: [],
-      ...overrides,
-    };
   },
 } as const;
 

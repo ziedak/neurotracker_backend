@@ -11,6 +11,7 @@ import {
   type AuthenticationService,
   type User,
   type AuthContext,
+  type Session,
   UnauthorizedError,
   ForbiddenError,
   type Action,
@@ -151,13 +152,12 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
       throw error;
     } finally {
       const executionTime = performance.now() - startTime;
-      await this.recordMetric("auth_execution_time", executionTime, {
+      await this.recordTimer("auth_execution_time", executionTime, {
         path: context.request.url,
         method: context.request.method,
       });
     }
   }
-
   /**
    * Attempt authentication using multiple methods
    */
@@ -221,25 +221,32 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
     );
   }
 
-  /**
-   * Try JWT token authentication
-   */
   private async tryJWTAuthentication(
     context: MiddlewareContext,
     requestId: string
   ): Promise<AuthenticationResult> {
     try {
       const authHeader = context.request.headers["authorization"];
+
+      if (!authHeader) {
+        return {
+          user: null,
+          authContext: null,
+          method: "jwt",
+          error: "Missing authorization header",
+        };
+      }
+
       const token = this.authService
         .getJWTService()
-        .extractTokenFromHeader(authHeader ?? "");
+        .extractTokenFromHeader(authHeader);
 
       if (!token) {
         return {
           user: null,
           authContext: null,
           method: "jwt",
-          error: "No JWT token found",
+          error: "Invalid token format",
         };
       }
 
@@ -249,7 +256,7 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
           user: null,
           authContext: null,
           method: "jwt",
-          error: "Invalid JWT token",
+          error: "Invalid user data",
         };
       }
 
@@ -270,17 +277,80 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
         error: null,
       };
     } catch (error) {
+      // Check if token is expiring and attempt refresh
+      if (error instanceof Error && error.message.includes("expiring soon")) {
+        try {
+          this.logger.debug("Token expiring soon, attempting refresh", {
+            requestId,
+          });
+
+          const authHeader = context.request.headers["authorization"];
+          const token = authHeader
+            ? this.authService
+                .getJWTService()
+                .extractTokenFromHeader(authHeader)
+            : null;
+
+          if (token) {
+            const refreshResult = await this.authService.refreshToken(token);
+
+            if (refreshResult.success && refreshResult.user) {
+              const authContext = this.authService
+                .getPermissionService()
+                .createAuthContext(refreshResult.user);
+
+              // Add refreshed token to response headers if available
+              if (context.response && refreshResult.tokens?.accessToken) {
+                context.response.headers = {
+                  ...context.response.headers,
+                  "x-refreshed-token": refreshResult.tokens.accessToken,
+                };
+              }
+
+              this.logger.debug("Token refresh successful", {
+                requestId,
+                userId: refreshResult.user.id,
+              });
+
+              return {
+                user: refreshResult.user,
+                authContext,
+                method: "jwt",
+                error: null,
+              };
+            }
+          }
+        } catch (refreshError) {
+          this.logger.warn("Token refresh failed", {
+            error:
+              refreshError instanceof Error ? refreshError.message : "unknown",
+            requestId,
+          });
+        }
+      }
+
       this.logger.warn("JWT authentication failed", {
         error: error instanceof Error ? error.message : "unknown",
         requestId,
       });
 
+      // Map specific error messages
+      let errorMessage = "JWT authentication failed";
+      if (error instanceof Error) {
+        if (error.message.includes("Redis")) {
+          errorMessage = "Redis connection failed";
+        } else if (error.message.includes("expiring soon")) {
+          errorMessage = "Token expiring soon";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+
       return {
         user: null,
         authContext: null,
         method: "jwt",
-        error:
-          error instanceof Error ? error.message : "JWT authentication failed",
+        error: errorMessage,
       };
     }
   }
@@ -416,6 +486,7 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
       return {
         user,
         authContext,
+        session,
         method: "session",
         error: null,
       };
@@ -451,7 +522,9 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
         reason: "authentication_required",
         path: context.request.url,
       });
-      throw new UnauthorizedError("Authentication required");
+      // Throw the specific error from authentication if available, otherwise generic error
+      const errorMessage = authResult.error || "Authentication required";
+      throw new UnauthorizedError(errorMessage);
     }
 
     // If no user, skip authorization checks (assuming allowAnonymous is true)
@@ -515,6 +588,24 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
       }
     }
 
+    // Check HTTP method/path based permissions if no specific action/resource configured
+    if (!this.config.action && !this.config.resource) {
+      const canPerform = this.authService.can(
+        user,
+        context.request.method,
+        context.request.url
+      );
+      if (!canPerform) {
+        await this.recordAuthMetrics("auth_failure", {
+          reason: "insufficient_permissions",
+          userId: user?.id ?? "unknown",
+          method: context.request.method,
+          path: context.request.url,
+        });
+        throw new ForbiddenError("Insufficient permissions");
+      }
+    }
+
     // Log successful authorization
     this.logger.debug("Authorization successful", {
       requestId,
@@ -547,6 +638,14 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
       context["authContext"] = authResult.authContext;
       context["isAuthenticated"] = !!authResult.user;
       context["authMethod"] = authResult.method;
+
+      // Set session information if available
+      if (authResult.session) {
+        context["session"] = authResult.session as unknown as Record<
+          string,
+          unknown
+        >;
+      }
     }
   }
 
@@ -695,6 +794,7 @@ export class AuthHttpMiddleware extends BaseMiddleware<AuthHttpMiddlewareConfig>
 interface AuthenticationResult {
   user: User | null;
   authContext: AuthContext | null;
+  session?: Session; // Session object when session authentication is used
   method: string;
   error: string | null;
 }

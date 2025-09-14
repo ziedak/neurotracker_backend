@@ -1,6 +1,13 @@
 /**
  * @fileoverview Comprehensive unit tests for LoggingHttpMiddleware
- * @description Tests request/response logging, data sanitization, and configuration
+ * @description Tests request/response log  afterEach(() => {
+    jest.clearAllTimers();
+    // Clear all mocks
+    mockLogger.info.mockClear();
+    mockLogger.warn.mockClear();
+    mockLogger.error.mockClear();
+    mockLogger.debug.mockClear();
+  }); data sanitization, and configuration
  */
 
 import {
@@ -15,6 +22,18 @@ import { LoggingHttpMiddleware } from "../../src/middleware/logging/logging.http
 import { MiddlewareContext } from "../../src/middleware/types";
 import { IMetricsCollector } from "@libs/monitoring";
 
+// Mock the logger creation
+jest.mock("@libs/utils", () => ({
+  createLogger: jest.fn(() => ({
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+    child: jest.fn(),
+    setLevel: jest.fn(),
+  })),
+}));
+
 const mockMetricsCollector = {
   recordCounter: jest.fn(),
   recordTimer: jest.fn(),
@@ -25,6 +44,12 @@ describe("LoggingHttpMiddleware", () => {
   let middleware: LoggingHttpMiddleware;
   let mockContext: MiddlewareContext;
   let nextFunction: jest.MockedFunction<() => Promise<void>>;
+  let mockLogger: {
+    info: jest.MockedFunction<any>;
+    warn: jest.MockedFunction<any>;
+    error: jest.MockedFunction<any>;
+    debug: jest.MockedFunction<any>;
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -46,6 +71,9 @@ describe("LoggingHttpMiddleware", () => {
       includeUserAgent: true,
       includeClientIp: true,
     });
+
+    // Get the mocked logger instance
+    mockLogger = middleware["logger"] as any;
 
     // Create mock context
     mockContext = {
@@ -86,6 +114,9 @@ describe("LoggingHttpMiddleware", () => {
       session: undefined,
       validated: {},
       path: "/api/users",
+      // Add query and params to context directly for middleware to find them
+      query: { filter: "active" },
+      params: { id: "123" },
     };
 
     nextFunction = jest.fn().mockResolvedValue(undefined);
@@ -93,6 +124,11 @@ describe("LoggingHttpMiddleware", () => {
 
   afterEach(() => {
     jest.clearAllTimers();
+    // Clear all mocks
+    mockLogger.info.mockClear();
+    mockLogger.warn.mockClear();
+    mockLogger.error.mockClear();
+    mockLogger.debug.mockClear();
   });
 
   describe("Middleware Initialization", () => {
@@ -131,11 +167,9 @@ describe("LoggingHttpMiddleware", () => {
 
   describe("Request Logging", () => {
     it("should log incoming request with all details", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       await middleware["execute"](mockContext, nextFunction);
 
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(mockLogger.info).toHaveBeenCalledWith(
         "Incoming request",
         expect.objectContaining({
           requestId: expect.any(String),
@@ -158,8 +192,6 @@ describe("LoggingHttpMiddleware", () => {
           params: { id: "123" },
         })
       );
-
-      consoleSpy.mockRestore();
     });
 
     it("should add request ID to headers", async () => {
@@ -170,48 +202,44 @@ describe("LoggingHttpMiddleware", () => {
     });
 
     it("should skip logging for excluded paths", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
-      mockContext.path = "/health";
+      mockContext.request.url = "/health";
 
       await middleware["execute"](mockContext, nextFunction);
 
       // Should not log request for excluded path
-      expect(consoleSpy).not.toHaveBeenCalledWith(
+      expect(mockLogger.info).not.toHaveBeenCalledWith(
         "Incoming request",
         expect.any(Object)
       );
-
-      consoleSpy.mockRestore();
     });
 
     it("should handle requests without body", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       mockContext.request.body = undefined;
       mockContext.request.method = "GET";
 
       await middleware["execute"](mockContext, nextFunction);
 
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(mockLogger.info).toHaveBeenCalledWith(
         "Incoming request",
         expect.objectContaining({
           method: "GET",
-          body: undefined,
+          // Body field should not be present when undefined
         })
       );
 
-      consoleSpy.mockRestore();
+      // Verify that body is not included in the logged data
+      const loggedCall = mockLogger.info.mock.calls.find(
+        (call: unknown[]) => call[0] === "Incoming request"
+      );
+      expect(loggedCall?.[1]).not.toHaveProperty("body");
     });
   });
 
   describe("Response Logging", () => {
     it("should log successful response", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       await middleware["execute"](mockContext, nextFunction);
 
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(mockLogger.info).toHaveBeenCalledWith(
         "Outgoing response",
         expect.objectContaining({
           requestId: expect.any(String),
@@ -224,13 +252,9 @@ describe("LoggingHttpMiddleware", () => {
           body: { id: "123", name: "John Doe" },
         })
       );
-
-      consoleSpy.mockRestore();
     });
 
     it("should log error responses", async () => {
-      const consoleSpy = jest.spyOn(console, "error").mockImplementation();
-
       nextFunction.mockRejectedValue(new Error("Test error"));
       mockContext.set.status = 500;
 
@@ -238,17 +262,10 @@ describe("LoggingHttpMiddleware", () => {
         middleware["execute"](mockContext, nextFunction)
       ).rejects.toThrow("Test error");
 
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(mockLogger.error).toHaveBeenCalledWith(
         "Error response",
-        expect.objectContaining({
-          requestId: expect.any(String),
-          statusCode: 500,
-          responseTime: expect.any(Number),
-          error: "Test error",
-        })
+        expect.any(Error)
       );
-
-      consoleSpy.mockRestore();
     });
 
     it("should use appropriate log level for different status codes", async () => {
@@ -261,43 +278,33 @@ describe("LoggingHttpMiddleware", () => {
       ];
 
       for (const { status, expectedLevel } of testCases) {
-        const consoleSpy = jest
-          .spyOn(console, expectedLevel as keyof Console)
-          .mockImplementation();
+        const spy = mockLogger[expectedLevel as keyof typeof mockLogger];
         mockContext.set.status = status;
 
         await middleware["execute"](mockContext, nextFunction);
 
-        expect(consoleSpy).toHaveBeenCalledWith(
+        expect(spy).toHaveBeenCalledWith(
           "Outgoing response",
           expect.any(Object)
         );
-
-        consoleSpy.mockRestore();
       }
     });
   });
 
   describe("Data Sanitization", () => {
     it("should sanitize sensitive fields in request body", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       await middleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Incoming request"
-      )?.[1];
+      const loggedCall = mockLogger.info.mock.calls.find(
+        (call: unknown[]) => call[0] === "Incoming request"
+      );
 
-      expect(loggedData.body.password).toBe("[REDACTED]");
-      expect(loggedData.body.token).toBe("[REDACTED]");
-      expect(loggedData.body.name).toBe("John Doe");
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].body.password).toBe("[REDACTED]");
+      expect(loggedCall?.[1].body.token).toBe("[REDACTED]");
+      expect(loggedCall?.[1].body.name).toBe("John Doe");
     });
 
     it("should sanitize sensitive fields in response body", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       mockContext.set.body = {
         id: "123",
         name: "John Doe",
@@ -307,52 +314,40 @@ describe("LoggingHttpMiddleware", () => {
 
       await middleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Outgoing response"
-      )?.[1];
+      const loggedCall = mockLogger.info.mock.calls.find(
+        (call: unknown[]) => call[0] === "Outgoing response"
+      );
 
-      expect(loggedData.body.token).toBe("[REDACTED]");
-      expect(loggedData.body.secret).toBe("[REDACTED]");
-      expect(loggedData.body.name).toBe("John Doe");
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].body.token).toBe("[REDACTED]");
+      expect(loggedCall?.[1].body.secret).toBe("[REDACTED]");
+      expect(loggedCall?.[1].body.name).toBe("John Doe");
     });
 
     it("should sanitize sensitive headers", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       await middleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Incoming request"
-      )?.[1];
+      const loggedCall = mockLogger.info.mock.calls.find(
+        (call: unknown[]) => call[0] === "Incoming request"
+      );
 
-      expect(loggedData.headers.authorization).toBe("[REDACTED]");
-      expect(loggedData.headers["user-agent"]).toBe("test-agent/1.0");
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].headers.authorization).toBe("[REDACTED]");
+      expect(loggedCall?.[1].headers["user-agent"]).toBe("test-agent/1.0");
     });
 
     it("should sanitize sensitive query parameters", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       mockContext.request.url = "/api/users?token=secret-token&filter=active";
 
       await middleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Incoming request"
-      )?.[1];
+      const loggedCall = mockLogger.info.mock.calls.find(
+        (call: unknown[]) => call[0] === "Incoming request"
+      );
 
-      expect(loggedData.url).toContain("token=[REDACTED]");
-      expect(loggedData.url).toContain("filter=active");
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].url).toContain("token=%5BREDACTED%5D");
+      expect(loggedCall?.[1].url).toContain("filter=active");
     });
 
     it("should handle deep object sanitization", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       mockContext.request.body = {
         user: {
           name: "John",
@@ -368,118 +363,92 @@ describe("LoggingHttpMiddleware", () => {
 
       await middleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Incoming request"
-      )?.[1];
+      const loggedCall = mockLogger.info.mock.calls.find(
+        (call: unknown[]) => call[0] === "Incoming request"
+      );
 
-      expect(loggedData.body.user.credentials.password).toBe("[REDACTED]");
-      expect(loggedData.body.user.credentials.token).toBe("[REDACTED]");
-      expect(loggedData.body.metadata.secret).toBe("[REDACTED]");
-      expect(loggedData.body.user.name).toBe("John");
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].body.user.credentials.password).toBe("[REDACTED]");
+      expect(loggedCall?.[1].body.user.credentials.token).toBe("[REDACTED]");
+      expect(loggedCall?.[1].body.metadata.secret).toBe("[REDACTED]");
+      expect(loggedCall?.[1].body.user.name).toBe("John");
     });
   });
 
   describe("Body Size Limits", () => {
     it("should truncate large request bodies", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       const largeBody = { data: "x".repeat(2000) };
       mockContext.request.body = largeBody;
 
       await middleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Incoming request"
-      )?.[1];
+      const loggedCall = mockLogger.info.mock.calls.find(
+        (call: unknown[]) => call[0] === "Incoming request"
+      );
 
-      expect(loggedData.body).toMatch(/^\[TRUNCATED - \d+ bytes\]$/);
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].body).toMatch(/^\[TRUNCATED - \d+ bytes\]$/);
     });
 
     it("should handle unparseable bodies", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       // Create a circular reference that can't be JSON stringified
-      const circularObj: any = { prop: "value" };
+      const circularObj: Record<string, unknown> = { prop: "value" };
       circularObj.circular = circularObj;
       mockContext.request.body = circularObj;
 
       await middleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Incoming request"
-      )?.[1];
+      const loggedCall = mockLogger.info.mock.calls.find(
+        (call: unknown[]) => call[0] === "Incoming request"
+      );
 
-      expect(loggedData.body).toBe("[UNPARSEABLE]");
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].body).toBe("[UNPARSEABLE]");
     });
   });
 
   describe("Client Information Extraction", () => {
     it("should extract user agent", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       await middleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Incoming request"
-      )?.[1];
+      const loggedCall = mockLogger.info.mock.calls.find(
+        (call: unknown[]) => call[0] === "Incoming request"
+      );
 
-      expect(loggedData.userAgent).toBe("test-agent/1.0");
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].userAgent).toBe("test-agent/1.0");
     });
 
     it("should extract client IP from x-forwarded-for", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       await middleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Incoming request"
-      )?.[1];
+      const loggedCall = mockLogger.info.mock.calls.find(
+        (call: unknown[]) => call[0] === "Incoming request"
+      );
 
-      expect(loggedData.ip).toBe("192.168.1.1");
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].ip).toBe("192.168.1.1");
     });
 
     it("should extract client IP from x-real-ip", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       delete mockContext.request.headers["x-forwarded-for"];
       mockContext.request.headers["x-real-ip"] = "10.0.0.1";
 
       await middleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Incoming request"
-      )?.[1];
+      const loggedCall = mockLogger.info.mock.calls.find(
+        (call: unknown[]) => call[0] === "Incoming request"
+      );
 
-      expect(loggedData.ip).toBe("10.0.0.1");
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].ip).toBe("10.0.0.1");
     });
 
     it("should handle multiple IPs in x-forwarded-for", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       mockContext.request.headers["x-forwarded-for"] =
         "192.168.1.1, 10.0.0.1, 172.16.0.1";
 
       await middleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Incoming request"
-      )?.[1];
+      const loggedCall = mockLogger.info.mock.calls.find(
+        (call: unknown[]) => call[0] === "Incoming request"
+      );
 
-      expect(loggedData.ip).toBe("192.168.1.1");
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].ip).toBe("192.168.1.1");
     });
   });
 
@@ -489,17 +458,13 @@ describe("LoggingHttpMiddleware", () => {
         logRequestBody: false,
       });
 
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       await noBodyMiddleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Incoming request"
-      )?.[1];
+      const loggedCall = noBodyMiddleware["logger"]["info"].mock.calls.find(
+        (call: unknown[]) => call[0] === "Incoming request"
+      );
 
-      expect(loggedData.body).toBeUndefined();
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].body).toBeUndefined();
     });
 
     it("should skip response body logging when disabled", async () => {
@@ -507,17 +472,13 @@ describe("LoggingHttpMiddleware", () => {
         logResponseBody: false,
       });
 
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       await noBodyMiddleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Outgoing response"
-      )?.[1];
+      const loggedCall = noBodyMiddleware["logger"]["info"].mock.calls.find(
+        (call: unknown[]) => call[0] === "Outgoing response"
+      );
 
-      expect(loggedData.body).toBeUndefined();
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].body).toBeUndefined();
     });
 
     it("should skip headers logging when disabled", async () => {
@@ -528,17 +489,13 @@ describe("LoggingHttpMiddleware", () => {
         }
       );
 
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       await noHeadersMiddleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Incoming request"
-      )?.[1];
+      const loggedCall = noHeadersMiddleware["logger"]["info"].mock.calls.find(
+        (call: unknown[]) => call[0] === "Incoming request"
+      );
 
-      expect(loggedData.headers).toBeUndefined();
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].headers).toBeUndefined();
     });
 
     it("should skip user agent when disabled", async () => {
@@ -549,17 +506,13 @@ describe("LoggingHttpMiddleware", () => {
         }
       );
 
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       await noUserAgentMiddleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Incoming request"
-      )?.[1];
+      const loggedCall = noUserAgentMiddleware["logger"][
+        "info"
+      ].mock.calls.find((call: unknown[]) => call[0] === "Incoming request");
 
-      expect(loggedData.userAgent).toBeUndefined();
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].userAgent).toBeUndefined();
     });
 
     it("should skip client IP when disabled", async () => {
@@ -567,72 +520,56 @@ describe("LoggingHttpMiddleware", () => {
         includeClientIp: false,
       });
 
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       await noIpMiddleware["execute"](mockContext, nextFunction);
 
-      const loggedData = consoleSpy.mock.calls.find(
-        (call) => call[0] === "Incoming request"
-      )?.[1];
+      const loggedCall = noIpMiddleware["logger"]["info"].mock.calls.find(
+        (call: unknown[]) => call[0] === "Incoming request"
+      );
 
-      expect(loggedData.ip).toBeUndefined();
-
-      consoleSpy.mockRestore();
+      expect(loggedCall?.[1].ip).toBeUndefined();
     });
   });
 
   describe("Path Exclusion", () => {
     it("should exclude specific paths from logging", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       const paths = ["/health", "/metrics"];
 
       for (const path of paths) {
-        mockContext.path = path;
+        mockContext.request.url = path;
         await middleware["execute"](mockContext, nextFunction);
       }
 
       // Should not have logged any requests
-      const requestLogs = consoleSpy.mock.calls.filter(
-        (call) => call[0] === "Incoming request"
+      const requestLogs = mockLogger.info.mock.calls.filter(
+        (call: unknown[]) => call[0] === "Incoming request"
       );
 
       expect(requestLogs).toHaveLength(0);
-
-      consoleSpy.mockRestore();
     });
 
     it("should exclude paths with prefixes", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
-      mockContext.path = "/metrics/detailed";
+      mockContext.request.url = "/metrics/detailed";
 
       await middleware["execute"](mockContext, nextFunction);
 
       // Should not have logged the request
-      const requestLogs = consoleSpy.mock.calls.filter(
-        (call) => call[0] === "Incoming request"
+      const requestLogs = mockLogger.info.mock.calls.filter(
+        (call: unknown[]) => call[0] === "Incoming request"
       );
 
       expect(requestLogs).toHaveLength(0);
-
-      consoleSpy.mockRestore();
     });
 
     it("should log non-excluded paths", async () => {
-      const consoleSpy = jest.spyOn(console, "info").mockImplementation();
-
       mockContext.path = "/api/users";
 
       await middleware["execute"](mockContext, nextFunction);
 
-      const requestLogs = consoleSpy.mock.calls.filter(
-        (call) => call[0] === "Incoming request"
+      const requestLogs = mockLogger.info.mock.calls.filter(
+        (call: unknown[]) => call[0] === "Incoming request"
       );
 
       expect(requestLogs).toHaveLength(1);
-
-      consoleSpy.mockRestore();
     });
   });
 

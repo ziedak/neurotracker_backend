@@ -13,9 +13,7 @@ import {
 } from "@jest/globals";
 import {
   AuditHttpMiddleware,
-  AuditEvent,
   AuditQuery,
-  AuditSummary,
   type AuditHttpMiddlewareConfig,
 } from "../../src/middleware/audit/audit.http.middleware";
 import { MiddlewareContext } from "../../src/middleware/types";

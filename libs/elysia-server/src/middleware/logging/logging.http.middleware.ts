@@ -189,7 +189,7 @@ export class LoggingHttpMiddleware extends BaseMiddleware<LoggingHttpMiddlewareC
       throw error; // Re-throw to maintain error chain
     } finally {
       const executionTime = performance.now() - startTime;
-      await this.recordMetric("logging_execution_time", executionTime, {
+      await this.recordTimer("logging_execution_time", executionTime, {
         method: context.request.method,
         path: this.extractPath(context),
       });

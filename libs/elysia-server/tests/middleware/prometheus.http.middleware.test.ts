@@ -45,7 +45,7 @@ describe("PrometheusHttpMiddleware", () => {
       priority: 60,
       collectDefaultMetrics: true,
       collectHttpMetrics: true,
-      collectCustomMetrics: true,
+
       metricPrefix: "test_app",
       buckets: [0.1, 0.5, 1, 2, 5, 10],
       includePathLabels: true,

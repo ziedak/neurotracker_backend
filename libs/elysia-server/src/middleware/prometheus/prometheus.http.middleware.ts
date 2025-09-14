@@ -87,10 +87,11 @@ export class PrometheusHttpMiddleware extends BaseMiddleware<PrometheusHttpMiddl
 
   constructor(
     metrics: IMetricsCollector,
-    config: PrometheusHttpMiddlewareConfig
+    config: Partial<PrometheusHttpMiddlewareConfig> = {}
   ) {
     // Set defaults for Prometheus-specific configuration
-    const prometheusDefaults: Partial<PrometheusHttpMiddlewareConfig> = {
+    const prometheusDefaults: PrometheusHttpMiddlewareConfig = {
+      enabled: true,
       collectHttpMetrics: true,
       collectDefaultMetrics: false,
       enableDetailedMetrics: false,
@@ -111,6 +112,8 @@ export class PrometheusHttpMiddleware extends BaseMiddleware<PrometheusHttpMiddl
       excludePaths: [],
       buckets: [0.1, 0.5, 1, 2.5, 5, 10],
       registry: undefined,
+      name: "",
+      priority: 100,
     };
 
     const mergedConfig = { ...prometheusDefaults, ...config };
