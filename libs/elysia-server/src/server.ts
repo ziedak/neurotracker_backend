@@ -66,6 +66,11 @@ export class AdvancedElysiaServerBuilder {
   private wsChain?: WebSocketMiddlewareChain;
   private middlewareConfig: AdvancedMiddlewareConfig | undefined;
 
+  // Store middleware instances that need cleanup
+  private securityWebSocketMiddleware?: SecurityWebSocketMiddleware;
+  private rateLimitHttpMiddleware?: RateLimitHttpMiddleware;
+  private rateLimitWebSocketMiddleware?: RateLimitWebSocketMiddleware;
+
   constructor(
     config: Partial<ServerConfig>,
     metrics: IMetricsCollector,
@@ -185,14 +190,19 @@ export class AdvancedElysiaServerBuilder {
 
         // Add rate limiting middleware with factory priority
         if (this.middlewareConfig?.rateLimit?.enabled !== false) {
+          const rateLimitMiddleware = new RateLimitHttpMiddleware(
+            this.metrics,
+            this.middlewareConfig?.rateLimit?.config ??
+              this.middlewareConfig?.rateLimit ??
+              {}
+          );
+
+          // Store reference for cleanup
+          this.rateLimitHttpMiddleware = rateLimitMiddleware;
+
           middlewares.push({
             name: "rateLimit",
-            middleware: new RateLimitHttpMiddleware(
-              this.metrics,
-              this.middlewareConfig?.rateLimit?.config ??
-                this.middlewareConfig?.rateLimit ??
-                {}
-            ),
+            middleware: rateLimitMiddleware,
             priority: patternConfig.priorities.rateLimit ?? 120,
             enabled: true,
           });
@@ -272,6 +282,9 @@ export class AdvancedElysiaServerBuilder {
               {}
           );
 
+          // Store reference for cleanup
+          this.rateLimitWebSocketMiddleware = rateLimitMiddleware;
+
           chain.register(
             {
               name: "ws-rateLimit",
@@ -292,6 +305,9 @@ export class AdvancedElysiaServerBuilder {
               this.middlewareConfig?.security ??
               {}
           );
+
+          // Store reference for cleanup
+          this.securityWebSocketMiddleware = securityMiddleware;
 
           chain.register(
             {
@@ -812,10 +828,29 @@ export class AdvancedElysiaServerBuilder {
   /**
    * Cleanup method for testing - clears all internal state
    */
-  public cleanup(): void {
+  public async cleanup(): Promise<void> {
     this.connections.clear();
     this.rooms.clear();
     this.userConnections.clear();
+
+    // Cleanup middleware chains
+    if (this.httpChain) {
+      await this.httpChain.cleanup();
+    }
+    if (this.wsChain) {
+      await this.wsChain.cleanup();
+    }
+
+    // Fallback: cleanup individual middleware instances if chains are not available
+    if (this.securityWebSocketMiddleware) {
+      this.securityWebSocketMiddleware.cleanup();
+    }
+    if (this.rateLimitHttpMiddleware) {
+      await this.rateLimitHttpMiddleware.cleanup();
+    }
+    if (this.rateLimitWebSocketMiddleware) {
+      await this.rateLimitWebSocketMiddleware.cleanup();
+    }
   }
 }
 
@@ -848,7 +883,7 @@ export function createProductionServer(
       factoryPattern: "PRODUCTION_WS",
     },
     cors: { enabled: true },
-    rateLimit: { enabled: true },
+    rateLimit: { enabled: true }, // Re-enable rate limiting
     security: { enabled: true },
     logging: { enabled: true, logLevel: "info" as const },
     prometheus: { enabled: true },

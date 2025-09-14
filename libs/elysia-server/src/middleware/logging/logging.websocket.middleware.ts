@@ -3,7 +3,7 @@ import {
   BaseWebSocketMiddleware,
   type WebSocketMiddlewareConfig,
 } from "../base/BaseWebSocketMiddleware";
-import type { WebSocketContext } from "../types";
+import type { WebSocketConnectionMetadata, WebSocketContext } from "../types";
 
 /**
  * WebSocket logging middleware configuration interface
@@ -38,8 +38,8 @@ export interface WebSocketConnectionLogData {
   userAgent?: string | undefined;
   userId?: string | undefined;
   readonly authenticated: boolean;
-  query?: Record<string, any>;
-  headers?: Record<string, any>;
+  query?: Record<string, string>;
+  headers?: Record<string, string>;
   connectionDuration?: number | undefined; // For disconnect events
   messageCount?: number; // For disconnect events
   reason?: string | undefined; // For disconnect events
@@ -58,8 +58,8 @@ export interface WebSocketMessageLogData {
   readonly authenticated: boolean;
   messageSize?: number | undefined;
   processingTime?: number;
-  payload?: any;
-  metadata?: any;
+  payload?: Record<string, unknown> | string | number | boolean | null;
+  metadata?: WebSocketConnectionMetadata;
   error?: string;
 }
 
@@ -181,7 +181,7 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
     try {
       // Log incoming message
       if (this.config.logIncomingMessages) {
-        await this.logIncomingMessage(context, messageId);
+        this.logIncomingMessage(context, messageId);
       }
 
       // Track message count for connection
@@ -196,7 +196,7 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
       // Log outgoing messages if configured
       if (this.config.logOutgoingMessages) {
         const processingTime = Date.now() - processingStartTime;
-        await this.logOutgoingMessage(context, messageId, processingTime);
+        this.logOutgoingMessage(context, messageId, processingTime);
       }
 
       // Record successful logging metrics
@@ -325,10 +325,10 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
   /**
    * Log incoming WebSocket message
    */
-  private async logIncomingMessage(
+  private logIncomingMessage(
     context: WebSocketContext,
     messageId: string
-  ): Promise<void> {
+  ): void {
     // Skip excluded message types
     if (this.shouldExcludeMessageType(context.message.type)) {
       return;
@@ -367,11 +367,11 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
   /**
    * Log outgoing WebSocket message
    */
-  private async logOutgoingMessage(
+  private logOutgoingMessage(
     context: WebSocketContext,
     messageId: string,
     processingTime: number
-  ): Promise<void> {
+  ): void {
     // Skip excluded message types
     if (this.shouldExcludeMessageType(context.message.type)) {
       return;
@@ -471,7 +471,7 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
   /**
    * Get message size in bytes
    */
-  private getMessageSize(message: any): number | undefined {
+  private getMessageSize(message: unknown): number | undefined {
     try {
       return JSON.stringify(message).length;
     } catch {
@@ -533,14 +533,14 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
   /**
    * Sanitize message payload by removing sensitive fields and limiting size
    */
-  private sanitizePayload(payload: any): any {
+  private sanitizePayload<T>(payload: T): T | string {
     if (!payload) return payload;
 
     try {
       const sanitized = this.deepSanitize(
         payload,
         this.config.sensitiveFields || []
-      );
+      ) as T;
 
       // Check size limits
       const payloadStr = JSON.stringify(sanitized);
@@ -561,14 +561,16 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
   /**
    * Sanitize connection metadata
    */
-  private sanitizeMetadata(metadata: any): any {
+  private sanitizeMetadata(
+    metadata: WebSocketConnectionMetadata
+  ): WebSocketConnectionMetadata {
     if (!metadata) return metadata;
 
-    const sanitized: any = { ...metadata };
+    const sanitized = { ...metadata };
 
     // Remove sensitive connection details
-    delete sanitized.headers?.authorization;
-    delete sanitized.headers?.cookie;
+    delete sanitized.headers?.["authorization"];
+    delete sanitized.headers?.["cookie"];
 
     return sanitized;
   }
@@ -576,7 +578,10 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
   /**
    * Deep sanitize object by removing sensitive fields recursively
    */
-  private deepSanitize(obj: any, sensitiveFields: readonly string[]): any {
+  private deepSanitize(
+    obj: unknown,
+    sensitiveFields: readonly string[]
+  ): unknown {
     if (typeof obj !== "object" || obj === null) {
       return obj;
     }
@@ -585,9 +590,12 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
       return obj.map((item) => this.deepSanitize(item, sensitiveFields));
     }
 
-    const sanitized: any = {};
+    // Cast to Record<string, unknown> after type check for safe indexing
+    const sanitized: Record<string, unknown> = {
+      ...(obj as Record<string, unknown>),
+    };
 
-    for (const [key, value] of Object.entries(obj)) {
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
       const lowerKey = key.toLowerCase();
 
       if (
@@ -608,7 +616,7 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
   private logWithLevel(
     level: "debug" | "info" | "warn" | "error" | undefined,
     message: string,
-    data: any
+    data: unknown
   ): void {
     const logLevel = level || "info";
 
@@ -657,9 +665,7 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
       );
     }
 
-    if (
-      excludeMessageTypes?.some((type) => !type.trim())
-    ) {
+    if (excludeMessageTypes?.some((type) => !type.trim())) {
       throw new Error(
         "WebSocket logging excludeMessageTypes cannot contain empty strings"
       );
@@ -814,6 +820,19 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
       enabled: true,
       priority: DEFAULT_WEBSOCKET_LOGGING_OPTIONS.PRIORITY,
     };
+  }
+
+  /**
+   * Cleanup method for WebSocket logging middleware
+   * Clears connection tracking data
+   */
+  public override cleanup(): void {
+    this.connectionStartTimes.clear();
+    this.connectionMessageCounts.clear();
+    this.logger.debug("WebSocket logging middleware cleanup completed", {
+      middlewareName: this.config.name,
+      clearedConnections: this.connectionStartTimes.size,
+    });
   }
 }
 

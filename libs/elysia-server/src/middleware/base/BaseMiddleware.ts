@@ -105,7 +105,7 @@ export abstract class BaseMiddleware<
         if (skipPath.endsWith("*")) {
           return path.startsWith(skipPath.slice(0, -1));
         }
-        return path === skipPath || path.startsWith(`${skipPath  }/`);
+        return path === skipPath || path.startsWith(`${skipPath}/`);
       }) || false
     );
   }
@@ -113,9 +113,12 @@ export abstract class BaseMiddleware<
   /**
    * Extract relevant information from HTTP context for logging
    */
-  protected override extractContextInfo(
-    context: MiddlewareContext
-  ): Record<string, any> {
+  protected override extractContextInfo(context: MiddlewareContext): {
+    path: string;
+    method: string;
+    requestId: string | undefined;
+    ip: string;
+  } {
     return {
       path: context.request.url,
       method: context.request.method,
@@ -128,7 +131,7 @@ export abstract class BaseMiddleware<
    * Extract client IP from request context
    */
   protected getClientIp(context: MiddlewareContext): string {
-    const {headers} = context.request;
+    const { headers } = context.request;
     return (
       headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
       headers["x-real-ip"] ||
@@ -169,5 +172,15 @@ export abstract class BaseMiddleware<
     return allSensitive.some((field) =>
       headerName.toLowerCase().includes(field.toLowerCase())
     );
+  }
+
+  /**
+   * Cleanup method for HTTP middleware
+   * Default implementation - override in subclasses if needed
+   */
+  public cleanup(): void {
+    this.logger.debug("HTTP middleware cleanup completed", {
+      middlewareName: this.config.name,
+    });
   }
 }

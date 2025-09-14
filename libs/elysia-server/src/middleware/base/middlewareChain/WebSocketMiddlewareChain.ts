@@ -316,15 +316,63 @@ export class WebSocketMiddlewareChain {
   /**
    * Get middleware chain statistics
    */
-  getChainStats() {
-    const stats: Record<string, any> = {};
+  getChainStats(): {
+    middlewareCount: number;
+    executionOrder: string[];
+    individualStats: Record<
+      string,
+      {
+        totalExecutions: number;
+        totalFailures: number;
+        averageExecutionTime: number;
+        lastExecutionTime?: number;
+        circuitBreakerState?: CircuitBreakerState;
+        circuitBreakerMetrics?: {
+          state: CircuitBreakerState;
+          failureCount: number;
+          lastFailureTime: number;
+        };
+      }
+    >;
+  } {
+    const stats: Record<
+      string,
+      {
+        totalExecutions: number;
+        totalFailures: number;
+        averageExecutionTime: number;
+        lastExecutionTime?: number;
+        circuitBreakerState?: CircuitBreakerState;
+        circuitBreakerMetrics?: {
+          state: CircuitBreakerState;
+          failureCount: number;
+          lastFailureTime: number;
+        };
+      }
+    > = {};
 
     for (const [name, registered] of this.middleware) {
-      stats[name] = {
+      const stat: {
+        totalExecutions: number;
+        totalFailures: number;
+        averageExecutionTime: number;
+        lastExecutionTime?: number;
+        circuitBreakerState?: CircuitBreakerState;
+        circuitBreakerMetrics?: {
+          state: CircuitBreakerState;
+          failureCount: number;
+          lastFailureTime: number;
+        };
+      } = {
         ...registered.executionStats,
-        circuitBreakerState: registered.circuitBreaker?.getState(),
-        circuitBreakerMetrics: registered.circuitBreaker?.getMetrics(),
       };
+
+      if (registered.circuitBreaker) {
+        stat.circuitBreakerState = registered.circuitBreaker.getState();
+        stat.circuitBreakerMetrics = registered.circuitBreaker.getMetrics();
+      }
+
+      stats[name] = stat;
     }
 
     return {
@@ -640,12 +688,46 @@ export class WebSocketMiddlewareChain {
   }
 
   /**
-   * Create an executable middleware function for use with WebSocket handlers
+   * Cleanup all middlewares in the chain
    */
-  createExecutor(): WebSocketMiddlewareFunction {
-    return async (context: WebSocketContext, next: () => Promise<void>) => {
-      await this.execute(context);
-      await next();
-    };
+  public async cleanup(): Promise<void> {
+    this.logger.info("Starting WebSocket middleware chain cleanup", {
+      chainName: this.chainName,
+      middlewareCount: this.middleware.size,
+    });
+
+    for (const [name, registered] of this.middleware) {
+      try {
+        // Check if the middleware has a cleanup method using type assertion
+        const middlewareObj = registered.middleware as unknown as {
+          cleanup?: () => void | Promise<void>;
+        };
+
+        if (
+          middlewareObj.cleanup &&
+          typeof middlewareObj.cleanup === "function"
+        ) {
+          const cleanupResult = middlewareObj.cleanup();
+          if (cleanupResult instanceof Promise) {
+            await cleanupResult;
+          }
+          this.logger.debug("Cleaned up middleware", {
+            middlewareName: name,
+          });
+        }
+      } catch (error) {
+        this.logger.error("Failed to cleanup middleware", error as Error, {
+          middlewareName: name,
+        });
+      }
+    }
+
+    // Clear the middleware map
+    this.middleware.clear();
+    this.executionOrder = [];
+
+    this.logger.info("WebSocket middleware chain cleanup completed", {
+      chainName: this.chainName,
+    });
   }
 }

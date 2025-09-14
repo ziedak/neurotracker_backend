@@ -10,7 +10,7 @@ import {
   type RateLimitAlgorithm,
   type RateLimitingAdapterConfig,
 } from "@libs/ratelimit";
-import type { CacheService, CacheConfigValidator } from "@libs/database";
+import { CacheService, type CacheConfigValidator } from "@libs/database";
 
 /**
  * Internal WebSocket rate limit result interface
@@ -46,6 +46,7 @@ export interface AdvancedRateLimitWebSocketConfig
   readonly closeOnLimit?: boolean;
   readonly sendWarningMessage?: boolean;
   readonly warningThreshold?: number; // percentage of limit (e.g., 80 for 80%)
+  readonly maxMessageSize?: number; // Maximum message size in bytes
   readonly redis: {
     readonly keyPrefix: string;
     readonly ttlBuffer: number;
@@ -104,6 +105,7 @@ const DEFAULT_WEBSOCKET_RATE_LIMIT_OPTIONS = {
   CLOSE_ON_LIMIT: false,
   SEND_WARNING_MESSAGE: true,
   WARNING_THRESHOLD: 80, // 80% of limit
+  MAX_MESSAGE_SIZE: 1024 * 1024, // 1MB default
   REDIS_KEY_PREFIX: "ws_rl:",
   REDIS_TTL_BUFFER: 1000,
   PRIORITY: 15, // High priority for rate limiting
@@ -181,6 +183,9 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
       warningThreshold:
         config.warningThreshold ??
         DEFAULT_WEBSOCKET_RATE_LIMIT_OPTIONS.WARNING_THRESHOLD,
+      maxMessageSize:
+        config.maxMessageSize ??
+        DEFAULT_WEBSOCKET_RATE_LIMIT_OPTIONS.MAX_MESSAGE_SIZE,
       redis: {
         keyPrefix:
           config.redis?.keyPrefix ??
@@ -686,16 +691,17 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
   }
 
   /**
-   * Initialize cache service (this should use a service locator or factory in production)
+   * Initialize cache service
    */
   private initializeCacheService(): CacheService {
-    // For now, throw a descriptive error until service locator pattern is implemented
-    // In production, this should use ServiceRegistry or another service locator
-    throw new Error(
-      "CacheService initialization required. " +
-        "RateLimitWebSocketMiddleware needs to be integrated with service locator pattern " +
-        "or CacheService factory for proper dependency management."
-    );
+    try {
+      return CacheService.create(this.metrics);
+    } catch (error) {
+      this.logger.error("Failed to create CacheService", error as Error);
+      throw new Error(
+        `CacheService initialization failed: ${(error as Error).message}`
+      );
+    }
   }
 
   /**

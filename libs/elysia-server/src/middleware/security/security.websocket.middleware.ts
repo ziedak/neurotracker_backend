@@ -17,6 +17,7 @@ import {
   type WebSocketMiddlewareConfig,
 } from "../base/BaseWebSocketMiddleware";
 import type { WebSocketContext } from "../types";
+import { Scheduler } from "@libs/utils";
 
 /**
  * Configuration for WebSocket Security middleware
@@ -52,6 +53,7 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
   private readonly connectionRegistry = new Map<string, ConnectionInfo>();
   private readonly ipConnectionCounts = new Map<string, number>();
   private readonly messageRateLimits = new Map<string, RateLimitInfo>();
+  private readonly scheduler = Scheduler.create();
 
   constructor(
     metrics: IMetricsCollector,
@@ -116,13 +118,13 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
       await this.registerConnection(context);
 
       // Validate connection security
-      await this.validateConnectionSecurity(context);
+       this.validateConnectionSecurity(context);
 
       // Validate message security
-      await this.validateMessageSecurity(context);
+       this.validateMessageSecurity(context);
 
       // Apply rate limiting
-      await this.applyRateLimit(context);
+       this.applyRateLimit(context);
 
       // Sanitize payload if enabled
       if (this.config.sanitizePayload) {
@@ -444,6 +446,7 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
     }
 
     // Check for suspicious patterns
+    // eslint-disable-next-line no-script-url
     const suspiciousPatterns = ["<script", "javascript:", "data:"];
     for (const [, value] of Object.entries(headers)) {
       if (typeof value === "string") {
@@ -474,10 +477,10 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
    * Cleanup stale connections and rate limit data
    */
   private startCleanupInterval(): void {
-    setInterval(() => {
+    this.scheduler.setInterval("cleanup", 60000, () => {
       this.cleanupStaleConnections();
       this.cleanupRateLimitData();
-    }, 60000); // Every minute
+    });
   }
 
   private cleanupStaleConnections(): void {
@@ -544,9 +547,13 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
   /**
    * Extract relevant information from WebSocket context for logging
    */
-  protected override extractContextInfo(
-    context: WebSocketContext
-  ): Record<string, any> {
+  protected override extractContextInfo(context: WebSocketContext): {
+    connectionId: string;
+    messageType: string;
+    clientIp: string;
+    origin: string;
+    messageCount: number;
+  } {
     return {
       connectionId: context.connectionId,
       messageType: context.message.type,
@@ -554,6 +561,16 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
       origin: this.getOrigin(context),
       messageCount: context.metadata.messageCount,
     };
+  }
+
+  /**
+   * Cleanup method to clear all timers and resources
+   */
+  public override cleanup(): void {
+    this.scheduler.clearAll();
+    this.connectionRegistry.clear();
+    this.ipConnectionCounts.clear();
+    this.messageRateLimits.clear();
   }
 
   /**

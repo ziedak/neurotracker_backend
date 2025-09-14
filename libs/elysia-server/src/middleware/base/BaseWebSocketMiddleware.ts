@@ -250,4 +250,14 @@ export abstract class BaseWebSocketMiddleware<
       return null;
     }
   }
+
+  /**
+   * Cleanup method for WebSocket middleware
+   * Default implementation - override in subclasses if needed
+   */
+  public cleanup(): void {
+    this.logger.debug("WebSocket middleware cleanup completed", {
+      middlewareName: this.config.name,
+    });
+  }
 }

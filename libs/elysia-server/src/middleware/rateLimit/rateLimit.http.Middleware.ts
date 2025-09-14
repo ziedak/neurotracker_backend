@@ -656,6 +656,34 @@ export class RateLimitHttpMiddleware extends BaseMiddleware<RateLimitHttpMiddlew
   }
 
   /**
+   * Cleanup method to destroy the rate limiter and clear resources
+   */
+  public override async cleanup(): Promise<void> {
+    try {
+      // Clear strategies map
+      this.strategies.clear();
+
+      // Dispose of cache service if it has a dispose method
+      if (
+        this.cacheService &&
+        typeof this.cacheService.dispose === "function"
+      ) {
+        await this.cacheService.dispose();
+      }
+
+      // Destroy rate limiter
+      await this.rateLimiter.destroy();
+
+      this.logger.info("RateLimitHttpMiddleware cleanup completed");
+    } catch (error) {
+      this.logger.error(
+        "Failed to cleanup RateLimitHttpMiddleware",
+        error as Error
+      );
+    }
+  }
+
+  /**
    * Create general rate limiting configuration preset
    */
   static createGeneralConfig(): Partial<RateLimitHttpMiddlewareConfig> {

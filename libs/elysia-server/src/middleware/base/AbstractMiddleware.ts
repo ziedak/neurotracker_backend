@@ -279,6 +279,12 @@ export abstract class AbstractMiddleware<
   }
 
   /**
+   * Abstract cleanup method - must be implemented by subclasses
+   * Called when the middleware needs to clean up resources
+   */
+  public abstract cleanup(): Promise<void> | void;
+
+  /**
    * Get middleware configuration (readonly)
    */
   public getConfig(): Readonly<TConfig> {

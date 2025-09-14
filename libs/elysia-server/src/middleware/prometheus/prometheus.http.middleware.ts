@@ -303,7 +303,7 @@ export class PrometheusHttpMiddleware extends BaseMiddleware<PrometheusHttpMiddl
       (result === "error" ? 500 : 200);
 
     // Record API request metrics using metrics collector
-    this.metrics.recordApiRequest(
+    await this.metrics.recordApiRequest(
       method,
       path,
       statusCode,

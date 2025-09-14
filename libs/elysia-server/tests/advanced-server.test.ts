@@ -19,11 +19,30 @@ import {
   type IMetricsCollector,
 } from "./mocks";
 
+// Global cleanup for all tests
+afterAll(async () => {
+  // Clear all timers
+  jest.clearAllTimers();
+
+  // Force garbage collection if available (in Node.js with --expose-gc)
+  if (global.gc) {
+    global.gc();
+  }
+
+  // Wait a bit for any pending async operations
+  await new Promise((resolve) => setTimeout(resolve, 100));
+});
+
 describe("AdvancedElysiaServerBuilder", () => {
   let mockConfig: ServerConfig;
   let mockMetrics: IMetricsCollector;
   let builder: AdvancedElysiaServerBuilder;
-  let mockWs: MockWebSocket;
+  let mockWs: ReturnType<typeof createMockWebSocket> & {
+    connectionId?: string;
+    connectedAt?: number;
+    data?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
 
   beforeEach(() => {
     setupCommonMocks();
@@ -40,11 +59,13 @@ describe("AdvancedElysiaServerBuilder", () => {
     mockWs = { ...createMockWebSocket(), data: {} };
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     jest.clearAllTimers();
     jest.clearAllMocks();
     // Cleanup builder state to prevent test interference
-    builder.cleanup();
+    if (builder) {
+      await builder.cleanup();
+    }
   });
 
   describe("Constructor", () => {

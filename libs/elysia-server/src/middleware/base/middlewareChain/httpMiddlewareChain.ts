@@ -320,6 +320,45 @@ export class HttpMiddlewareChain {
   }
 
   /**
+   * Cleanup all middlewares in the chain
+   */
+  public async cleanup(): Promise<void> {
+    this.logger.info("Starting HTTP middleware chain cleanup", {
+      chainName: this.chainName,
+      middlewareCount: this.middlewares.length,
+    });
+
+    for (const middleware of this.middlewares) {
+      try {
+        // Check if the middleware has a cleanup method using type assertion
+        const middlewareObj = middleware.middleware as unknown as {
+          cleanup?: () => void | Promise<void>;
+        };
+
+        if (
+          middlewareObj.cleanup &&
+          typeof middlewareObj.cleanup === "function"
+        ) {
+          const cleanupResult = middlewareObj.cleanup();
+          if (cleanupResult instanceof Promise) {
+            await cleanupResult;
+          }
+          this.logger.debug("Cleaned up middleware", {
+            middlewareName: middleware.name,
+          });
+        }
+      } catch (error) {
+        this.logger.error("Failed to cleanup middleware", error as Error, {
+          middlewareName: middleware.name,
+        });
+      }
+    }
+
+    this.logger.info("HTTP middleware chain cleanup completed", {
+      chainName: this.chainName,
+    });
+  }
+  /**
    * Generate unique execution ID for tracing
    */
   private generateExecutionId(): string {
