@@ -4,6 +4,7 @@
  * sanitization, ID generation, and data processing
  */
 
+import type { HttpMiddlewareConfig } from "../base";
 import { MiddlewareContext } from "../types";
 
 /**
@@ -21,8 +22,8 @@ export interface ValidationResult {
  * @returns ValidationResult with errors if any
  */
 export function validateMiddlewareConfig(
-  config: Record<string, unknown>,
-  type: "http" | "websocket"
+  config: HttpMiddlewareConfig,
+  _type: "http" | "websocket"
 ): ValidationResult {
   const errors: string[] = [];
 
@@ -77,32 +78,45 @@ export function sanitizeData(
   }
 
   // Handle objects
-  const sanitized: Record<string, unknown> = {};
   const dataObj = data as Record<string, unknown>;
 
   // Track visited objects to handle circular references
   const visited = new WeakSet();
 
-  if (visited.has(dataObj)) {
-    return "[CIRCULAR]";
-  }
-  visited.add(dataObj);
-
-  for (const [key, value] of Object.entries(dataObj)) {
-    const lowerKey = key.toLowerCase();
-
-    if (
-      sensitiveFields.some((field) =>
-        lowerKey.includes(field.toLowerCase())
-      )
-    ) {
-      sanitized[key] = "[REDACTED]";
-    } else {
-      sanitized[key] = sanitizeData(value, sensitiveFields);
+  function sanitizeObject(
+    obj: Record<string, unknown>
+  ): Record<string, unknown> {
+    if (visited.has(obj)) {
+      return { "[CIRCULAR]": true } as Record<string, unknown>;
     }
+    visited.add(obj);
+
+    const result: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(obj)) {
+      const lowerKey = key.toLowerCase();
+
+      if (
+        sensitiveFields.some((field) => lowerKey.includes(field.toLowerCase()))
+      ) {
+        result[key] = "[REDACTED]";
+      } else if (typeof value === "object" && value !== null) {
+        if (Array.isArray(value)) {
+          result[key] = value.map((item) =>
+            sanitizeData(item, sensitiveFields)
+          );
+        } else {
+          result[key] = sanitizeObject(value as Record<string, unknown>);
+        }
+      } else {
+        result[key] = value;
+      }
+    }
+
+    return result;
   }
 
-  return sanitized;
+  return sanitizeObject(dataObj);
 }
 
 /**
@@ -118,7 +132,9 @@ export function generateRequestId(): string {
  * @param jsonString - JSON string to parse
  * @returns Parsed object or error indicator
  */
-export function parseJsonSafely(jsonString: string | null | undefined): unknown {
+export function parseJsonSafely(
+  jsonString: string | null | undefined
+): unknown {
   if (!jsonString || typeof jsonString !== "string") {
     return "[INVALID_JSON]";
   }
@@ -135,7 +151,9 @@ export function parseJsonSafely(jsonString: string | null | undefined): unknown 
  * @param headers - Request headers
  * @returns Client IP address or undefined
  */
-export function getClientIP(headers: Record<string, string>): string | undefined {
+export function getClientIP(
+  headers: Record<string, string>
+): string | undefined {
   // Check for forwarded headers
   const forwardedFor = headers["x-forwarded-for"];
   if (forwardedFor) {
@@ -194,11 +212,22 @@ export function matchPathPattern(pattern: string, path: string): boolean {
 
   // Wildcard matching
   if (pattern.includes("*")) {
-    const regexPattern = pattern
-      .replace(/\*/g, ".*")
-      .replace(/\//g, "\\/");
-    const regex = new RegExp(`^${regexPattern}$`);
-    return regex.test(path);
+    // Wildcard matching
+    if (pattern.includes("*")) {
+      // Handle different wildcard patterns
+      if (pattern.endsWith("/*")) {
+        // Prefix pattern like "/api/*" - matches any path starting with the prefix
+        const prefix = pattern.slice(0, -1); // Remove the "/*"
+        return path.startsWith(prefix);
+      } else {
+        // General wildcard pattern - convert to regex with strict segment matching
+        const regexPattern = pattern
+          .replace(/\*/g, "([^/]+)") // * matches exactly one segment (no slashes)
+          .replace(/\//g, "\\/");
+        const regex = new RegExp(`^${regexPattern}$`);
+        return regex.test(path);
+      }
+    }
   }
 
   return false;
@@ -240,11 +269,12 @@ export function formatLogMessage(
   context: Record<string, unknown> = {}
 ): string {
   const timestamp = new Date().toISOString();
-  const contextStr = Object.keys(context).length > 0
-    ? ` | ${Object.entries(context)
-        .map(([key, value]) => `${key}=${String(value)}`)
-        .join(" ")}`
-    : "";
+  const contextStr =
+    Object.keys(context).length > 0
+      ? ` | ${Object.entries(context)
+          .map(([key, value]) => `${key}=${String(value)}`)
+          .join(" ")}`
+      : "";
 
   return `[${timestamp}] ${message}${contextStr}`;
 }
@@ -255,7 +285,10 @@ export function formatLogMessage(
 export class MiddlewareChain {
   private middlewares: Array<{
     name: string;
-    middleware: (context: MiddlewareContext, next: () => Promise<void>) => Promise<void>;
+    middleware: (
+      context: MiddlewareContext,
+      next: () => Promise<void>
+    ) => Promise<void>;
     priority: number;
     enabled: boolean;
   }> = [];
@@ -265,7 +298,10 @@ export class MiddlewareChain {
    */
   add(
     name: string,
-    middleware: (context: MiddlewareContext, next: () => Promise<void>) => Promise<void>,
+    middleware: (
+      context: MiddlewareContext,
+      next: () => Promise<void>
+    ) => Promise<void>,
     priority: number = 0
   ): void {
     this.middlewares.push({
@@ -275,8 +311,8 @@ export class MiddlewareChain {
       enabled: true,
     });
 
-    // Sort by priority (higher first)
-    this.middlewares.sort((a, b) => b.priority - a.priority);
+    // Sort by priority (lower priority first)
+    this.middlewares.sort((a, b) => a.priority - b.priority);
   }
 
   /**
@@ -311,11 +347,13 @@ export class MiddlewareChain {
     priority: number;
     enabled: boolean;
   }> {
-    return this.middlewares.map((m) => ({
-      name: m.name,
-      priority: m.priority,
-      enabled: m.enabled,
-    }));
+    return this.middlewares
+      .filter((m) => m.enabled)
+      .map((m) => ({
+        name: m.name,
+        priority: m.priority,
+        enabled: m.enabled,
+      }));
   }
 
   /**
@@ -349,7 +387,10 @@ export class MiddlewareChain {
 export function createMiddlewareChain(
   middlewares: Array<{
     name: string;
-    middleware: (context: MiddlewareContext, next: () => Promise<void>) => Promise<void>;
+    middleware: (
+      context: MiddlewareContext,
+      next: () => Promise<void>
+    ) => Promise<void>;
     priority?: number;
     enabled?: boolean;
   }>

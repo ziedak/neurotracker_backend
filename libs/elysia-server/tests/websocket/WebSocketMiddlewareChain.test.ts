@@ -50,6 +50,7 @@ const createMockContext = (): WebSocketContext => ({
     query: {},
   },
   authenticated: false,
+  executionOrder: [], // Initialize execution order array
 });
 
 // Mock middleware functions
@@ -68,7 +69,11 @@ const createTestMiddleware = (
         throw new Error(`${name} middleware failed`);
       }
 
-      // Set a marker to track execution order
+      // Track execution order
+      if (!context.executionOrder) {
+        context.executionOrder = [];
+      }
+      (context.executionOrder as string[]).push(name);
 
       await next();
     }

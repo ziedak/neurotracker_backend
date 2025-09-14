@@ -76,7 +76,7 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
     error: Error,
     context: MiddlewareContext
   ): Promise<void> {
-    const errorResponse = await this.createErrorResponse(error, context);
+    const errorResponse =  this.createErrorResponse(error, context);
 
     // Set status code
     context.set.status = errorResponse.statusCode ?? 500;
@@ -104,17 +104,17 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
 
     // Log error if configured
     if (this.config.logErrors) {
-      await this.logError(error, context);
+       this.logError(error, context);
     }
   }
 
   /**
    * Create formatted error response
    */
-  public async createErrorResponse(
+  public  createErrorResponse(
     error: Error | CustomError,
     context?: MiddlewareContext
-  ): Promise<ErrorResponse> {
+  ): ErrorResponse{
     try {
       const requestId =
         context?.requestId ??
@@ -191,10 +191,10 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
   /**
    * Log error with comprehensive context
    */
-  private async logError(
+  private  logError(
     error: Error | CustomError,
     context: MiddlewareContext
-  ): Promise<void> {
+  ): void {
     const errorContext: Record<string, unknown> = {
       requestId: context.requestId,
       errorType: this.getErrorType(error),
@@ -317,7 +317,7 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
     details: Record<string, unknown>
   ): Record<string, unknown> {
     const sensitiveFields = this.config.sensitiveFields ?? [];
-    return this.sanitizeObject(details, [...sensitiveFields]);
+    return this.sanitizeObject(details, [...sensitiveFields]) as Record<string, unknown>;
   }
 
   /**

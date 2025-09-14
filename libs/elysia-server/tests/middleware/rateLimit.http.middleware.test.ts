@@ -262,6 +262,7 @@ describe("RateLimitHttpMiddleware", () => {
     it("should generate IP-based keys", async () => {
       const ipMiddleware = new RateLimitHttpMiddleware(mockMetricsCollector, {
         keyStrategy: "ip",
+        redis: { keyPrefix: "test:" },
       });
 
       await ipMiddleware["execute"](mockContext, nextFunction);
@@ -277,6 +278,7 @@ describe("RateLimitHttpMiddleware", () => {
     it("should generate user-based keys", async () => {
       const userMiddleware = new RateLimitHttpMiddleware(mockMetricsCollector, {
         keyStrategy: "user",
+        redis: { keyPrefix: "test:" },
       });
 
       await userMiddleware["execute"](mockContext, nextFunction);
@@ -296,6 +298,7 @@ describe("RateLimitHttpMiddleware", () => {
         mockMetricsCollector,
         {
           keyStrategy: "apiKey",
+          redis: { keyPrefix: "test:" },
         }
       );
 
@@ -317,6 +320,7 @@ describe("RateLimitHttpMiddleware", () => {
         {
           keyStrategy: "custom",
           customKeyGenerator,
+          redis: { keyPrefix: "test:" },
         }
       );
 
@@ -626,7 +630,7 @@ describe("RateLimitHttpMiddleware", () => {
     it("should reject invalid keyStrategy", () => {
       expect(() => {
         new RateLimitHttpMiddleware(mockMetricsCollector, {
-          keyStrategy: "invalid" as any,
+          keyStrategy: "invalid" as "ip",
         });
       }).toThrow(
         "Rate limit keyStrategy must be one of: ip, user, apiKey, custom"

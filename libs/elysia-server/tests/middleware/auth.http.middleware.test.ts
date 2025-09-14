@@ -11,10 +11,10 @@ import {
   it,
   expect,
 } from "@jest/globals";
-import { AuthHttpMiddleware } from "../../src/middleware/auth/auth.http.middleware";
+import { AuthenticationService, User } from "@libs/auth";
 import { MiddlewareContext } from "../../src/middleware/types";
 import { IMetricsCollector } from "@libs/monitoring";
-import { IAuthService } from "@libs/auth";
+import { AuthHttpMiddleware } from "../../src/middleware/auth/auth.http.middleware";
 
 // Mock dependencies
 const mockMetricsCollector = {
@@ -24,17 +24,18 @@ const mockMetricsCollector = {
 } as jest.Mocked<IMetricsCollector>;
 
 const mockAuthService = {
-  validateToken: jest.fn(),
+  verifyToken: jest.fn(),
   refreshToken: jest.fn(),
-  revokeToken: jest.fn(),
   getUserById: jest.fn(),
+  can: jest.fn(),
   getUserPermissions: jest.fn(),
-  validatePermissions: jest.fn(),
-  createSession: jest.fn(),
-  getSession: jest.fn(),
-  destroySession: jest.fn(),
-  validateSession: jest.fn(),
-} as jest.Mocked<IAuthService>;
+  getJWTService: jest.fn(),
+  getSessionService: jest.fn(),
+  getApiKeyService: jest.fn(),
+  getPermissionService: jest.fn(),
+  getKeycloakService: jest.fn(),
+  healthCheck: jest.fn(),
+} as jest.Mocked<AuthenticationService>;
 
 const mockRedisClient = {
   set: jest.fn(),
@@ -76,14 +77,13 @@ describe("AuthHttpMiddleware", () => {
       enabled: true,
       priority: 5,
       requireAuth: true,
-      publicPaths: ["/health", "/login", "/register"],
-      tokenHeader: "authorization",
-      tokenPrefix: "Bearer",
-      sessionTimeout: 3600,
-      refreshTokenEnabled: true,
-      rateLimitEnabled: true,
-      rateLimitWindow: 900,
-      rateLimitMax: 100,
+      bypassRoutes: ["/health", "/login", "/register"],
+      jwtAuth: true,
+      apiKeyAuth: true,
+      sessionAuth: false,
+      allowAnonymous: false,
+      strictMode: false,
+      extractUserInfo: true,
     });
 
     // Create mock context
@@ -134,7 +134,7 @@ describe("AuthHttpMiddleware", () => {
       expect(defaultMiddleware).toBeDefined();
       expect(defaultMiddleware["config"].name).toBe("auth");
       expect(defaultMiddleware["config"].requireAuth).toBe(true);
-      expect(defaultMiddleware["config"].publicPaths).toEqual([
+      expect(defaultMiddleware["config"].bypassRoutes).toEqual([
         "/health",
         "/login",
         "/register",
@@ -143,17 +143,18 @@ describe("AuthHttpMiddleware", () => {
 
     it("should initialize with custom configuration", () => {
       expect(middleware["config"].name).toBe("test-auth");
-      expect(middleware["config"].tokenHeader).toBe("authorization");
-      expect(middleware["config"].tokenPrefix).toBe("Bearer");
-      expect(middleware["config"].sessionTimeout).toBe(3600);
+      expect(middleware["config"].requireAuth).toBe(true);
+      expect(middleware["config"].jwtAuth).toBe(true);
     });
 
     it("should validate configuration on initialization", () => {
       expect(() => {
         new AuthHttpMiddleware(mockMetricsCollector, mockAuthService, {
-          sessionTimeout: -1, // Invalid
+          jwtAuth: false,
+          apiKeyAuth: false,
+          sessionAuth: false, // Invalid - no auth method enabled
         });
-      }).toThrow("Auth sessionTimeout must be a positive integer");
+      }).toThrow("At least one authentication method must be enabled");
     });
   });
 
@@ -168,11 +169,11 @@ describe("AuthHttpMiddleware", () => {
         anonymous: false,
       };
 
-      mockAuthService.validateToken.mockResolvedValue(mockUser);
+      mockAuthService.verifyToken.mockResolvedValue(mockUser);
 
       await middleware["execute"](mockContext, nextFunction);
 
-      expect(mockAuthService.validateToken).toHaveBeenCalledWith(
+      expect(mockAuthService.verifyToken).toHaveBeenCalledWith(
         "valid-jwt-token"
       );
       expect(mockContext.user).toEqual(mockUser);
@@ -212,7 +213,7 @@ describe("AuthHttpMiddleware", () => {
     });
 
     it("should handle expired tokens", async () => {
-      mockAuthService.validateToken.mockRejectedValue(
+      mockAuthService.verifyToken.mockRejectedValue(
         new Error("Token expired")
       );
 
@@ -228,7 +229,7 @@ describe("AuthHttpMiddleware", () => {
     });
 
     it("should handle invalid tokens", async () => {
-      mockAuthService.validateToken.mockRejectedValue(
+      mockAuthService.verifyToken.mockRejectedValue(
         new Error("Invalid token")
       );
 
@@ -251,7 +252,7 @@ describe("AuthHttpMiddleware", () => {
 
       await middleware["execute"](mockContext, nextFunction);
 
-      expect(mockAuthService.validateToken).not.toHaveBeenCalled();
+      expect(mockAuthService.verifyToken).not.toHaveBeenCalled();
       expect(mockContext.user).toBeUndefined();
       expect(mockMetricsCollector.recordCounter).toHaveBeenCalledWith(
         "auth_public_path_access",
@@ -266,7 +267,7 @@ describe("AuthHttpMiddleware", () => {
 
       await middleware["execute"](mockContext, nextFunction);
 
-      expect(mockAuthService.validateToken).not.toHaveBeenCalled();
+      expect(mockAuthService.verifyToken).not.toHaveBeenCalled();
     });
 
     it("should allow access to register endpoint", async () => {
@@ -275,7 +276,7 @@ describe("AuthHttpMiddleware", () => {
 
       await middleware["execute"](mockContext, nextFunction);
 
-      expect(mockAuthService.validateToken).not.toHaveBeenCalled();
+      expect(mockAuthService.verifyToken).not.toHaveBeenCalled();
     });
   });
 
@@ -297,14 +298,14 @@ describe("AuthHttpMiddleware", () => {
         expiresAt: new Date(Date.now() + 3600000),
       };
 
-      mockAuthService.validateToken.mockResolvedValue(mockUser);
-      mockAuthService.createSession.mockResolvedValue(mockSession);
+      mockAuthService.verifyToken.mockResolvedValue(mockUser);
+      mockAuthService.getSessionService().createSession?.mockResolvedValue(mockSession);
 
       await middleware["execute"](mockContext, nextFunction);
 
-      expect(mockAuthService.createSession).toHaveBeenCalledWith(
+      expect(mockAuthService.getSessionService().createSession).toHaveBeenCalledWith(
         mockUser,
-        3600
+        expect.any(Number)
       );
       expect(mockContext.session).toEqual(mockSession);
     });
@@ -472,9 +473,9 @@ describe("AuthHttpMiddleware", () => {
       mockAuthService.refreshToken.mockResolvedValue(newToken);
 
       // Mock token nearing expiration (less than 5 minutes)
-      mockAuthService.validateToken.mockImplementation(() => {
+      mockAuthService.verifyToken.mockImplementation(() => {
         const error = new Error("Token expiring soon");
-        (error as any).expiresIn = 240; // 4 minutes
+        (error as Error & { expiresIn: number }).expiresIn = 240; // 4 minutes
         throw error;
       });
 
@@ -513,7 +514,7 @@ describe("AuthHttpMiddleware", () => {
 
   describe("Error Handling", () => {
     it("should handle authentication service failures", async () => {
-      mockAuthService.validateToken.mockRejectedValue(
+      mockAuthService.verifyToken.mockRejectedValue(
         new Error("Auth service unavailable")
       );
 
@@ -545,7 +546,7 @@ describe("AuthHttpMiddleware", () => {
     });
 
     it("should handle malformed user data", async () => {
-      mockAuthService.validateToken.mockResolvedValue(null as any);
+      mockAuthService.verifyToken.mockResolvedValue(null as User | null);
 
       await expect(
         middleware["execute"](mockContext, nextFunction)

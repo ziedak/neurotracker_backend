@@ -282,7 +282,10 @@ export class ErrorWebSocketMiddleware extends BaseWebSocketMiddleware<ErrorWebSo
     details: Record<string, unknown>
   ): Record<string, unknown> {
     const sensitiveFields = this.config.sensitiveFields ?? [];
-    return this.sanitizeObject(details, [...sensitiveFields]);
+    return this.sanitizeObject(details, [...sensitiveFields]) as Record<
+      string,
+      unknown
+    >;
   }
 
   /**

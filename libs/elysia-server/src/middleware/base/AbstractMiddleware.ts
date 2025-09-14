@@ -109,7 +109,7 @@ export abstract class AbstractMiddleware<
    * Override in subclasses for protocol-specific information
    * @param context - Protocol-specific context
    */
-  protected abstract extractContextInfo(context: TContext): Record<string, any>;
+  protected abstract extractContextInfo(context: TContext): Record<string, unknown>;
 
   /**
    * Record a metric counter with consistent tagging
@@ -194,31 +194,52 @@ export abstract class AbstractMiddleware<
    * @param obj - Object to sanitize
    * @param sensitiveFields - Additional sensitive field patterns
    */
+  /**
+   * Sanitize object by removing or masking sensitive fields
+   * Handles circular references to prevent infinite recursion
+   * @param obj - Object to sanitize
+   * @param sensitiveFields - Additional sensitive field patterns
+   * @param visited - Internal set to track visited objects (for circular refs)
+   */
   protected sanitizeObject(
     obj: unknown,
-    sensitiveFields: string[] = []
+    sensitiveFields: string[] = [],
+    visited: WeakSet<object> = new WeakSet()
   ): unknown {
+    // Handle non-objects or null
     if (!obj || typeof obj !== "object") {
       return obj;
     }
 
+    // Prevent circular references
+    if (visited.has(obj)) {
+      return "[CIRCULAR_REFERENCE]";
+    }
+    visited.add(obj);
+
+    // Handle arrays
     if (Array.isArray(obj)) {
-      return obj.map((item) => this.sanitizeObject(item, sensitiveFields));
+      return obj.map((item) => this.sanitizeObject(item, sensitiveFields, visited));
     }
 
-    const sanitized: Record<string, any> = {};
+    // Handle plain objects
+    const sanitized: Record<string, unknown> = {};
     const defaultSensitive = ["password", "token", "secret", "key", "auth"];
     const allSensitive = [...defaultSensitive, ...sensitiveFields];
 
+    // Pre-compile regex for faster matching (union of patterns)
+    const sensitiveRegex = new RegExp(
+      allSensitive.map(field => field.toLowerCase()).join("|"),
+      "i"
+    );
+
     for (const [key, value] of Object.entries(obj)) {
-      const isSensitive = allSensitive.some((field) =>
-        key.toLowerCase().includes(field.toLowerCase())
-      );
+      const isSensitive = sensitiveRegex.test(key);
 
       if (isSensitive) {
         sanitized[key] = "[REDACTED]";
       } else if (typeof value === "object" && value !== null) {
-        sanitized[key] = this.sanitizeObject(value, sensitiveFields);
+        sanitized[key] = this.sanitizeObject(value, sensitiveFields, visited);
       } else {
         sanitized[key] = value;
       }

@@ -54,8 +54,7 @@ interface ExtendedWebSocket {
 export class AdvancedElysiaServerBuilder {
   private app?: Elysia;
   private readonly config: ServerConfig;
-  private readonly connections: Map<string, ExtendedWebSocket | unknown> =
-    new Map();
+  private readonly connections: Map<string, ExtendedWebSocket> = new Map();
   private readonly rooms: Map<string, Set<string>> = new Map();
   private readonly userConnections: Map<string, Set<string>> = new Map();
   private readonly logger: ILogger;
@@ -330,10 +329,7 @@ export class AdvancedElysiaServerBuilder {
 
     // Setup WebSocket with middleware chain
     if (this.config.websocket?.enabled && this.wsChain) {
-      this.setupWebSocketWithMiddleware().catch((error) => {
-        this.logger.error("Failed to setup WebSocket with middleware", error);
-        this.logger.error("Failed to setup WebSocket with middleware", error);
-      });
+      this.setupWebSocketWithMiddleware();
     }
 
     // Health check endpoint
@@ -369,7 +365,7 @@ export class AdvancedElysiaServerBuilder {
           headers: request.headers as unknown as Record<string, string>,
           body: undefined,
         },
-        headers: request.headers as unknown as Record<string, string>,
+
         response: {
           status: 200,
           headers: {},
@@ -427,8 +423,8 @@ export class AdvancedElysiaServerBuilder {
         this.connections.set(connectionId, ws);
 
         // Set connection metadata
-        (ws as unknown as ExtendedWebSocket).connectionId = connectionId;
-        (ws as unknown as ExtendedWebSocket).connectedAt = Date.now();
+        (ws as ExtendedWebSocket).connectionId = connectionId;
+        (ws as ExtendedWebSocket).connectedAt = Date.now();
 
         this.logger.info("WebSocket connection opened", { connectionId });
 
@@ -437,7 +433,7 @@ export class AdvancedElysiaServerBuilder {
       },
 
       message: async (ws, message) => {
-        const { connectionId } = ws as unknown as ExtendedWebSocket;
+        const { connectionId } = ws as ExtendedWebSocket;
 
         if (!connectionId) {
           this.logger.warn("WebSocket message received without connection ID");
@@ -480,7 +476,7 @@ export class AdvancedElysiaServerBuilder {
           authenticated: false, // Default to unauthenticated
           metadata: {
             connectedAt: new Date(
-              (ws as unknown as ExtendedWebSocket).connectedAt ?? Date.now()
+              (ws as ExtendedWebSocket).connectedAt ?? Date.now()
             ),
             lastActivity: new Date(),
             messageCount: 1,
@@ -527,7 +523,7 @@ export class AdvancedElysiaServerBuilder {
       },
 
       close: async (ws) => {
-        const { connectionId } = ws as unknown as ExtendedWebSocket;
+        const { connectionId } = ws as ExtendedWebSocket;
 
         if (connectionId) {
           this.connections.delete(connectionId);
@@ -731,7 +727,11 @@ export class AdvancedElysiaServerBuilder {
     websocket: {
       enabled: boolean;
       count: number;
-      middlewares: unknown[];
+      middlewares: Array<{
+        name: string;
+        priority: number;
+        enabled: boolean;
+      }>;
     };
   } {
     return {

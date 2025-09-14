@@ -83,7 +83,37 @@ export class SecurityHttpMiddleware extends BaseMiddleware<SecurityHttpMiddlewar
       enabled: config.enabled ?? true,
       priority: config.priority ?? 0,
       skipPaths: config.skipPaths || [],
-      ...config,
+      contentSecurityPolicy: {
+        enabled: true,
+        directives: {
+          "default-src": ["'self'"],
+          "script-src": ["'self'", "'unsafe-inline'"],
+          "style-src": ["'self'", "'unsafe-inline'"],
+          "img-src": ["'self'", "data:", "https:"],
+          "font-src": ["'self'"],
+          "connect-src": ["'self'"],
+          "frame-ancestors": ["'none'"],
+          "base-uri": ["'self'"],
+          "form-action": ["'self'"],
+        },
+      },
+      hsts: {
+        enabled: true,
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true,
+      },
+      frameOptions: "DENY",
+      noSniff: true,
+      xssFilter: true,
+      referrerPolicy: "strict-origin-when-cross-origin",
+      permissionsPolicy: {
+        camera: ["'none'"],
+        microphone: ["'none'"],
+        geolocation: ["'none'"],
+        payment: ["'none'"],
+      },
+      ...config, // Override with user config
     };
 
     super(metrics, defaultConfig);
@@ -100,7 +130,7 @@ export class SecurityHttpMiddleware extends BaseMiddleware<SecurityHttpMiddlewar
 
     try {
       // Set security headers before processing request
-      await this.setSecurityHeaders(context);
+      this.setSecurityHeaders(context);
 
       // Record metrics
       await this.recordMetric("security_headers_applied");
@@ -129,7 +159,7 @@ export class SecurityHttpMiddleware extends BaseMiddleware<SecurityHttpMiddlewar
   /**
    * Set security headers based on configuration
    */
-  private async setSecurityHeaders(context: MiddlewareContext): Promise<void> {
+  private setSecurityHeaders(context: MiddlewareContext): void {
     const config = this.mergeConfig(this.defaultConfig, this.config);
     const { set } = context;
 

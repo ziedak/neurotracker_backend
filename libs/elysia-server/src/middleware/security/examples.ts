@@ -24,6 +24,7 @@ import {
   createFullStackSecurity,
   createWebSocketSecurityForEnvironment,
 } from "./index";
+import { type MiddlewareContext } from "../types/context.types";
 
 // Mock metrics collector for examples
 const metrics: IMetricsCollector = {} as IMetricsCollector;
@@ -96,6 +97,7 @@ export function basicWebSocketSecurityExample() {
     rateLimitPerConnection: {
       messagesPerMinute: 30,
       messagesPerHour: 1000,
+      bytesPerMinute: 100,
     },
   });
 
@@ -334,6 +336,7 @@ export function loadBalancerWebSocketExample() {
     rateLimitPerConnection: {
       messagesPerMinute: 200,
       messagesPerHour: 10000,
+      bytesPerMinute: 0,
     },
   });
 
@@ -349,15 +352,32 @@ export function expressIntegrationExample() {
   const httpSecurity = createProductionSecurity(metrics);
 
   // Convert to Express middleware
-  return (req: any, res: any, next: any) => {
-    const context = {
-      request: { url: req.url, method: req.method, headers: req.headers },
-      response: res,
+  return (req: unknown, res: unknown, next: unknown) => {
+    const expressReq = req as {
+      url: string;
+      method: string;
+      headers: Record<string, string>;
+      id?: string;
+    };
+    const expressRes = res as {
+      status?: number;
+      headers?: Record<string, string>;
+      body?: unknown;
+    };
+    const expressNext = next as () => Promise<void>;
+
+    const context: MiddlewareContext = {
+      request: {
+        url: expressReq.url,
+        method: expressReq.method,
+        headers: expressReq.headers,
+      },
+      response: expressRes,
       set: { headers: {} },
-      requestId: req.id,
+      ...(expressReq.id && { requestId: expressReq.id }),
     };
 
-    return httpSecurity.middleware()(context, next);
+    return httpSecurity.middleware()(context, expressNext);
   };
 }
 
@@ -365,23 +385,34 @@ export function expressIntegrationExample() {
 export function socketIOIntegrationExample() {
   const wsSecurity = createProductionWebSocketSecurity(metrics);
 
-  return (socket: any, next: any) => {
+  return (socket: unknown, next: unknown) => {
+    const ioSocket = socket as {
+      id: string;
+      handshake: {
+        address: string;
+        headers: Record<string, string>;
+        query: Record<string, unknown>;
+      };
+    };
+    const ioNext = next as () => void;
+    const asyncNext = () => Promise.resolve(ioNext());
+
     const context = {
       ws: socket,
-      connectionId: socket.id,
+      connectionId: ioSocket.id,
       message: { type: "connection", payload: {} },
       metadata: {
         connectedAt: new Date(),
         lastActivity: new Date(),
         messageCount: 0,
-        clientIp: socket.handshake.address,
-        headers: socket.handshake.headers,
-        query: socket.handshake.query,
+        clientIp: ioSocket.handshake.address,
+        headers: ioSocket.handshake.headers,
+        query: ioSocket.handshake.query as Record<string, string>,
       },
       authenticated: false,
     };
 
-    return wsSecurity.middleware()(context, next);
+    return wsSecurity.middleware()(context, asyncNext);
   };
 }
 

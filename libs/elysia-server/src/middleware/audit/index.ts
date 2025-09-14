@@ -5,9 +5,11 @@
 
 import { type IMetricsCollector } from "@libs/monitoring";
 import { RedisClient, ClickHouseClient } from "@libs/database";
+import type { MiddlewareContext } from "../types/context.types";
 import {
   AuditHttpMiddleware,
   type AuditHttpMiddlewareConfig,
+  type AuditEvent,
 } from "./audit.http.middleware";
 
 /**
@@ -266,47 +268,47 @@ export const AUDIT_PRESETS = {
 /**
  * Create audit middleware with comprehensive dependency injection
  * @param metrics - Metrics collector instance
- * @param redisClient - Redis client for fast storage
- * @param clickhouseClient - ClickHouse client for analytics
  * @param config - Middleware configuration
+ * @param redisClient - Optional Redis client (uses default if not provided)
+ * @param clickhouseClient - Optional ClickHouse client (uses default if not provided)
  */
 export function createAuditHttpMiddleware(
   metrics: IMetricsCollector,
-  redisClient: RedisClient,
-  clickhouseClient: ClickHouseClient,
-  config: Partial<AuditHttpMiddlewareConfig> = {}
+  config: Partial<AuditHttpMiddlewareConfig> = {},
+  redisClient?: RedisClient,
+  clickhouseClient?: ClickHouseClient
 ): AuditHttpMiddleware {
   return new AuditHttpMiddleware(
     metrics,
+    config,
     redisClient,
-    clickhouseClient,
-    config
+    clickhouseClient
   );
 }
 
 /**
  * Create audit middleware with preset configuration
  * @param metrics - Metrics collector instance
- * @param redisClient - Redis client for fast storage
- * @param clickhouseClient - ClickHouse client for analytics
  * @param preset - Preset configuration function
  * @param overrides - Configuration overrides
+ * @param redisClient - Optional Redis client (uses default if not provided)
+ * @param clickhouseClient - Optional ClickHouse client (uses default if not provided)
  */
 export function createAuditHttpMiddlewareWithPreset(
   metrics: IMetricsCollector,
-  redisClient: RedisClient,
-  clickhouseClient: ClickHouseClient,
   preset: () => Partial<AuditHttpMiddlewareConfig>,
-  overrides: Partial<AuditHttpMiddlewareConfig> = {}
+  overrides: Partial<AuditHttpMiddlewareConfig> = {},
+  redisClient?: RedisClient,
+  clickhouseClient?: ClickHouseClient
 ): AuditHttpMiddleware {
   const presetConfig = preset();
   const finalConfig = { ...presetConfig, ...overrides };
 
   return new AuditHttpMiddleware(
     metrics,
+    finalConfig,
     redisClient,
-    clickhouseClient,
-    finalConfig
+    clickhouseClient
   );
 }
 
@@ -319,16 +321,16 @@ export const AUDIT_FACTORIES = {
    */
   forDevelopment(
     metrics: IMetricsCollector,
-    redisClient: RedisClient,
-    clickhouseClient: ClickHouseClient,
-    overrides: Partial<AuditHttpMiddlewareConfig> = {}
+    overrides: Partial<AuditHttpMiddlewareConfig> = {},
+    redisClient?: RedisClient,
+    clickhouseClient?: ClickHouseClient
   ): AuditHttpMiddleware {
     return createAuditHttpMiddlewareWithPreset(
       metrics,
-      redisClient,
-      clickhouseClient,
       AUDIT_PRESETS.development,
-      overrides
+      overrides,
+      redisClient,
+      clickhouseClient
     );
   },
 
@@ -337,16 +339,16 @@ export const AUDIT_FACTORIES = {
    */
   forProduction(
     metrics: IMetricsCollector,
-    redisClient: RedisClient,
-    clickhouseClient: ClickHouseClient,
-    overrides: Partial<AuditHttpMiddlewareConfig> = {}
+    overrides: Partial<AuditHttpMiddlewareConfig> = {},
+    redisClient?: RedisClient,
+    clickhouseClient?: ClickHouseClient
   ): AuditHttpMiddleware {
     return createAuditHttpMiddlewareWithPreset(
       metrics,
-      redisClient,
-      clickhouseClient,
       AUDIT_PRESETS.production,
-      overrides
+      overrides,
+      redisClient,
+      clickhouseClient
     );
   },
 
@@ -355,16 +357,16 @@ export const AUDIT_FACTORIES = {
    */
   forGDPR(
     metrics: IMetricsCollector,
-    redisClient: RedisClient,
-    clickhouseClient: ClickHouseClient,
-    overrides: Partial<AuditHttpMiddlewareConfig> = {}
+    overrides: Partial<AuditHttpMiddlewareConfig> = {},
+    redisClient?: RedisClient,
+    clickhouseClient?: ClickHouseClient
   ): AuditHttpMiddleware {
     return createAuditHttpMiddlewareWithPreset(
       metrics,
-      redisClient,
-      clickhouseClient,
       AUDIT_PRESETS.gdprCompliance,
-      overrides
+      overrides,
+      redisClient,
+      clickhouseClient
     );
   },
 
@@ -373,16 +375,16 @@ export const AUDIT_FACTORIES = {
    */
   forSOX(
     metrics: IMetricsCollector,
-    redisClient: RedisClient,
-    clickhouseClient: ClickHouseClient,
-    overrides: Partial<AuditHttpMiddlewareConfig> = {}
+    overrides: Partial<AuditHttpMiddlewareConfig> = {},
+    redisClient?: RedisClient,
+    clickhouseClient?: ClickHouseClient
   ): AuditHttpMiddleware {
     return createAuditHttpMiddlewareWithPreset(
       metrics,
-      redisClient,
-      clickhouseClient,
       AUDIT_PRESETS.soxCompliance,
-      overrides
+      overrides,
+      redisClient,
+      clickhouseClient
     );
   },
 
@@ -391,16 +393,16 @@ export const AUDIT_FACTORIES = {
    */
   forHIPAA(
     metrics: IMetricsCollector,
-    redisClient: RedisClient,
-    clickhouseClient: ClickHouseClient,
-    overrides: Partial<AuditHttpMiddlewareConfig> = {}
+    overrides: Partial<AuditHttpMiddlewareConfig> = {},
+    redisClient?: RedisClient,
+    clickhouseClient?: ClickHouseClient
   ): AuditHttpMiddleware {
     return createAuditHttpMiddlewareWithPreset(
       metrics,
-      redisClient,
-      clickhouseClient,
       AUDIT_PRESETS.hipaaCompliance,
-      overrides
+      overrides,
+      redisClient,
+      clickhouseClient
     );
   },
 
@@ -409,16 +411,16 @@ export const AUDIT_FACTORIES = {
    */
   forPCI(
     metrics: IMetricsCollector,
-    redisClient: RedisClient,
-    clickhouseClient: ClickHouseClient,
-    overrides: Partial<AuditHttpMiddlewareConfig> = {}
+    overrides: Partial<AuditHttpMiddlewareConfig> = {},
+    redisClient?: RedisClient,
+    clickhouseClient?: ClickHouseClient
   ): AuditHttpMiddleware {
     return createAuditHttpMiddlewareWithPreset(
       metrics,
-      redisClient,
-      clickhouseClient,
       AUDIT_PRESETS.pciCompliance,
-      overrides
+      overrides,
+      redisClient,
+      clickhouseClient
     );
   },
 
@@ -427,16 +429,16 @@ export const AUDIT_FACTORIES = {
    */
   forHighPerformance(
     metrics: IMetricsCollector,
-    redisClient: RedisClient,
-    clickhouseClient: ClickHouseClient,
-    overrides: Partial<AuditHttpMiddlewareConfig> = {}
+    overrides: Partial<AuditHttpMiddlewareConfig> = {},
+    redisClient?: RedisClient,
+    clickhouseClient?: ClickHouseClient
   ): AuditHttpMiddleware {
     return createAuditHttpMiddlewareWithPreset(
       metrics,
-      redisClient,
-      clickhouseClient,
       AUDIT_PRESETS.highPerformance,
-      overrides
+      overrides,
+      redisClient,
+      clickhouseClient
     );
   },
 
@@ -445,16 +447,16 @@ export const AUDIT_FACTORIES = {
    */
   forSecurity(
     metrics: IMetricsCollector,
-    redisClient: RedisClient,
-    clickhouseClient: ClickHouseClient,
-    overrides: Partial<AuditHttpMiddlewareConfig> = {}
+    overrides: Partial<AuditHttpMiddlewareConfig> = {},
+    redisClient?: RedisClient,
+    clickhouseClient?: ClickHouseClient
   ): AuditHttpMiddleware {
     return createAuditHttpMiddlewareWithPreset(
       metrics,
-      redisClient,
-      clickhouseClient,
       AUDIT_PRESETS.securityMonitoring,
-      overrides
+      overrides,
+      redisClient,
+      clickhouseClient
     );
   },
 
@@ -463,16 +465,16 @@ export const AUDIT_FACTORIES = {
    */
   forAPI(
     metrics: IMetricsCollector,
-    redisClient: RedisClient,
-    clickhouseClient: ClickHouseClient,
-    overrides: Partial<AuditHttpMiddlewareConfig> = {}
+    overrides: Partial<AuditHttpMiddlewareConfig> = {},
+    redisClient?: RedisClient,
+    clickhouseClient?: ClickHouseClient
   ): AuditHttpMiddleware {
     return createAuditHttpMiddlewareWithPreset(
       metrics,
-      redisClient,
-      clickhouseClient,
       AUDIT_PRESETS.apiMonitoring,
-      overrides
+      overrides,
+      redisClient,
+      clickhouseClient
     );
   },
 } as const;
@@ -489,34 +491,22 @@ export const AUDIT_TESTING_UTILS = {
       recordCounter: jest.fn(),
       recordTimer: jest.fn(),
       recordHistogram: jest.fn(),
-    } as any;
+      recordGauge: jest.fn(),
+      recordSummary: jest.fn(),
+      getMetrics: jest.fn(),
+      recordApiRequest: jest.fn(),
+      measureEventLoopLag: jest.fn(),
+    } as unknown as IMetricsCollector;
 
-    const mockRedis = {
-      getRedis: () => ({
-        setex: jest.fn(),
-        get: jest.fn(),
-        del: jest.fn(),
-      }),
-    } as any;
-
-    const mockClickhouse = {
-      insert: jest.fn(),
-      execute: jest.fn(),
-    } as any;
-
-    const middleware = new AuditHttpMiddleware(
-      mockMetrics,
-      mockRedis,
-      mockClickhouse,
-      { name: "test-audit", ...config }
-    );
+    const middleware = new AuditHttpMiddleware(mockMetrics, {
+      name: "test-audit",
+      ...config,
+    });
 
     return {
       middleware,
       mocks: {
         metrics: mockMetrics,
-        redis: mockRedis,
-        clickhouse: mockClickhouse,
       },
     };
   },
@@ -524,7 +514,7 @@ export const AUDIT_TESTING_UTILS = {
   /**
    * Create a test context for audit middleware
    */
-  createTestContext(overrides: any = {}) {
+  createTestContext(overrides: Partial<MiddlewareContext> = {}) {
     return {
       request: {
         method: "GET",
@@ -542,16 +532,16 @@ export const AUDIT_TESTING_UTILS = {
       },
       user: overrides.user || null,
       session: overrides.session || null,
-      params: overrides.params || {},
-      query: overrides.query || {},
+      params: overrides["params"] || {},
+      query: overrides["query"] || {},
       ...overrides,
-    };
+    } as MiddlewareContext;
   },
 
   /**
    * Create a test audit event
    */
-  createTestAuditEvent(overrides: any = {}) {
+  createTestAuditEvent(overrides: Partial<AuditEvent> = {}) {
     return {
       id: "test-audit-123",
       userId: "user-123",
@@ -567,7 +557,7 @@ export const AUDIT_TESTING_UTILS = {
       statusCode: 200,
       duration: 100,
       ...overrides,
-    };
+    } as AuditEvent;
   },
 } as const;
 
