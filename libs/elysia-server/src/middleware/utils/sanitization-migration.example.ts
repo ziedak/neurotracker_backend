@@ -31,9 +31,16 @@ class ApiKeyStrategyOld {
 }
 
 class LoggingWebSocketMiddlewareOld {
-  private sanitizeHeaders(headers: Record<string, string>): Record<string, string> {
+  private sanitizeHeaders(
+    headers: Record<string, string>
+  ): Record<string, string> {
     const sanitized: Record<string, string> = {};
-    const sensitiveHeaders = ["authorization", "cookie", "set-cookie", "x-api-key"];
+    const sensitiveHeaders = [
+      "authorization",
+      "cookie",
+      "set-cookie",
+      "x-api-key",
+    ];
 
     for (const [key, value] of Object.entries(headers)) {
       const lowerKey = key.toLowerCase();
@@ -54,7 +61,10 @@ class LoggingWebSocketMiddlewareOld {
 }
 
 class SecurityWebSocketMiddlewareOld {
-  private sanitizeObject(obj: Record<string, unknown>, sensitiveFields: string[]): Record<string, unknown> {
+  private sanitizeObject(
+    obj: Record<string, unknown>,
+    sensitiveFields: string[]
+  ): Record<string, unknown> {
     // Another custom implementation...
     return obj;
   }
@@ -68,7 +78,7 @@ import {
   sanitizePayload,
   middlewareSanitizers,
   createSanitizer,
-  type SanitizationConfig
+  type SanitizationConfig,
 } from "../utils/sanitization.utils";
 
 // ✅ NEW - ApiKeyStrategy.ts
@@ -91,7 +101,9 @@ class ApiKeyStrategy {
 // ✅ NEW - logging.websocket.middleware.ts
 class LoggingWebSocketMiddleware {
   // Simple header sanitization
-  private sanitizeHeaders(headers: Record<string, string>): Record<string, string> {
+  private sanitizeHeaders(
+    headers: Record<string, string>
+  ): Record<string, string> {
     return sanitizeHeaders(headers) as Record<string, string>;
   }
 
@@ -115,8 +127,13 @@ class LoggingWebSocketMiddleware {
 // ✅ NEW - security.websocket.middleware.ts
 class SecurityWebSocketMiddleware {
   // Use pre-configured security sanitizer
-  private sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
-    return middlewareSanitizers.security.sanitize(obj).data as Record<string, unknown>;
+  private sanitizeObject(
+    obj: Record<string, unknown>
+  ): Record<string, unknown> {
+    return middlewareSanitizers.security.sanitize(obj).data as Record<
+      string,
+      unknown
+    >;
   }
 
   // Or use the general utility
@@ -129,7 +146,7 @@ class SecurityWebSocketMiddleware {
 
 // Example 1: Environment-specific sanitization
 const createEnvironmentSanitizer = () => {
-  const isProduction = process.env['NODE_ENV'] === "production";
+  const isProduction = process.env["NODE_ENV"] === "production";
 
   return createSanitizer({
     maskingStrategy: isProduction ? "redact" : "partial",
@@ -173,8 +190,8 @@ class ModernCorsMiddleware {
   processRequest(context: Record<string, unknown>) {
     // Log sanitized request data
     this.logger.info("CORS request processed", {
-      origin: context['headers'],
-      headers: this.sanitizer.sanitize(context['headers']).data,
+      origin: context["headers"],
+      headers: this.sanitizer.sanitize(context["headers"]).data,
       timestamp: new Date().toISOString(),
     });
   }
@@ -184,9 +201,9 @@ class ModernCorsMiddleware {
     this.logger.error("CORS error", {
       error: error.message,
       sanitizedContext: this.sanitizer.sanitize({
-        headers: context['headers'],
-        url: context['url'],
-        method: context['method'],
+        headers: context["headers"],
+        url: context["url"],
+        method: context["method"],
       }).data,
     });
   }
@@ -222,10 +239,10 @@ describe("Sanitization Integration", () => {
             preferences: {
               theme: "dark",
               notifications: true,
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     };
 
     const result = sanitizers.logging.sanitize(complexPayload);
