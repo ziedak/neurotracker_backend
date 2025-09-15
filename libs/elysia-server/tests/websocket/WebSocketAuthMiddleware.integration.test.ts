@@ -7,6 +7,18 @@ jest.mock("@libs/auth");
 jest.mock("@libs/monitoring");
 
 // Create mocks
+const mockJWTService = {
+  extractTokenFromHeader: jest.fn().mockReturnValue("test-token"),
+};
+
+const mockPermissionService = {
+  createAuthContext: jest.fn().mockReturnValue({
+    user: { id: "user_123", roles: ["user"], permissions: ["test:read"] },
+    permissions: ["test:read"],
+    roles: ["user"],
+  }),
+};
+
 const mockMetrics: {
   recordCounter: jest.MockedFunction<() => void>;
   recordTimer: jest.MockedFunction<() => void>;
@@ -21,18 +33,18 @@ const mockAuthService: {
   verifyToken: jest.MockedFunction<() => Promise<unknown>>;
   getUserById: jest.MockedFunction<() => Promise<unknown>>;
   can: jest.MockedFunction<() => Promise<boolean>>;
-  getJWTService: jest.MockedFunction<() => unknown>;
+  getJWTService: jest.MockedFunction<() => typeof mockJWTService>;
   getApiKeyService: jest.MockedFunction<() => unknown>;
   getSessionService: jest.MockedFunction<() => unknown>;
-  getPermissionService: jest.MockedFunction<() => unknown>;
+  getPermissionService: jest.MockedFunction<() => typeof mockPermissionService>;
 } = {
   verifyToken: jest.fn(),
   getUserById: jest.fn(),
   can: jest.fn(),
-  getJWTService: jest.fn(),
+  getJWTService: jest.fn().mockReturnValue(mockJWTService),
   getApiKeyService: jest.fn(),
   getSessionService: jest.fn(),
-  getPermissionService: jest.fn(),
+  getPermissionService: jest.fn().mockReturnValue(mockPermissionService),
 };
 
 // Test data factories
@@ -145,5 +157,12 @@ describe("WebSocketAuthMiddleware Integration", () => {
     await middleware.middleware()(context, next);
 
     expect(next).toHaveBeenCalled();
+    expect(mockJWTService.extractTokenFromHeader).toHaveBeenCalledWith("Bearer test-token");
+    expect(mockAuthService.verifyToken).toHaveBeenCalledWith("test-token");
+    expect(mockPermissionService.createAuthContext).toHaveBeenCalledWith({
+      id: "user_123",
+      roles: ["user"],
+      permissions: ["test:read"],
+    });
   });
 });

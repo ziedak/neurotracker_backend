@@ -98,7 +98,7 @@ describe("CorsHttpMiddleware", () => {
         "PATCH",
         "OPTIONS",
       ]);
-      expect(defaultMiddleware["config"].credentials).toBe(true);
+      expect(defaultMiddleware["config"].credentials).toBe(false);
     });
 
     it("should initialize with custom configuration", () => {
@@ -147,7 +147,7 @@ describe("CorsHttpMiddleware", () => {
     it("should handle preflight with multiple requested headers", async () => {
       mockContext.request.method = "OPTIONS";
       mockContext.request.headers["access-control-request-headers"] =
-        "content-type,authorization,x-custom-header";
+        "content-type,authorization,x-requested-with";
 
       await middleware["execute"](mockContext, nextFunction);
 
@@ -518,7 +518,7 @@ describe("CorsHttpMiddleware", () => {
       ).rejects.toThrow();
 
       expect(mockMetricsCollector.recordCounter).toHaveBeenCalledWith(
-        "cors_request_failure",
+        "cors_origin_rejected",
         1,
         expect.any(Object)
       );

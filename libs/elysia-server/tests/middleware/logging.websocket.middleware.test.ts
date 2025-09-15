@@ -646,12 +646,15 @@ describe("LoggingWebSocketMiddleware", () => {
 
     it("should skip heartbeat logging when disabled", async () => {
       // Create middleware with default excludeMessageTypes (includes ping/pong/heartbeat)
-      const defaultMiddleware = new LoggingWebSocketMiddleware(mockMetricsCollector, {
-        name: "test-default-exclude",
-        enabled: true,
-        logIncomingMessages: true,
-        // Use default excludeMessageTypes which should include ping/pong/heartbeat
-      });
+      const defaultMiddleware = new LoggingWebSocketMiddleware(
+        mockMetricsCollector,
+        {
+          name: "test-default-exclude",
+          enabled: true,
+          logIncomingMessages: true,
+          // Use default excludeMessageTypes which should include ping/pong/heartbeat
+        }
+      );
 
       // Clear any previous calls from initialization
       jest.clearAllMocks();

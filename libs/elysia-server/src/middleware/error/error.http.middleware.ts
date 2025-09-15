@@ -74,7 +74,10 @@ export class ErrorHttpMiddleware extends BaseMiddleware<ErrorHttpMiddlewareConfi
   /**
    * Validate middleware configuration
    */
-  validateConfig(config: ErrorHttpMiddlewareConfig): void {
+  static override validateConfig(config: ErrorHttpMiddlewareConfig): void {
+    // Call base validation first
+    super.validateConfig(config);
+
     // Validate maxErrorMessageLength
     if (
       config.maxErrorMessageLength !== undefined &&

@@ -40,9 +40,25 @@ describe("Base Middleware Classes", () => {
           context: MiddlewareContext,
           next: () => Promise<void>
         ): Promise<void> {
-          this.beforeProcess(context);
-          await next();
-          this.afterProcess(context);
+          const startTime = Date.now();
+          try {
+            await this.beforeProcess(context);
+            await next();
+            await this.afterProcess(context);
+
+            // Record execution time metric
+            await this.recordTimer(
+              "base_http_execution_time",
+              Date.now() - startTime,
+              { middleware: this.config.name }
+            );
+          } catch (error) {
+            // Record error metric
+            await this.recordMetric("base_http_error", 1, {
+              errorType: (error as Error).name,
+            });
+            throw error;
+          }
         }
 
         protected async handleRequest(
@@ -145,9 +161,14 @@ describe("Base Middleware Classes", () => {
             context: MiddlewareContext,
             next: () => Promise<void>
           ): Promise<void> {
-            this.beforeProcess(context);
+            // Check if middleware is enabled before calling lifecycle methods
+            if (!this.config.enabled) {
+              await next();
+              return;
+            }
+            await this.beforeProcess(context);
             await next();
-            this.afterProcess(context);
+            await this.afterProcess(context);
           }
           protected async handleRequest(): Promise<void> {}
         })(mockMetricsCollector, { enabled: false });
@@ -292,8 +313,17 @@ describe("Base Middleware Classes", () => {
             context: MiddlewareContext,
             next: () => Promise<void>
           ): Promise<void> {
-            await this.beforeExecute(context);
-            throw new Error("Test error");
+            const startTime = Date.now();
+            try {
+              await this.beforeProcess(context);
+              throw new Error("Test error");
+            } catch (error) {
+              // Record error metric
+              await this.recordMetric("base_http_error", 1, {
+                errorType: (error as Error).name,
+              });
+              throw error;
+            }
           }
           protected async handleRequest(): Promise<void> {}
         })(mockMetricsCollector, {});
@@ -325,9 +355,25 @@ describe("Base Middleware Classes", () => {
           context: WebSocketContext,
           next: () => Promise<void>
         ): Promise<void> {
-          await this.beforeProcessing(context);
-          await next();
-          await this.afterProcessing(context);
+          const startTime = Date.now();
+          try {
+            await this.beforeProcessing(context);
+            await next();
+            await this.afterProcessing(context);
+
+            // Record execution time metric
+            await this.recordTimer(
+              "base_websocket_execution_time",
+              Date.now() - startTime,
+              { middleware: this.config.name }
+            );
+          } catch (error) {
+            // Record error metric
+            await this.recordMetric("base_websocket_error", 1, {
+              errorType: (error as Error).name,
+            });
+            throw error;
+          }
         }
 
         // Add lifecycle methods for this test class
@@ -459,9 +505,14 @@ describe("Base Middleware Classes", () => {
             context: WebSocketContext,
             next: () => Promise<void>
           ): Promise<void> {
-            await this.beforeExecute(context);
+            // Check if middleware is enabled before calling lifecycle methods
+            if (!this.config.enabled) {
+              await next();
+              return;
+            }
+            await this.beforeProcessing(context);
             await next();
-            await this.afterExecute(context);
+            await this.afterProcessing(context);
           }
           protected async handleWebSocketMessage(): Promise<void> {}
         })(mockMetricsCollector, { enabled: false });
@@ -637,7 +688,7 @@ describe("Base Middleware Classes", () => {
             enabled: true,
             priority: -1,
           });
-        }).toThrow("Priority must be non-negative");
+        }).toThrow("Base WebSocket priority must be a non-negative integer");
       });
     });
 
@@ -658,8 +709,17 @@ describe("Base Middleware Classes", () => {
             context: WebSocketContext,
             next: () => Promise<void>
           ): Promise<void> {
-            await this.beforeExecute(context);
-            throw new Error("WebSocket test error");
+            const startTime = Date.now();
+            try {
+              await this.beforeProcessing(context);
+              throw new Error("WebSocket test error");
+            } catch (error) {
+              // Record error metric
+              await this.recordMetric("base_websocket_error", 1, {
+                errorType: (error as Error).name,
+              });
+              throw error;
+            }
           }
           protected async handleWebSocketMessage(): Promise<void> {}
         })(mockMetricsCollector, {});
@@ -837,6 +897,94 @@ describe("Base Middleware Classes", () => {
     });
 
     describe("Error Handling", () => {
+      let testNextFunction: jest.MockedFunction<() => Promise<void>>;
+      let testMockContext: MiddlewareContext;
+      let testMockWSContext: WebSocketContext;
+
+      beforeEach(() => {
+        testNextFunction = jest.fn().mockResolvedValue(undefined);
+        testMockContext = {
+          requestId: "test-request-123",
+          request: {
+            method: "GET",
+            url: "/api/test",
+            headers: { "user-agent": "test-agent" },
+            body: { test: "data" },
+            query: {},
+            params: {},
+            ip: "192.168.1.1",
+          },
+          response: {
+            status: 200,
+            headers: { "content-type": "application/json" },
+            body: { success: true },
+          },
+          set: {
+            status: 200,
+            headers: { "content-type": "application/json" },
+            body: { success: true },
+          },
+          user: undefined,
+          session: undefined,
+          validated: {},
+          path: "/api/test",
+        };
+        testMockWSContext = {
+          requestId: "ws-test-request-123",
+          connectionId: "ws-conn-456",
+          request: {
+            method: "GET",
+            url: "/ws/test",
+            headers: {
+              connection: "upgrade",
+              upgrade: "websocket",
+              "sec-websocket-key": "test-key",
+            },
+            body: {},
+            query: {},
+            params: {},
+            ip: "192.168.1.1",
+          },
+          response: {
+            status: 101,
+            headers: { upgrade: "websocket" },
+          },
+          set: {
+            status: 101,
+            headers: {
+              connection: "upgrade",
+              upgrade: "websocket",
+            },
+          },
+          user: undefined,
+          session: undefined,
+          validated: {},
+          path: "/ws/test",
+          websocket: {
+            send: jest.fn(),
+            close: jest.fn(),
+            ping: jest.fn(),
+            pong: jest.fn(),
+            isAlive: true,
+            readyState: 1,
+            data: {},
+          },
+          message: {
+            type: "text",
+            data: Buffer.from("test"),
+          },
+          isBinary: false,
+          ws: {
+            send: jest.fn(),
+            close: jest.fn(),
+            ping: jest.fn(),
+            pong: jest.fn(),
+          },
+          metadata: {},
+          authenticated: false,
+        } as WebSocketContext;
+      });
+
       it("should handle middleware execution errors gracefully", async () => {
         const errorMiddleware = new (class extends BaseHttpMiddleware {
           async execute(
@@ -844,11 +992,11 @@ describe("Base Middleware Classes", () => {
             next: () => Promise<void>
           ): Promise<void> {
             try {
-              await this.beforeExecute(context);
+              await this.beforeProcess(context);
               await next();
-              await this.afterExecute(context);
+              await this.afterProcess(context);
             } catch (error) {
-              await this.handleError(error, context);
+              await this.handleError(error as Error, context);
             }
           }
           protected async handleRequest(): Promise<void> {}
@@ -861,12 +1009,12 @@ describe("Base Middleware Classes", () => {
           }
         })(mockMetricsCollector, {});
 
-        nextFunction.mockRejectedValue(new Error("Test error"));
+        testNextFunction.mockRejectedValue(new Error("Test error"));
 
-        await errorMiddleware["execute"](mockContext, nextFunction);
+        await errorMiddleware["execute"](testMockContext, testNextFunction);
 
-        expect(mockContext.set.status).toBe(500);
-        expect(mockContext.set.body).toEqual({
+        expect(testMockContext.set.status).toBe(500);
+        expect(testMockContext.set.body).toEqual({
           error: "Internal server error",
         });
       });
@@ -878,11 +1026,11 @@ describe("Base Middleware Classes", () => {
             next: () => Promise<void>
           ): Promise<void> {
             try {
-              await this.beforeExecute(context);
+              await this.beforeProcessing(context);
               await next();
-              await this.afterExecute(context);
+              await this.afterProcessing(context);
             } catch (error) {
-              await this.handleError(error, context);
+              await this.handleError(error as Error, context);
             }
           }
           protected async handleWebSocketMessage(): Promise<void> {}
@@ -890,15 +1038,15 @@ describe("Base Middleware Classes", () => {
             error: Error,
             context: WebSocketContext
           ): Promise<void> {
-            context.websocket.close(4000, "Internal error");
+            (context.websocket as any).close(4000, "Internal error");
           }
         })(mockMetricsCollector, {});
 
-        nextFunction.mockRejectedValue(new Error("WebSocket test error"));
+        testNextFunction.mockRejectedValue(new Error("WebSocket test error"));
 
-        await errorMiddleware["execute"](mockWSContext, nextFunction);
+        await errorMiddleware["execute"](testMockWSContext, testNextFunction);
 
-        expect(mockWSContext.websocket.close).toHaveBeenCalledWith(
+        expect((testMockWSContext.websocket as any).close).toHaveBeenCalledWith(
           4000,
           "Internal error"
         );

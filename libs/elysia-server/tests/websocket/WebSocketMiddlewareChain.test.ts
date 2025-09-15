@@ -65,15 +65,15 @@ const createTestMiddleware = (
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
 
-      if (shouldFail) {
-        throw new Error(`${name} middleware failed`);
-      }
-
-      // Track execution order
+      // Track execution order BEFORE potentially failing
       if (!context.executionOrder) {
         context.executionOrder = [];
       }
       (context.executionOrder as string[]).push(name);
+
+      if (shouldFail) {
+        throw new Error(`${name} middleware failed`);
+      }
 
       await next();
     }

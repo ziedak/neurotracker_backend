@@ -291,7 +291,11 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
    * Extract origin from request with proper null handling
    */
   private extractOrigin(context: MiddlewareContext): string | null {
-    const { origin } = context.request.headers;
+    const { headers } = context.request;
+    
+    // HTTP headers are case-insensitive, so check multiple cases
+    const origin = headers["origin"] || headers["Origin"] || headers["ORIGIN"];
+    
     return typeof origin === "string" ? origin : null;
   }
 
@@ -312,8 +316,10 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
    */
   private validateOrigin(origin: string | null): OriginValidationResult {
     if (!origin) {
+      const wildcardAllowed = this.config.origin === "*" || this.config.origin === true;
       return {
-        allowed: this.config.origin === "*" || this.config.origin === true,
+        allowed: wildcardAllowed,
+        matchedOrigin: wildcardAllowed ? "*" : undefined,
         reason: "no_origin_header",
       };
     }
@@ -369,14 +375,28 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
     context: MiddlewareContext,
     origin: string | null
   ): Promise<void> {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    
     this.logger.error("CORS middleware error", {
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: errorMessage,
       origin: origin || "null",
       path: context.request.url,
       requestId: this.getRequestId(context),
     });
 
-    await this.recordMetric("cors_origin_rejected", 1, {
+    // Record specific error metrics based on error type
+    let metricName = "cors_request_failure"; // Default fallback
+    if (errorMessage === "Origin not allowed") {
+      metricName = "cors_origin_rejected";
+    } else if (errorMessage === "Method not allowed") {
+      metricName = "cors_method_rejected";
+    } else if (errorMessage === "Header not allowed") {
+      metricName = "cors_header_rejected";
+    } else if (errorMessage === "Invalid origin format") {
+      metricName = "cors_invalid_origin";
+    }
+
+    await this.recordMetric(metricName, 1, {
       error_type: error instanceof Error ? error.constructor.name : "unknown",
       origin: origin || "null",
     });

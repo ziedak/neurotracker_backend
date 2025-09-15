@@ -43,12 +43,30 @@ export interface HttpMiddlewareConfig extends BaseMiddlewareConfig {
 export abstract class BaseMiddleware<
   TConfig extends HttpMiddlewareConfig = HttpMiddlewareConfig
 > extends AbstractMiddleware<TConfig, MiddlewareContext> {
-  constructor(metrics: IMetricsCollector, config: TConfig, name?: string) {
+  constructor(
+    metrics: IMetricsCollector,
+    config: Partial<TConfig>,
+    name?: string
+  ) {
     const httpDefaults = {
       skipPaths: [] as readonly string[],
+      enabled: true,
+      priority: 0,
     };
 
-    super(metrics, { ...httpDefaults, ...config } as TConfig, name);
+    // Set default name if not provided
+    const defaultName =
+      name || (config as Partial<BaseMiddlewareConfig>).name || "base-http";
+    const configWithDefaults = {
+      ...httpDefaults,
+      ...config,
+      name: defaultName,
+    } as TConfig;
+
+    // Validate configuration after merging defaults
+    BaseMiddleware.validateConfig(configWithDefaults);
+
+    super(metrics, configWithDefaults, defaultName);
   }
 
   /**
@@ -95,11 +113,22 @@ export abstract class BaseMiddleware<
       throw new Error("Configuration enabled must be a boolean");
     }
 
+    // HTTP-specific validation
     if (
       configObj["priority"] !== undefined &&
-      typeof configObj["priority"] !== "number"
+      (typeof configObj["priority"] !== "number" || configObj["priority"] < 0)
     ) {
-      throw new Error("Configuration priority must be a number");
+      throw new Error("Base HTTP priority must be a non-negative integer");
+    }
+
+    if (
+      configObj["skipPaths"] !== undefined &&
+      (!Array.isArray(configObj["skipPaths"]) ||
+        !configObj["skipPaths"].every(
+          (path: unknown) => typeof path === "string"
+        ))
+    ) {
+      throw new Error("Configuration skipPaths must be an array of strings");
     }
   }
 
@@ -239,6 +268,44 @@ export abstract class BaseMiddleware<
     this.logger.debug("HTTP middleware cleanup completed", {
       middlewareName: this.config.name,
     });
+  }
+
+  /**
+   * Update configuration with validation
+   */
+  public updateConfig(configOverrides: Partial<TConfig>): void {
+    const newConfig = { ...this.config, ...configOverrides } as TConfig;
+    // Call static validateConfig for validation
+    (this.constructor as typeof BaseMiddleware).validateConfig(newConfig);
+    // Update config via property assignment
+    Object.assign(this as unknown as { config: TConfig }, {
+      config: Object.freeze(newConfig),
+    });
+  }
+
+  /**
+   * Sort middleware instances by priority (lower priority numbers first = higher priority)
+   */
+  static sortByPriority<T extends BaseMiddleware>(middlewares: T[]): T[] {
+    return middlewares.sort((a, b) => a.config.priority - b.config.priority);
+  }
+
+  /**
+   * Factory method to create middleware instances
+   */
+  static create<
+    TConfig extends HttpMiddlewareConfig,
+    T extends BaseMiddleware<TConfig>
+  >(
+    metrics: IMetricsCollector,
+    config: TConfig,
+    MiddlewareClass: new (
+      metrics: IMetricsCollector,
+      config: TConfig,
+      name?: string
+    ) => T
+  ): T {
+    return new MiddlewareClass(metrics, config, config.name);
   }
 }
 

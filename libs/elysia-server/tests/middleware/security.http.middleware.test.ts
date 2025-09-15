@@ -564,7 +564,8 @@ describe("SecurityHttpMiddleware", () => {
 
       expect(mockMetricsCollector.recordTimer).toHaveBeenCalledWith(
         "security_middleware_error_duration",
-        expect.any(Number)
+        expect.any(Number),
+        { middleware: "security" }
       );
 
       // Restore the spy
@@ -589,7 +590,8 @@ describe("SecurityHttpMiddleware", () => {
 
       expect(mockMetricsCollector.recordTimer).toHaveBeenCalledWith(
         "security_middleware_duration",
-        expect.any(Number)
+        expect.any(Number),
+        { middleware: "test-security" }
       );
     });
 
@@ -612,7 +614,8 @@ describe("SecurityHttpMiddleware", () => {
 
       expect(mockMetricsCollector.recordTimer).toHaveBeenCalledWith(
         "security_middleware_error_duration",
-        expect.any(Number)
+        expect.any(Number),
+        { middleware: "test-security" }
       );
     });
   });

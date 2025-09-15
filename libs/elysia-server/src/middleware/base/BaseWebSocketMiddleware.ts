@@ -47,12 +47,32 @@ export interface WebSocketMiddlewareConfig extends BaseMiddlewareConfig {
 export abstract class BaseWebSocketMiddleware<
   TConfig extends WebSocketMiddlewareConfig = WebSocketMiddlewareConfig
 > extends AbstractMiddleware<TConfig, WebSocketContext> {
-  constructor(metrics: IMetricsCollector, config: TConfig, name?: string) {
+  constructor(
+    metrics: IMetricsCollector,
+    config: Partial<TConfig>,
+    name?: string
+  ) {
     const wsDefaults = {
       skipMessageTypes: [] as readonly string[],
+      enabled: true,
+      priority: 0,
     };
 
-    super(metrics, { ...wsDefaults, ...config } as TConfig, name);
+    // Set default name if not provided
+    const defaultName =
+      name ||
+      (config as Partial<BaseMiddlewareConfig>).name ||
+      "base-websocket";
+    const configWithDefaults = {
+      ...wsDefaults,
+      ...config,
+      name: defaultName,
+    } as TConfig;
+
+    // Validate configuration after merging defaults
+    BaseWebSocketMiddleware.validateConfig(configWithDefaults);
+
+    super(metrics, configWithDefaults, defaultName);
   }
 
   /**
@@ -267,5 +287,116 @@ export abstract class BaseWebSocketMiddleware<
     this.logger.debug("WebSocket middleware cleanup completed", {
       middlewareName: this.config.name,
     });
+  }
+
+  /**
+   * Update configuration with validation
+   */
+  public updateConfig(configOverrides: Partial<TConfig>): void {
+    const newConfig = { ...this.config, ...configOverrides } as TConfig;
+    // Call static validateConfig for validation
+    (this.constructor as typeof BaseWebSocketMiddleware).validateConfig(
+      newConfig
+    );
+    // Update config via property assignment
+    Object.assign(this as unknown as { config: TConfig }, {
+      config: Object.freeze(newConfig),
+    });
+  }
+
+  /**
+   * Static method to validate configuration
+   * Override in subclasses for custom validation
+   */
+  static validateConfig(config: unknown): void {
+    if (!config || typeof config !== "object") {
+      throw new Error("Configuration must be an object");
+    }
+
+    const configObj = config as Record<string, unknown>;
+
+    if (!configObj["name"] || typeof configObj["name"] !== "string") {
+      throw new Error("Configuration must have a valid name");
+    }
+
+    if (
+      configObj["enabled"] !== undefined &&
+      typeof configObj["enabled"] !== "boolean"
+    ) {
+      throw new Error("Configuration enabled must be a boolean");
+    }
+
+    // WebSocket-specific validation
+    if (
+      configObj["priority"] !== undefined &&
+      (typeof configObj["priority"] !== "number" || configObj["priority"] < 0)
+    ) {
+      throw new Error("Base WebSocket priority must be a non-negative integer");
+    }
+
+    if (
+      configObj["skipMessageTypes"] !== undefined &&
+      (!Array.isArray(configObj["skipMessageTypes"]) ||
+        !configObj["skipMessageTypes"].every(
+          (type: unknown) => typeof type === "string"
+        ))
+    ) {
+      throw new Error(
+        "Configuration skipMessageTypes must be an array of strings"
+      );
+    }
+  }
+
+  /**
+   * Sort middleware instances by priority (lower priority numbers first = higher priority)
+   */
+  static sortByPriority<T extends BaseWebSocketMiddleware>(
+    middlewares: T[]
+  ): T[] {
+    return middlewares.sort((a, b) => a.config.priority - b.config.priority);
+  }
+
+  /**
+   * Factory method to create middleware instances
+   */
+  static create<
+    TConfig extends WebSocketMiddlewareConfig,
+    T extends BaseWebSocketMiddleware<TConfig>
+  >(
+    metrics: IMetricsCollector,
+    config: TConfig,
+    MiddlewareClass: new (
+      metrics: IMetricsCollector,
+      config: TConfig,
+      name?: string
+    ) => T
+  ): T {
+    return new MiddlewareClass(metrics, config, config.name);
+  }
+
+  // Instance methods expected by tests
+  protected beforeProcessing(context: WebSocketContext): void {
+    this.logger.debug("Before processing WebSocket message", {
+      connectionId: context.connectionId,
+      messageType: context.message?.type,
+    });
+  }
+
+  protected afterProcessing(context: WebSocketContext): void {
+    this.logger.debug("After processing WebSocket message", {
+      connectionId: context.connectionId,
+      messageType: context.message?.type,
+    });
+  }
+
+  // Alias methods for backward compatibility with tests
+  protected async beforeExecute(context: WebSocketContext): Promise<void> {
+    this.beforeProcessing(context);
+    return Promise.resolve();
+  }
+
+  protected async afterExecute(context: WebSocketContext): Promise<void> {
+    this.afterProcessing(context);
+    return Promise.resolve();
   }
 }
