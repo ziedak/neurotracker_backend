@@ -85,10 +85,9 @@ export class PrometheusWebSocketMiddleware extends BaseWebSocketMiddleware<Prome
     };
 
     super(metrics, defaultConfig);
-    this.serviceName = this.config.serviceName!;
-
+    this.serviceName = this.config.serviceName ?? "websocket-service";
     // Start metrics flush timer
-    if (this.config.metricsFlushInterval! > 0) {
+    if (this.config.metricsFlushInterval ?? 5000 > 0) {
       this.startMetricsFlushTimer();
     }
   }

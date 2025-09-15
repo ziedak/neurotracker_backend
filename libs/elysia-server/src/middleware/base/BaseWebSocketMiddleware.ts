@@ -113,15 +113,23 @@ export abstract class BaseWebSocketMiddleware<
    * Extract relevant information from WebSocket context for logging
    */
   protected override extractContextInfo(
-    context: WebSocketContext
+    context: WebSocketContext,
+    extraInfoContext?: Record<string, unknown>
   ): Record<string, unknown> {
-    return {
+    const contextInfo: Record<string, unknown> = {
       messageType: context.message.type,
       connectionId: context.connectionId,
       userId: context.userId,
       authenticated: context.authenticated,
       clientIp: this.getClientIp(context),
     };
+
+    // Add extra context if provided
+    if (extraInfoContext) {
+      Object.assign(contextInfo, extraInfoContext);
+    }
+
+    return contextInfo;
   }
 
   /**

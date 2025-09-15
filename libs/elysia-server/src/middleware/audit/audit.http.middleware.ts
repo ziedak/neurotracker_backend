@@ -260,7 +260,7 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
    * Determine if middleware should skip processing for this context
    */
   protected override shouldSkip(context: MiddlewareContext): boolean {
-    const path = context.request.url ?? "/";
+    const path = context.request?.url ?? "/";
 
     // Skip if middleware is disabled
     if (!this.config.enabled) {
@@ -279,36 +279,37 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
   protected override extractContextInfo(
     context: MiddlewareContext,
     extraInfoContext?: Record<string, unknown>
-  ): {
-    path: string;
-    method: string;
-    requestId: string | undefined;
-    ip: string;
-    extraInfo?: Record<string, unknown> | undefined;
-  } {
-    // Handle MiddlewareContext
-    const middlewareContext = context as MiddlewareContext;
-    const extraInfo: Record<string, unknown> = {
-      userId: this.extractUserId(middlewareContext),
-      sessionId: this.extractSessionId(middlewareContext),
-      userAgent: this.extractUserAgent(middlewareContext),
+  ): Record<string, unknown> {
+    const contextInfo: Record<string, unknown> = {
+      path: context.request?.url ?? "/",
+      method: context.request?.method ?? "GET",
+      requestId: this.getRequestId(context),
+      ip: this.extractClientIp(context),
+      userId: this.extractUserId(context),
+      sessionId: this.extractSessionId(context),
+      userAgent: this.extractUserAgent(context),
     };
 
     // Handle AuditEvent context if applicable
-    if ("action" in context && "resource" in context) {
+    if ("action" in context && "resource" in context && extraInfoContext) {
       const auditEvent = extraInfoContext as unknown as AuditEvent;
-      extraInfo["action"] = auditEvent.action;
-      extraInfo["resource"] = auditEvent.resource;
-      extraInfo["result"] = auditEvent.result;
+      if (
+        auditEvent &&
+        typeof auditEvent === "object" &&
+        "action" in auditEvent
+      ) {
+        contextInfo["action"] = auditEvent.action;
+        contextInfo["resource"] = auditEvent.resource;
+        contextInfo["result"] = auditEvent.result;
+      }
     }
 
-    return {
-      path: middlewareContext.request?.url ?? "/",
-      method: middlewareContext.request?.method ?? "GET",
-      requestId: this.getRequestId(middlewareContext),
-      ip: this.extractClientIp(middlewareContext),
-      extraInfo,
-    };
+    // Add extra context if provided
+    if (extraInfoContext && typeof extraInfoContext === "object") {
+      Object.assign(contextInfo, extraInfoContext);
+    }
+
+    return contextInfo;
   }
 
   /**
@@ -535,14 +536,17 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
    * Helper methods for data extraction
    */
   private extractUserId(context: MiddlewareContext): string | undefined {
+    if (!context.request) return undefined;
     return context.user?.id ?? context.request.headers?.["x-user-id"];
   }
 
   private extractSessionId(context: MiddlewareContext): string | undefined {
+    if (!context.request) return undefined;
     return context.session?.id ?? context.request.headers?.["x-session-id"];
   }
 
   private extractAction(context: MiddlewareContext): string {
+    if (!context.request) return "unknown_action";
     const method = context.request.method?.toLowerCase() ?? "unknown";
     const path = context.request.url?.split("?")[0] ?? "/";
 
@@ -557,6 +561,7 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
   }
 
   private extractResource(context: MiddlewareContext): string {
+    if (!context.request) return "unknown";
     const path = context.request.url?.split("?")[0] ?? "/";
     const segments = path.split("/").filter(Boolean);
 
@@ -568,6 +573,7 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
   }
 
   private extractResourceId(context: MiddlewareContext): string | undefined {
+    if (!context.request) return undefined;
     const path = context.request.url?.split("?")[0] ?? "/";
     const segments = path.split("/").filter(Boolean);
 
@@ -583,13 +589,11 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
       }
     }
 
-    return (
-      ((context["params"] as Record<string, unknown>)?.["id"] as string) ??
-      ((context["query"] as Record<string, unknown>)?.["id"] as string)
-    );
+    return undefined;
   }
 
   private extractClientIp(context: MiddlewareContext): string {
+    if (!context.request) return "unknown";
     return (
       context.request.headers?.["x-forwarded-for"] ??
       context.request.headers?.["x-real-ip"] ??
@@ -599,6 +603,7 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
   }
 
   private extractUserAgent(context: MiddlewareContext): string {
+    if (!context.request) return "unknown";
     return context.request.headers?.["user-agent"] ?? "unknown";
   }
 
@@ -611,16 +616,16 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
    */
   private buildMetadata(context: MiddlewareContext): Record<string, unknown> {
     const metadata: Record<string, unknown> = {
-      method: context.request.method,
-      url: context.request.url,
+      method: context.request?.method ?? "unknown",
+      url: context.request?.url ?? "/",
       headers: this.sanitizeObject(
-        context.request.headers ?? {},
+        context.request?.headers ?? {},
         this.config.sensitiveFields as string[]
       ),
     };
 
     // Include request body if configured
-    if (this.config.includeBody && context.request["body"]) {
+    if (this.config.includeBody && context.request?.["body"]) {
       metadata["body"] = this.sanitizeRequestBody(context.request["body"]);
     }
 

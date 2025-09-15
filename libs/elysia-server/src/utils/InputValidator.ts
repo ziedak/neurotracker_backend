@@ -213,16 +213,16 @@ export class InputValidator {
       throw new Error("Message must be an object");
     }
 
-    if (!message.type || typeof message.type !== "string") {
+    if (message.type === null || message.type === undefined) {
       throw new Error("Invalid message: missing type");
-    }
-
-    if (message.type.length === 0) {
-      throw new Error("Invalid message: type cannot be empty");
     }
 
     if (typeof message.type !== "string") {
       throw new Error("Invalid message: type must be a string");
+    }
+
+    if (message.type.length === 0) {
+      throw new Error("Invalid message: type cannot be empty");
     }
 
     if (message.type.length > 100) {

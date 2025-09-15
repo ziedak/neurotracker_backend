@@ -11,7 +11,7 @@ import {
   it,
   expect,
 } from "@jest/globals";
-import { LoggingWebSocketMiddleware } from "../../src/middleware/websocket/logging.websocket.middleware";
+import { LoggingWebSocketMiddleware } from "../../src/middleware/logging/logging.websocket.middleware";
 import { WebSocketContext } from "../../src/middleware/types";
 import { IMetricsCollector } from "@libs/monitoring";
 

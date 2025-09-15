@@ -103,6 +103,7 @@ describe("AuthWebSocketMiddleware", () => {
 
   afterEach(() => {
     jest.clearAllTimers();
+    middleware?.cleanup();
   });
 
   describe("Middleware Initialization", () => {

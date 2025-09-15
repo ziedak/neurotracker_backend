@@ -12,12 +12,15 @@ import type { WebSocketConnectionMetadata, WebSocketContext } from "../types";
 export interface LoggingWebSocketMiddlewareConfig
   extends WebSocketMiddlewareConfig {
   readonly logLevel?: "debug" | "info" | "warn" | "error";
+  readonly logMessages?: boolean; // Combined flag for incoming/outgoing messages
   readonly logIncomingMessages?: boolean;
   readonly logOutgoingMessages?: boolean;
   readonly logConnections?: boolean;
   readonly logDisconnections?: boolean;
+  readonly logErrors?: boolean;
   readonly logMetadata?: boolean;
   readonly excludeMessageTypes?: readonly string[];
+  readonly excludePaths?: readonly string[];
   readonly maxMessageSize?: number;
   readonly sensitiveFields?: readonly string[];
   readonly includeMessageTiming?: boolean;
@@ -25,6 +28,7 @@ export interface LoggingWebSocketMiddlewareConfig
   readonly includeConnectionMetrics?: boolean;
   readonly logHeartbeat?: boolean;
   readonly redactPayload?: boolean;
+  readonly sampleRate?: number; // 0.0 to 1.0 for sampling
 }
 
 /**

@@ -20,7 +20,7 @@ import type { WebSocketContext } from "../types";
 import { Scheduler } from "@libs/utils";
 
 /**
- * Configuration for WebSocket Security middleware
+ * Configuration for Security WebSocket middleware
  * Extends WebSocketMiddlewareConfig with security-specific options
  */
 export interface SecurityWebSocketMiddlewareConfig
@@ -648,20 +648,24 @@ export class SecurityWebSocketMiddleware extends BaseWebSocketMiddleware<Securit
   /**
    * Extract relevant information from WebSocket context for logging
    */
-  protected override extractContextInfo(context: WebSocketContext): {
-    connectionId: string;
-    messageType: string;
-    clientIp: string;
-    origin: string;
-    messageCount: number;
-  } {
-    return {
+  protected override extractContextInfo(
+    context: WebSocketContext,
+    extraInfoContext?: Record<string, unknown>
+  ): Record<string, unknown> {
+    const contextInfo: Record<string, unknown> = {
       connectionId: context.connectionId,
       messageType: context.message.type,
       clientIp: context.metadata.clientIp,
       origin: this.getOrigin(context),
       messageCount: context.metadata.messageCount,
     };
+
+    // Add extra context if provided
+    if (extraInfoContext) {
+      Object.assign(contextInfo, extraInfoContext);
+    }
+
+    return contextInfo;
   }
 
   /**

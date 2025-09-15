@@ -34,7 +34,7 @@ const DEFAULT_CORS_OPTIONS = {
     "X-API-Key",
   ] as const,
   EXPOSED_HEADERS: ["X-Total-Count", "X-Rate-Limit-Remaining"] as const,
-  CREDENTIALS: true,
+  CREDENTIALS: false, // Cannot use credentials with wildcard origin
   MAX_AGE: 86400, // 24 hours
   OPTIONS_SUCCESS_STATUS: 204,
   PRIORITY: 100, // High priority for CORS
@@ -116,6 +116,17 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
 
       // Validate and set CORS headers
       const validationResult = this.validateOrigin(origin);
+
+      // Check for invalid origin format
+      if (origin && !this.isValidOriginFormat(origin)) {
+        throw new Error("Invalid origin format");
+      }
+
+      // Throw error for disallowed origins if request has origin
+      if (origin && !validationResult.allowed) {
+        throw new Error("Origin not allowed");
+      }
+
       this.setCorsHeaders(context, origin, validationResult);
 
       // Handle preflight requests
@@ -130,6 +141,16 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
         origin: origin || "null",
       });
 
+      // Record headers added metric
+      await this.recordMetric("cors_headers_added", 1, {
+        origin: origin || "null",
+      });
+
+      // Record success metric
+      await this.recordMetric("cors_request_success", 1, {
+        origin: origin || "null",
+      });
+
       // Continue to next middleware
       await next();
     } catch (error) {
@@ -137,7 +158,7 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
       throw error; // Re-throw to maintain error chain
     } finally {
       const executionTime = performance.now() - startTime;
-      await this.recordMetric("cors_execution_time", executionTime, {
+      await this.recordTimer("cors_request_duration", executionTime, {
         method,
         origin: origin || "null",
       });
@@ -157,6 +178,35 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
       allowed: validationResult.allowed,
       requestId: this.getRequestId(context),
     });
+
+    // Validate requested method
+    const requestedMethod =
+      context.request.headers["access-control-request-method"];
+    if (requestedMethod) {
+      const methodAllowed = this.config.methods?.includes(
+        requestedMethod.toUpperCase()
+      );
+      if (!methodAllowed) {
+        throw new Error("Method not allowed");
+      }
+    }
+
+    // Validate requested headers
+    const requestedHeaders =
+      context.request.headers["access-control-request-headers"];
+    if (requestedHeaders) {
+      const headerNames = requestedHeaders
+        .split(",")
+        .map((h) => h.trim().toLowerCase());
+      const allowedHeadersLower =
+        this.config.allowedHeaders?.map((h) => h.toLowerCase()) || [];
+
+      for (const headerName of headerNames) {
+        if (!allowedHeadersLower.includes(headerName)) {
+          throw new Error("Header not allowed");
+        }
+      }
+    }
 
     // Set preflight-specific headers
     this.setPreflightHeaders(context);
@@ -182,12 +232,16 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
       context.set.headers = {};
     }
 
-    const {headers} = context.set;
+    const { headers } = context.set;
 
     // Set origin header
-    if (validationResult.allowed && origin) {
-      headers["Access-Control-Allow-Origin"] =
-        validationResult.matchedOrigin || origin;
+    if (validationResult.allowed) {
+      if (validationResult.matchedOrigin === "*") {
+        headers["Access-Control-Allow-Origin"] = "*";
+      } else if (origin) {
+        headers["Access-Control-Allow-Origin"] =
+          validationResult.matchedOrigin || origin;
+      }
     }
 
     // Set credentials
@@ -221,7 +275,7 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
       context.set.headers = {};
     }
 
-    const {headers} = context.set;
+    const { headers } = context.set;
 
     // Set max age for preflight cache
     if (this.config.maxAge !== undefined) {
@@ -237,8 +291,20 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
    * Extract origin from request with proper null handling
    */
   private extractOrigin(context: MiddlewareContext): string | null {
-    const origin = context.request.headers["origin"];
+    const { origin } = context.request.headers;
     return typeof origin === "string" ? origin : null;
+  }
+
+  /**
+   * Validate origin format
+   */
+  private isValidOriginFormat(origin: string): boolean {
+    try {
+      new URL(origin);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -310,7 +376,7 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
       requestId: this.getRequestId(context),
     });
 
-    await this.recordMetric("cors_error", 1, {
+    await this.recordMetric("cors_origin_rejected", 1, {
       error_type: error instanceof Error ? error.constructor.name : "unknown",
       origin: origin || "null",
     });
@@ -335,7 +401,15 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
    * Validate configuration on instantiation
    */
   private validateConfiguration(): void {
-    const { methods, allowedHeaders, exposedHeaders, maxAge } = this.config;
+    const {
+      methods,
+      allowedHeaders,
+      exposedHeaders,
+      maxAge,
+      optionsSuccessStatus,
+      credentials,
+      origin,
+    } = this.config;
 
     if (methods && methods.length === 0) {
       throw new Error("CORS methods array cannot be empty");
@@ -351,6 +425,18 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
 
     if (maxAge !== undefined && (maxAge < 0 || !Number.isInteger(maxAge))) {
       throw new Error("CORS maxAge must be a non-negative integer");
+    }
+
+    if (
+      optionsSuccessStatus !== undefined &&
+      (optionsSuccessStatus < 200 || optionsSuccessStatus >= 300)
+    ) {
+      throw new Error("CORS optionsSuccessStatus must be between 200 and 299");
+    }
+
+    // Validate credentials with wildcard origin
+    if (credentials && (origin === "*" || origin === true)) {
+      throw new Error("Cannot use credentials with wildcard origin");
     }
   }
 
@@ -451,12 +537,15 @@ export const CORS_PRESETS = {
   production: (origins: readonly string[]): Partial<CorsHttpMiddlewareConfig> =>
     CorsHttpMiddleware.createProductionConfig(origins),
 
-  api: (): Partial<CorsHttpMiddlewareConfig> => CorsHttpMiddleware.createApiConfig(),
+  api: (): Partial<CorsHttpMiddlewareConfig> =>
+    CorsHttpMiddleware.createApiConfig(),
 
   strict: (origins: readonly string[]): Partial<CorsHttpMiddlewareConfig> =>
     CorsHttpMiddleware.createStrictConfig(origins),
 
-  websocket: (origins: readonly string[]): Partial<CorsHttpMiddlewareConfig> => ({
+  websocket: (
+    origins: readonly string[]
+  ): Partial<CorsHttpMiddlewareConfig> => ({
     name: "cors-websocket",
     origin: [...origins],
     credentials: true,

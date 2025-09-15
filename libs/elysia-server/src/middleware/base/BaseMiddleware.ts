@@ -52,6 +52,58 @@ export abstract class BaseMiddleware<
   }
 
   /**
+   * Hook called before request processing
+   * Override in subclasses for custom pre-processing logic
+   */
+  protected beforeProcess(context: MiddlewareContext): void {
+    this.logger.debug("Before request processing", {
+      middlewareName: this.config.name,
+      requestId: this.getRequestId(context),
+    });
+  }
+
+  /**
+   * Hook called after request processing
+   * Override in subclasses for custom post-processing logic
+   */
+  protected afterProcess(context: MiddlewareContext): void {
+    this.logger.debug("After request processing", {
+      middlewareName: this.config.name,
+      requestId: this.getRequestId(context),
+    });
+  }
+
+  /**
+   * Static method to validate configuration
+   * Override in subclasses for custom validation
+   */
+  static validateConfig(config: unknown): void {
+    if (!config || typeof config !== "object") {
+      throw new Error("Configuration must be an object");
+    }
+
+    const configObj = config as Record<string, unknown>;
+
+    if (!configObj["name"] || typeof configObj["name"] !== "string") {
+      throw new Error("Configuration must have a valid name");
+    }
+
+    if (
+      configObj["enabled"] !== undefined &&
+      typeof configObj["enabled"] !== "boolean"
+    ) {
+      throw new Error("Configuration enabled must be a boolean");
+    }
+
+    if (
+      configObj["priority"] !== undefined &&
+      typeof configObj["priority"] !== "number"
+    ) {
+      throw new Error("Configuration priority must be a number");
+    }
+  }
+
+  /**
    * Abstract method for middleware execution logic
    * Subclasses must implement this method
    */
@@ -116,20 +168,20 @@ export abstract class BaseMiddleware<
   protected override extractContextInfo(
     context: MiddlewareContext,
     extraInfoContext?: Record<string, unknown>
-  ): {
-    path: string;
-    method: string;
-    requestId: string | undefined;
-    ip: string;
-    extraInfo?: Record<string, unknown> | undefined;
-  } {
-    return {
+  ): Record<string, unknown> {
+    const contextInfo: Record<string, unknown> = {
       path: context.request.url,
       method: context.request.method,
-      requestId: context.requestId,
+      requestId: this.getRequestId(context),
       ip: this.getClientIp(context),
-      extraInfo: extraInfoContext,
     };
+
+    // Add extra context if provided
+    if (extraInfoContext) {
+      Object.assign(contextInfo, extraInfoContext);
+    }
+
+    return contextInfo;
   }
 
   /**
@@ -189,3 +241,6 @@ export abstract class BaseMiddleware<
     });
   }
 }
+
+// Export aliases for backward compatibility
+export const BaseHttpMiddleware = BaseMiddleware;

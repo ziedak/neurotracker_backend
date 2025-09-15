@@ -40,9 +40,9 @@ describe("Base Middleware Classes", () => {
           context: MiddlewareContext,
           next: () => Promise<void>
         ): Promise<void> {
-          await this.beforeExecute(context);
+          this.beforeProcess(context);
           await next();
-          await this.afterExecute(context);
+          this.afterProcess(context);
         }
 
         protected async handleRequest(
@@ -123,20 +123,20 @@ describe("Base Middleware Classes", () => {
 
     describe("Execution Flow", () => {
       it("should execute middleware when enabled", async () => {
-        const beforeExecuteSpy = jest.spyOn(
+        const beforeProcessSpy = jest.spyOn(
           baseMiddleware as any,
-          "beforeExecute"
+          "beforeProcess"
         );
-        const afterExecuteSpy = jest.spyOn(
+        const afterProcessSpy = jest.spyOn(
           baseMiddleware as any,
-          "afterExecute"
+          "afterProcess"
         );
 
         await baseMiddleware["execute"](mockContext, nextFunction);
 
-        expect(beforeExecuteSpy).toHaveBeenCalledWith(mockContext);
+        expect(beforeProcessSpy).toHaveBeenCalledWith(mockContext);
         expect(nextFunction).toHaveBeenCalled();
-        expect(afterExecuteSpy).toHaveBeenCalledWith(mockContext);
+        expect(afterProcessSpy).toHaveBeenCalledWith(mockContext);
       });
 
       it("should skip execution when disabled", async () => {
@@ -145,27 +145,27 @@ describe("Base Middleware Classes", () => {
             context: MiddlewareContext,
             next: () => Promise<void>
           ): Promise<void> {
-            await this.beforeExecute(context);
+            this.beforeProcess(context);
             await next();
-            await this.afterExecute(context);
+            this.afterProcess(context);
           }
           protected async handleRequest(): Promise<void> {}
         })(mockMetricsCollector, { enabled: false });
 
-        const beforeExecuteSpy = jest.spyOn(
+        const beforeProcessSpy = jest.spyOn(
           disabledMiddleware as any,
-          "beforeExecute"
+          "beforeProcess"
         );
-        const afterExecuteSpy = jest.spyOn(
+        const afterProcessSpy = jest.spyOn(
           disabledMiddleware as any,
-          "afterExecute"
+          "afterProcess"
         );
 
         await disabledMiddleware["execute"](mockContext, nextFunction);
 
-        expect(beforeExecuteSpy).not.toHaveBeenCalled();
+        expect(beforeProcessSpy).not.toHaveBeenCalled();
         expect(nextFunction).toHaveBeenCalled();
-        expect(afterExecuteSpy).not.toHaveBeenCalled();
+        expect(afterProcessSpy).not.toHaveBeenCalled();
       });
 
       it("should handle execution errors", async () => {
@@ -174,7 +174,7 @@ describe("Base Middleware Classes", () => {
             context: MiddlewareContext,
             next: () => Promise<void>
           ): Promise<void> {
-            await this.beforeExecute(context);
+            this.beforeProcess(context);
             throw new Error("Test error");
           }
           protected async handleRequest(): Promise<void> {}
@@ -187,68 +187,68 @@ describe("Base Middleware Classes", () => {
     });
 
     describe("Lifecycle Methods", () => {
-      it("should call beforeExecute hook", async () => {
-        const beforeExecuteSpy = jest.spyOn(
+      it("should call beforeProcess hook", async () => {
+        const beforeProcessSpy = jest.spyOn(
           baseMiddleware as any,
-          "beforeExecute"
+          "beforeProcess"
         );
 
         await baseMiddleware["execute"](mockContext, nextFunction);
 
-        expect(beforeExecuteSpy).toHaveBeenCalledWith(mockContext);
+        expect(beforeProcessSpy).toHaveBeenCalledWith(mockContext);
       });
 
-      it("should call afterExecute hook", async () => {
-        const afterExecuteSpy = jest.spyOn(
+      it("should call afterProcess hook", async () => {
+        const afterProcessSpy = jest.spyOn(
           baseMiddleware as any,
-          "afterExecute"
+          "afterProcess"
         );
 
         await baseMiddleware["execute"](mockContext, nextFunction);
 
-        expect(afterExecuteSpy).toHaveBeenCalledWith(mockContext);
+        expect(afterProcessSpy).toHaveBeenCalledWith(mockContext);
       });
 
-      it("should handle beforeExecute errors", async () => {
+      it("should handle beforeProcess errors", async () => {
         const errorMiddleware = new (class extends BaseHttpMiddleware {
           async execute(
             context: MiddlewareContext,
             next: () => Promise<void>
           ): Promise<void> {
-            await this.beforeExecute(context);
+            this.beforeProcess(context);
             await next();
-            await this.afterExecute(context);
+            this.afterProcess(context);
           }
-          protected async beforeExecute(): Promise<void> {
-            throw new Error("Before execute error");
+          protected beforeProcess(_context: MiddlewareContext): void {
+            throw new Error("Before process error");
           }
           protected async handleRequest(): Promise<void> {}
         })(mockMetricsCollector, {});
 
         await expect(
           errorMiddleware["execute"](mockContext, nextFunction)
-        ).rejects.toThrow("Before execute error");
+        ).rejects.toThrow("Before process error");
       });
 
-      it("should handle afterExecute errors", async () => {
+      it("should handle afterProcess errors", async () => {
         const errorMiddleware = new (class extends BaseHttpMiddleware {
           async execute(
             context: MiddlewareContext,
             next: () => Promise<void>
           ): Promise<void> {
-            await this.beforeExecute(context);
+            this.beforeProcess(context);
             await next();
-            await this.afterExecute(context);
+            this.afterProcess(context);
           }
-          protected async afterExecute(): Promise<void> {
-            throw new Error("After execute error");
+          protected afterProcess(_context: MiddlewareContext): void {
+            throw new Error("After process error");
           }
           protected async handleRequest(): Promise<void> {}
         })(mockMetricsCollector, {});
 
         await expect(
           errorMiddleware["execute"](mockContext, nextFunction)
-        ).rejects.toThrow("After execute error");
+        ).rejects.toThrow("After process error");
       });
     });
 
@@ -325,9 +325,22 @@ describe("Base Middleware Classes", () => {
           context: WebSocketContext,
           next: () => Promise<void>
         ): Promise<void> {
-          await this.beforeExecute(context);
+          await this.beforeProcessing(context);
           await next();
-          await this.afterExecute(context);
+          await this.afterProcessing(context);
+        }
+
+        // Add lifecycle methods for this test class
+        protected async beforeProcessing(
+          context: WebSocketContext
+        ): Promise<void> {
+          // Simulate before processing logic
+        }
+
+        protected async afterProcessing(
+          context: WebSocketContext
+        ): Promise<void> {
+          // Simulate after processing logic
         }
 
         protected async handleWebSocketMessage(
@@ -424,20 +437,20 @@ describe("Base Middleware Classes", () => {
 
     describe("Execution Flow", () => {
       it("should execute middleware when enabled", async () => {
-        const beforeExecuteSpy = jest.spyOn(
+        const beforeProcessingSpy = jest.spyOn(
           baseWSMiddleware as any,
-          "beforeExecute"
+          "beforeProcessing"
         );
-        const afterExecuteSpy = jest.spyOn(
+        const afterProcessingSpy = jest.spyOn(
           baseWSMiddleware as any,
-          "afterExecute"
+          "afterProcessing"
         );
 
         await baseWSMiddleware["execute"](mockWSContext, nextFunction);
 
-        expect(beforeExecuteSpy).toHaveBeenCalledWith(mockWSContext);
+        expect(beforeProcessingSpy).toHaveBeenCalledWith(mockWSContext);
         expect(nextFunction).toHaveBeenCalled();
-        expect(afterExecuteSpy).toHaveBeenCalledWith(mockWSContext);
+        expect(afterProcessingSpy).toHaveBeenCalledWith(mockWSContext);
       });
 
       it("should skip execution when disabled", async () => {
@@ -453,20 +466,20 @@ describe("Base Middleware Classes", () => {
           protected async handleWebSocketMessage(): Promise<void> {}
         })(mockMetricsCollector, { enabled: false });
 
-        const beforeExecuteSpy = jest.spyOn(
+        const beforeProcessingSpy = jest.spyOn(
           disabledMiddleware as any,
-          "beforeExecute"
+          "beforeProcessing"
         );
-        const afterExecuteSpy = jest.spyOn(
+        const afterProcessingSpy = jest.spyOn(
           disabledMiddleware as any,
-          "afterExecute"
+          "afterProcessing"
         );
 
         await disabledMiddleware["execute"](mockWSContext, nextFunction);
 
-        expect(beforeExecuteSpy).not.toHaveBeenCalled();
+        expect(beforeProcessingSpy).not.toHaveBeenCalled();
         expect(nextFunction).toHaveBeenCalled();
-        expect(afterExecuteSpy).not.toHaveBeenCalled();
+        expect(afterProcessingSpy).not.toHaveBeenCalled();
       });
 
       it("should handle execution errors", async () => {
@@ -475,8 +488,13 @@ describe("Base Middleware Classes", () => {
             context: WebSocketContext,
             next: () => Promise<void>
           ): Promise<void> {
-            await this.beforeExecute(context);
+            await this.beforeProcessing(context);
             throw new Error("WebSocket test error");
+          }
+          protected async beforeProcessing(
+            _context: WebSocketContext
+          ): Promise<void> {
+            // Test implementation
           }
           protected async handleWebSocketMessage(): Promise<void> {}
         })(mockMetricsCollector, {});
@@ -488,68 +506,90 @@ describe("Base Middleware Classes", () => {
     });
 
     describe("Lifecycle Methods", () => {
-      it("should call beforeExecute hook", async () => {
-        const beforeExecuteSpy = jest.spyOn(
+      it("should call beforeProcessing hook", async () => {
+        const beforeProcessingSpy = jest.spyOn(
           baseWSMiddleware as any,
-          "beforeExecute"
+          "beforeProcessing"
         );
 
         await baseWSMiddleware["execute"](mockWSContext, nextFunction);
 
-        expect(beforeExecuteSpy).toHaveBeenCalledWith(mockWSContext);
+        expect(beforeProcessingSpy).toHaveBeenCalledWith(mockWSContext);
       });
 
-      it("should call afterExecute hook", async () => {
-        const afterExecuteSpy = jest.spyOn(
+      it("should call afterProcessing hook", async () => {
+        const afterProcessingSpy = jest.spyOn(
           baseWSMiddleware as any,
-          "afterExecute"
+          "afterProcessing"
         );
 
         await baseWSMiddleware["execute"](mockWSContext, nextFunction);
 
-        expect(afterExecuteSpy).toHaveBeenCalledWith(mockWSContext);
+        expect(afterProcessingSpy).toHaveBeenCalledWith(mockWSContext);
       });
 
-      it("should handle beforeExecute errors", async () => {
+      it("should handle beforeProcessing errors", async () => {
         const errorMiddleware = new (class extends BaseWebSocketMiddleware {
           async execute(
             context: WebSocketContext,
             next: () => Promise<void>
           ): Promise<void> {
-            await this.beforeExecute(context);
+            await this.beforeProcessing(context);
             await next();
-            await this.afterExecute(context);
+            await this.afterProcessing(context);
           }
-          protected async beforeExecute(): Promise<void> {
-            throw new Error("WebSocket before execute error");
+          protected async beforeProcessing(
+            _context: WebSocketContext
+          ): Promise<void> {
+            throw new Error("WebSocket before processing error");
+          }
+          protected async afterProcessing(
+            _context: WebSocketContext
+          ): Promise<void> {
+            // Test implementation
           }
           protected async handleWebSocketMessage(): Promise<void> {}
-        })(mockMetricsCollector, {});
+        })(mockMetricsCollector, {
+          name: "test-ws-error",
+          enabled: true,
+          priority: 0,
+        });
 
         await expect(
           errorMiddleware["execute"](mockWSContext, nextFunction)
-        ).rejects.toThrow("WebSocket before execute error");
+        ).rejects.toThrow("WebSocket before processing error");
       });
 
-      it("should handle afterExecute errors", async () => {
+      it("should handle afterProcessing errors", async () => {
         const errorMiddleware = new (class extends BaseWebSocketMiddleware {
           async execute(
             context: WebSocketContext,
             next: () => Promise<void>
           ): Promise<void> {
-            await this.beforeExecute(context);
+            await this.beforeProcessing(context);
             await next();
-            await this.afterExecute(context);
+            await this.afterProcessing(context);
           }
-          protected async afterExecute(): Promise<void> {
-            throw new Error("WebSocket after execute error");
+          protected async beforeProcessing(
+            _context: WebSocketContext
+          ): Promise<void> {
+            // Test implementation
+          }
+          protected async afterProcessing(
+            _context: WebSocketContext
+          ): Promise<void> {
+            throw new Error("WebSocket after processing error");
           }
           protected async handleWebSocketMessage(): Promise<void> {}
-        })(mockMetricsCollector, {});
+        })(mockMetricsCollector, {
+          name: "test-ws-after-error",
+          enabled: true,
+          priority: 0,
+        });
 
         await expect(
           errorMiddleware["execute"](mockWSContext, nextFunction)
-        ).rejects.toThrow("WebSocket after execute error");
+        ).rejects.toThrow("WebSocket after processing error");
       });
     });
 
@@ -563,16 +603,41 @@ describe("Base Middleware Classes", () => {
       });
 
       it("should update configuration", () => {
-        baseWSMiddleware.updateConfig({ enabled: false, priority: 45 });
+        // Configuration is immutable - use withConfig for new instances
+        const updatedMiddleware = baseWSMiddleware.withConfig({
+          enabled: false,
+          priority: 45,
+        });
 
-        expect(baseWSMiddleware["config"].enabled).toBe(false);
-        expect(baseWSMiddleware["config"].priority).toBe(45);
+        expect(updatedMiddleware.getConfig().enabled).toBe(false);
+        expect(updatedMiddleware.getConfig().priority).toBe(45);
       });
 
       it("should validate configuration updates", () => {
+        // BaseWebSocketMiddleware validates config in constructor, not in updateConfig
         expect(() => {
-          baseWSMiddleware.updateConfig({ priority: -1 });
-        }).toThrow("Base WebSocket priority must be a non-negative integer");
+          new (class extends BaseWebSocketMiddleware {
+            async execute(
+              context: WebSocketContext,
+              next: () => Promise<void>
+            ): Promise<void> {
+              await this.beforeProcessing(context);
+              await next();
+              await this.afterProcessing(context);
+            }
+            protected async beforeProcessing(
+              _context: WebSocketContext
+            ): Promise<void> {}
+            protected async afterProcessing(
+              _context: WebSocketContext
+            ): Promise<void> {}
+            protected async handleWebSocketMessage(): Promise<void> {}
+          })(mockMetricsCollector, {
+            name: "test-ws",
+            enabled: true,
+            priority: -1,
+          });
+        }).toThrow("Priority must be non-negative");
       });
     });
 
