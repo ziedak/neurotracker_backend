@@ -35,6 +35,43 @@ jest.mock("@libs/monitoring", () => ({
   },
 }));
 
+// Mock @libs/utils to prevent timer leaks
+jest.mock("@libs/utils", () => ({
+  ...jest.requireActual("@libs/utils"),
+  createLogger: jest.fn(() => ({
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+    child: jest.fn(() => ({
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn(),
+    })),
+  })),
+  // Mock both the constructor and static create method
+  Scheduler: jest.fn().mockImplementation(() => ({
+    setInterval: jest.fn(),
+    clearInterval: jest.fn(),
+    clearAll: jest.fn(),
+    setTimeout: jest.fn(),
+    clearTimeout: jest.fn(),
+    clear: jest.fn(), // For AuthWebSocketMiddleware compatibility
+  })),
+}));
+
+// Add static create method to Scheduler mock
+const MockScheduler = require("@libs/utils").Scheduler;
+MockScheduler.create = jest.fn(() => ({
+  setInterval: jest.fn(),
+  clearInterval: jest.fn(),
+  clearAll: jest.fn(),
+  setTimeout: jest.fn(),
+  clearTimeout: jest.fn(),
+  clear: jest.fn(),
+}));
+
 // Mock problematic ES modules
 jest.mock("@elysiajs/swagger", () => ({
   swagger: jest.fn(() => ({})),

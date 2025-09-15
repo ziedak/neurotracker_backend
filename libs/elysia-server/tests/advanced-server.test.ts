@@ -20,18 +20,10 @@ import {
 } from "./mocks";
 
 // Global cleanup for all tests
-afterAll(async () => {
-  // Clear all timers
+afterAll(() => {
+  // Clear all mocked timers
   jest.clearAllTimers();
-
-  // Force garbage collection if available (in Node.js with --expose-gc)
-  if (global.gc) {
-    global.gc();
-  }
-
-  // Shorter wait for any pending async operations
-  await new Promise((resolve) => setTimeout(resolve, 50));
-}, 5000); // Increase timeout to 5 seconds
+});
 
 describe("AdvancedElysiaServerBuilder", () => {
   let mockConfig: ServerConfig;

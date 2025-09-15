@@ -121,13 +121,17 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
     metrics: IMetricsCollector,
     config: Partial<LoggingWebSocketMiddlewareConfig> = {}
   ) {
+    // Validate configuration before applying defaults
+    LoggingWebSocketMiddleware.validateRawConfiguration(config);
+
     // Create complete configuration with validated defaults
     const completeConfig: LoggingWebSocketMiddlewareConfig = {
-      name: config.name || "websocket-logging",
+      name: config.name || "ws-logging",
       enabled: config.enabled ?? true,
       priority: config.priority ?? DEFAULT_WEBSOCKET_LOGGING_OPTIONS.PRIORITY,
       skipMessageTypes: config.skipMessageTypes || [],
       logLevel: config.logLevel ?? DEFAULT_WEBSOCKET_LOGGING_OPTIONS.LOG_LEVEL,
+      logMessages: config.logMessages ?? true,
       logIncomingMessages:
         config.logIncomingMessages ??
         DEFAULT_WEBSOCKET_LOGGING_OPTIONS.LOG_INCOMING_MESSAGES,
@@ -169,6 +173,32 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
 
     super(metrics, completeConfig, completeConfig.name);
     this.validateConfiguration();
+  }
+
+  /**
+   * Validate raw configuration before defaults are applied
+   */
+  private static validateRawConfiguration(
+    config: Partial<LoggingWebSocketMiddlewareConfig>
+  ): void {
+    const { maxMessageSize, sampleRate, excludePaths } = config;
+
+    if (
+      maxMessageSize !== undefined &&
+      (maxMessageSize <= 0 || !Number.isInteger(maxMessageSize))
+    ) {
+      throw new Error(
+        "WebSocket Logging maxMessageSize must be a positive integer"
+      );
+    }
+
+    if (sampleRate !== undefined && (sampleRate < 0 || sampleRate > 1)) {
+      throw new Error("WebSocket Logging sampleRate must be between 0 and 1");
+    }
+
+    if (excludePaths?.some((path) => !path.startsWith("/"))) {
+      throw new Error("WebSocket Logging excludePaths must start with '/'");
+    }
   }
 
   /**
@@ -657,16 +687,29 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
    * Validate configuration on instantiation
    */
   private validateConfiguration(): void {
-    const { maxMessageSize, excludeMessageTypes, sensitiveFields } =
-      this.config;
+    const {
+      maxMessageSize,
+      excludeMessageTypes,
+      sensitiveFields,
+      sampleRate,
+      excludePaths,
+    } = this.config;
 
     if (
       maxMessageSize !== undefined &&
-      (maxMessageSize < 0 || !Number.isInteger(maxMessageSize))
+      (maxMessageSize <= 0 || !Number.isInteger(maxMessageSize))
     ) {
       throw new Error(
-        "WebSocket logging maxMessageSize must be a non-negative integer"
+        "WebSocket Logging maxMessageSize must be a positive integer"
       );
+    }
+
+    if (sampleRate !== undefined && (sampleRate < 0 || sampleRate > 1)) {
+      throw new Error("WebSocket Logging sampleRate must be between 0 and 1");
+    }
+
+    if (excludePaths?.some((path) => !path.startsWith("/"))) {
+      throw new Error("WebSocket Logging excludePaths must start with '/'");
     }
 
     if (excludeMessageTypes?.some((type) => !type.trim())) {
@@ -700,6 +743,7 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
       includeUserContext: true,
       includeConnectionMetrics: true,
       logHeartbeat: true,
+      sampleRate: 1.0,
       redactPayload: false,
       enabled: true,
       priority: DEFAULT_WEBSOCKET_LOGGING_OPTIONS.PRIORITY,
@@ -724,6 +768,7 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
       includeUserContext: true,
       includeConnectionMetrics: true,
       logHeartbeat: false,
+      sampleRate: 0.1,
       redactPayload: true,
       enabled: true,
       priority: DEFAULT_WEBSOCKET_LOGGING_OPTIONS.PRIORITY,
@@ -763,8 +808,10 @@ export class LoggingWebSocketMiddleware extends BaseWebSocketMiddleware<LoggingW
       logLevel: "warn",
       logIncomingMessages: false,
       logOutgoingMessages: false,
+      logMessages: false,
       logConnections: true,
       logDisconnections: true,
+      logErrors: true,
       logMetadata: false,
       excludeMessageTypes: ["ping", "pong", "heartbeat", "status", "ack"],
       maxMessageSize: 1024, // 1KB

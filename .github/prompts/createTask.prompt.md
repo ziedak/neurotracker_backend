@@ -1,30 +1,30 @@
 ---
-mode: 'agent'
+mode: "agent"
 tools:
   [
-    'changes',
-    'codebase',
-    'editFiles',
-    'extensions',
-    'fetch',
-    'findTestFiles',
-    'githubRepo',
-    'new',
-    'openSimpleBrowser',
-    'problems',
-    'runCommands',
-    'runNotebooks',
-    'runTasks',
-    'runTests',
-    'search',
-    'searchResults',
-    'terminalLastCommand',
-    'terminalSelection',
-    'testFailure',
-    'usages',
-    'vscodeAPI',
+    "changes",
+    "codebase",
+    "editFiles",
+    "extensions",
+    "fetch",
+    "findTestFiles",
+    "githubRepo",
+    "new",
+    "openSimpleBrowser",
+    "problems",
+    "runCommands",
+    "runNotebooks",
+    "runTasks",
+    "runTests",
+    "search",
+    "searchResults",
+    "terminalLastCommand",
+    "terminalSelection",
+    "testFailure",
+    "usages",
+    "vscodeAPI",
   ]
-description: 'Review , optimize the code and fix bugs.'
+description: "Review , optimize the code and fix bugs."
 ---
 
 # Create New Memory Bank Task
@@ -40,10 +40,12 @@ This document defines how to create and initialize new task directories in the t
 ### Quick Task Creation Flow:
 
 1. **Read Current Context**
+
    - Read `.memory-bank/context/current-work.json`
    - Check active tasks to avoid conflicts
 
 2. **Create Task Directory**
+
    - Format: `.memory-bank/tasks/YYYY-MM-DD-task-name/`
    - Use kebab-case for task names
 
@@ -278,4 +280,7 @@ This will:
 
 ---
 
+Ask me clarifying questions if needed before proceeding until you are 95% confident you can complete the task successfully.
+what would a top 0,1% developer do in this situation?
+reframe this in a way that changes or challenges how i see the problem.
 **Follow this process precisely to maintain Memory Bank consistency and enable effective task-focused development workflow.**

@@ -301,9 +301,12 @@ export class AdvancedElysiaServerBuilder {
         ) {
           const securityMiddleware = new SecurityWebSocketMiddleware(
             this.metrics,
-            this.middlewareConfig?.security?.config ??
-              this.middlewareConfig?.security ??
-              {}
+            {
+              enableCleanupTimer: process.env["NODE_ENV"] !== "test",
+              ...(this.middlewareConfig?.security?.config ??
+                this.middlewareConfig?.security ??
+                {}),
+            }
           );
 
           // Store reference for cleanup

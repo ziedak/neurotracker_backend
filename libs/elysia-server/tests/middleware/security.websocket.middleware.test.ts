@@ -18,22 +18,7 @@ import {
 import { WebSocketContext } from "../../src/middleware/types";
 import { IMetricsCollector } from "@libs/monitoring";
 
-// Mock the logger to prevent Pino worker threads
-jest.mock("@libs/utils", () => ({
-  ...jest.requireActual("@libs/utils"),
-  createLogger: jest.fn(() => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
-    child: jest.fn(() => ({
-      info: jest.fn(),
-      warn: jest.fn(),
-      error: jest.fn(),
-      debug: jest.fn(),
-    })),
-  })),
-}));
+// Note: @libs/utils is already mocked globally in setup.ts to prevent timer leaks
 
 const mockMetricsCollector = {
   recordCounter: jest.fn(),
