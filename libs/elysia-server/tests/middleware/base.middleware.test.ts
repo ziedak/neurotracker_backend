@@ -11,8 +11,8 @@ import {
   it,
   expect,
 } from "@jest/globals";
-import { BaseHttpMiddleware } from "../../src/middleware/base/base.http.middleware";
-import { BaseWebSocketMiddleware } from "../../src/middleware/base/base.websocket.middleware";
+import { BaseHttpMiddleware } from "../../src/middleware/base/BaseMiddleware";
+import { BaseWebSocketMiddleware } from "../../src/middleware/base/BaseWebSocketMiddleware";
 import {
   MiddlewareContext,
   WebSocketContext,

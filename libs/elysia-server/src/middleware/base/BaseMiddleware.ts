@@ -113,17 +113,22 @@ export abstract class BaseMiddleware<
   /**
    * Extract relevant information from HTTP context for logging
    */
-  protected override extractContextInfo(context: MiddlewareContext): {
+  protected override extractContextInfo(
+    context: MiddlewareContext,
+    extraInfoContext?: Record<string, unknown>
+  ): {
     path: string;
     method: string;
     requestId: string | undefined;
     ip: string;
+    extraInfo?: Record<string, unknown> | undefined;
   } {
     return {
       path: context.request.url,
       method: context.request.method,
       requestId: context.requestId,
       ip: this.getClientIp(context),
+      extraInfo: extraInfoContext,
     };
   }
 

@@ -94,11 +94,6 @@ export function basicWebSocketSecurityExample() {
     name: "websocket-security",
     allowedOrigins: ["https://myapp.com"],
     maxConnectionsPerIP: 5,
-    rateLimitPerConnection: {
-      messagesPerMinute: 30,
-      messagesPerHour: 1000,
-      bytesPerMinute: 100,
-    },
   });
 
   return security.middleware();
@@ -125,11 +120,6 @@ export function gamingWebSocketSecurityExample() {
     ...GamingWebSocketSecurityPreset,
     allowedOrigins: ["https://game.example.com"],
     maxConnectionsPerIP: 1, // One connection per IP for gaming
-    rateLimitPerConnection: {
-      messagesPerMinute: 600, // Very high for real-time gaming
-      messagesPerHour: 20000,
-      bytesPerMinute: 256 * 1024, // 256KB
-    },
   });
 
   return security;
@@ -214,11 +204,6 @@ export function apiGatewayWebSocketExample() {
     allowedOrigins: ["*"], // Handled by load balancer
     maxConnectionsPerIP: 50,
     skipMessageTypes: ["ping", "pong", "heartbeat", "health"],
-    rateLimitPerConnection: {
-      messagesPerMinute: 100,
-      messagesPerHour: 5000,
-      bytesPerMinute: 2 * 1024 * 1024, // 2MB
-    },
   });
 
   return security;
@@ -230,11 +215,6 @@ export function financialWebSocketExample() {
     allowedOrigins: ["https://secure.bank.com"],
     maxConnectionsPerIP: 1, // One connection per IP
     messageTypeWhitelist: ["transaction", "balance", "auth", "heartbeat"],
-    rateLimitPerConnection: {
-      messagesPerMinute: 5, // Very conservative
-      messagesPerHour: 100,
-      bytesPerMinute: 32 * 1024, // 32KB
-    },
     maxMessageSize: 64 * 1024, // 64KB max
     connectionTimeout: 5000, // 5 seconds
     requireSecureConnection: true,
@@ -333,11 +313,6 @@ export function loadBalancerWebSocketExample() {
     maxConnectionsPerIP: 100, // Higher limit behind LB
     requireSecureConnection: false, // Terminated at LB
     validateHeaders: false, // Headers modified by LB
-    rateLimitPerConnection: {
-      messagesPerMinute: 200,
-      messagesPerHour: 10000,
-      bytesPerMinute: 0,
-    },
   });
 
   return security;

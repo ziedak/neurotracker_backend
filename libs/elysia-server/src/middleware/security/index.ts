@@ -382,11 +382,6 @@ export const DevelopmentWebSocketSecurityPreset: Partial<SecurityWebSocketMiddle
     maxConnectionsPerIP: 50,
     requireSecureConnection: false,
     blockSuspiciousConnections: false,
-    rateLimitPerConnection: {
-      messagesPerMinute: 120,
-      messagesPerHour: 5000,
-      bytesPerMinute: 2 * 1024 * 1024, // 2MB
-    },
     validateHeaders: false,
     sanitizePayload: false,
   };
@@ -411,11 +406,6 @@ export const ProductionWebSocketSecurityPreset: Partial<SecurityWebSocketMiddlew
       "debug",
       "test",
     ],
-    rateLimitPerConnection: {
-      messagesPerMinute: 30,
-      messagesPerHour: 500,
-      bytesPerMinute: 512 * 1024, // 512KB
-    },
     validateHeaders: true,
     sanitizePayload: true,
     connectionTimeout: 15000,
@@ -434,11 +424,6 @@ export const HighSecurityWebSocketPreset: Partial<SecurityWebSocketMiddlewareCon
     requireSecureConnection: true,
     blockSuspiciousConnections: true,
     messageTypeWhitelist: ["chat", "heartbeat", "auth"],
-    rateLimitPerConnection: {
-      messagesPerMinute: 10,
-      messagesPerHour: 100,
-      bytesPerMinute: 128 * 1024, // 128KB
-    },
     validateHeaders: true,
     sanitizePayload: true,
     connectionTimeout: 10000,
@@ -458,11 +443,6 @@ export const ApiGatewayWebSocketSecurityPreset: Partial<SecurityWebSocketMiddlew
     maxConnectionsPerIP: 20,
     requireSecureConnection: true,
     messageTypeBlacklist: ["admin", "system", "debug"],
-    rateLimitPerConnection: {
-      messagesPerMinute: 60,
-      messagesPerHour: 2000,
-      bytesPerMinute: 1024 * 1024, // 1MB
-    },
     validateHeaders: true,
     sanitizePayload: true,
     skipMessageTypes: ["ping", "pong", "heartbeat", "metrics"],
@@ -480,11 +460,6 @@ export const ChatWebSocketSecurityPreset: Partial<SecurityWebSocketMiddlewareCon
     maxConnectionsPerIP: 10,
     requireSecureConnection: true,
     messageTypeWhitelist: ["message", "typing", "join", "leave", "heartbeat"],
-    rateLimitPerConnection: {
-      messagesPerMinute: 60, // Allow frequent messaging
-      messagesPerHour: 2000,
-      bytesPerMinute: 1024 * 1024, // 1MB for media sharing
-    },
     validateHeaders: true,
     sanitizePayload: true,
     maxMessageSize: 2 * 1024 * 1024, // 2MB for file sharing
@@ -502,11 +477,6 @@ export const GamingWebSocketSecurityPreset: Partial<SecurityWebSocketMiddlewareC
     maxConnectionsPerIP: 5, // Stricter for gaming
     requireSecureConnection: true,
     messageTypeWhitelist: ["move", "action", "state", "ping", "heartbeat"],
-    rateLimitPerConnection: {
-      messagesPerMinute: 300, // High frequency for real-time gaming
-      messagesPerHour: 10000,
-      bytesPerMinute: 512 * 1024, // Smaller messages for gaming
-    },
     validateHeaders: true,
     sanitizePayload: true,
     maxMessageSize: 64 * 1024, // Small messages for gaming efficiency

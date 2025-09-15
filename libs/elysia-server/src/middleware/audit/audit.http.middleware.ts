@@ -277,29 +277,37 @@ export class AuditHttpMiddleware extends BaseMiddleware<AuditHttpMiddlewareConfi
    * Extract context information for logging and debugging
    */
   protected override extractContextInfo(
-    context: MiddlewareContext | AuditEvent
-  ): Record<string, string | undefined> {
-    // Handle AuditEvent context
-    if ("action" in context && "resource" in context) {
-      const auditEvent = context as AuditEvent;
-      return {
-        action: auditEvent.action,
-        resource: auditEvent.resource,
-        userId: auditEvent.userId,
-        sessionId: auditEvent.sessionId,
-        result: auditEvent.result,
-      };
-    }
-
+    context: MiddlewareContext,
+    extraInfoContext?: Record<string, unknown>
+  ): {
+    path: string;
+    method: string;
+    requestId: string | undefined;
+    ip: string;
+    extraInfo?: Record<string, unknown> | undefined;
+  } {
     // Handle MiddlewareContext
     const middlewareContext = context as MiddlewareContext;
-    return {
-      method: middlewareContext.request?.method,
-      url: middlewareContext.request?.url,
+    const extraInfo: Record<string, unknown> = {
       userId: this.extractUserId(middlewareContext),
       sessionId: this.extractSessionId(middlewareContext),
-      ip: this.extractClientIp(middlewareContext),
       userAgent: this.extractUserAgent(middlewareContext),
+    };
+
+    // Handle AuditEvent context if applicable
+    if ("action" in context && "resource" in context) {
+      const auditEvent = extraInfoContext as unknown as AuditEvent;
+      extraInfo["action"] = auditEvent.action;
+      extraInfo["resource"] = auditEvent.resource;
+      extraInfo["result"] = auditEvent.result;
+    }
+
+    return {
+      path: middlewareContext.request?.url ?? "/",
+      method: middlewareContext.request?.method ?? "GET",
+      requestId: this.getRequestId(middlewareContext),
+      ip: this.extractClientIp(middlewareContext),
+      extraInfo,
     };
   }
 

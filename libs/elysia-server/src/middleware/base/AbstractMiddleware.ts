@@ -110,7 +110,8 @@ export abstract class AbstractMiddleware<
    * @param context - Protocol-specific context
    */
   protected abstract extractContextInfo(
-    context: TContext
+    context: TContext,
+    extraInfo?: Record<string, unknown>
   ): Record<string, unknown>;
 
   /**
