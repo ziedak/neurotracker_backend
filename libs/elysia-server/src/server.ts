@@ -295,29 +295,14 @@ export class AdvancedElysiaServerBuilder {
         }
 
         // Add security middleware with factory priority (using validation priority for WebSocket security)
-        if (
-          this.middlewareConfig?.security?.enabled !== false &&
-          "validation" in patternConfig.priorities
-        ) {
-          const securityMiddleware = new SecurityWebSocketMiddleware(
-            this.metrics,
-            {
-              enableCleanupTimer: process.env["NODE_ENV"] !== "test",
-              ...(this.middlewareConfig?.security?.config ??
-                this.middlewareConfig?.security ??
-                {}),
-            }
-          );
+        if (this.shouldEnableSecurityMiddleware(patternConfig)) {
+          const securityMiddleware = this.createSecurityWebSocketMiddleware();
+          const priority = this.getSecurityMiddlewarePriority(patternConfig);
 
-          // Store reference for cleanup
-          this.securityWebSocketMiddleware = securityMiddleware;
-
-          chain.register(
-            {
-              name: "ws-security",
-              priority: patternConfig.priorities.validation ?? 120,
-            },
-            securityMiddleware.middleware()
+          this.registerSecurityWebSocketMiddleware(
+            chain,
+            securityMiddleware,
+            priority
           );
         }
       }
@@ -666,6 +651,64 @@ export class AdvancedElysiaServerBuilder {
   }
 
   /**
+   * Check if security middleware should be enabled
+   */
+  private shouldEnableSecurityMiddleware(patternConfig: {
+    priorities?: Record<string, number>;
+  }): boolean {
+    const isSecurityEnabled =
+      this.middlewareConfig?.security?.enabled !== false;
+    const hasValidationSupport = Boolean(
+      patternConfig?.priorities && "validation" in patternConfig.priorities
+    );
+
+    return isSecurityEnabled && hasValidationSupport;
+  }
+
+  /**
+   * Create security WebSocket middleware with proper configuration
+   */
+  private createSecurityWebSocketMiddleware(): SecurityWebSocketMiddleware {
+    const baseConfig = this.middlewareConfig?.security?.config ?? {};
+    const fallbackConfig = this.middlewareConfig?.security ?? {};
+    const mergedConfig = { ...fallbackConfig, ...baseConfig };
+
+    return new SecurityWebSocketMiddleware(this.metrics, mergedConfig);
+  }
+
+  /**
+   * Get security middleware priority with fallback
+   */
+  private getSecurityMiddlewarePriority(patternConfig: {
+    priorities?: Record<string, number>;
+  }): number {
+    const DEFAULT_SECURITY_PRIORITY = 120;
+    return (
+      patternConfig?.priorities?.["validation"] ?? DEFAULT_SECURITY_PRIORITY
+    );
+  }
+
+  /**
+   * Register security WebSocket middleware in chain
+   */
+  private registerSecurityWebSocketMiddleware(
+    chain: WebSocketMiddlewareChain,
+    securityMiddleware: SecurityWebSocketMiddleware,
+    priority: number
+  ): void {
+    // Store reference for cleanup
+    this.securityWebSocketMiddleware = securityMiddleware;
+
+    chain.register(
+      {
+        name: "ws-security",
+        priority,
+      },
+      securityMiddleware.middleware()
+    );
+  }
+
+  /**
    * Generate unique connection ID
    */
   private generateConnectionId(): string {
@@ -852,7 +895,7 @@ export class AdvancedElysiaServerBuilder {
       await this.rateLimitHttpMiddleware.cleanup();
     }
     if (this.rateLimitWebSocketMiddleware) {
-      await this.rateLimitWebSocketMiddleware.cleanup();
+      this.rateLimitWebSocketMiddleware.cleanup();
     }
   }
 }

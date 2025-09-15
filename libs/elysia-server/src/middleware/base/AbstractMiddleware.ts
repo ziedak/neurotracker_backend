@@ -298,7 +298,9 @@ export abstract class AbstractMiddleware<
   public getName(): string {
     return this.config.name;
   }
-
+  public getPriority(): number {
+    return this.config.priority;
+  }
   /**
    * Check if middleware is enabled
    */

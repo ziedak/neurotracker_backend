@@ -1,10 +1,9 @@
 import { Elysia } from "elysia";
-import { Logger, RateLimiter } from "@libs/monitoring";
+import { createLogger } from "@libs/utils";
 import { generateId } from "@libs/utils";
 import { APP_CONFIG } from "../config/app-config";
 
-const logger = Logger.getInstance("api-gateway");
-const rateLimiter = new RateLimiter();
+const logger = createLogger("api-gateway");
 
 export function setupMiddleware(app: Elysia) {
   return (
@@ -19,7 +18,6 @@ export function setupMiddleware(app: Elysia) {
           userAgent: headers["user-agent"],
           ip: headers["x-forwarded-for"],
         });
-        return { requestId };
       })
 
       // Response tracking
@@ -30,8 +28,8 @@ export function setupMiddleware(app: Elysia) {
         });
       })
 
-      // Rate limiting
-      .onBeforeHandle(async ({ request, set }) => {
+      // Basic request handling (rate limiting would be handled by middleware in AdvancedElysiaServerBuilder)
+      .onBeforeHandle(async ({ request }) => {
         try {
           const url = new URL(request.url);
 
@@ -44,36 +42,12 @@ export function setupMiddleware(app: Elysia) {
             return;
           }
 
-          const clientIp =
-            request.headers.get("x-forwarded-for") ||
-            request.headers.get("x-real-ip") ||
-            "unknown";
-
-          try {
-            const result = await rateLimiter.checkRateLimit(
-              clientIp,
-              APP_CONFIG.rateLimiting.requests,
-              APP_CONFIG.rateLimiting.windowMs
-            );
-
-            if (!result.allowed) {
-              set.status = 429;
-              return {
-                error: "Too Many Requests",
-                message: "Rate limit exceeded. Please try again later.",
-                retryAfter: Math.ceil((result.resetTime - Date.now()) / 1000),
-              };
-            }
-          } catch (redisError) {
-            logger.debug("Rate limiting skipped due to Redis unavailability", {
-              error:
-                redisError instanceof Error
-                  ? redisError.message
-                  : String(redisError),
-            });
-          }
+          // Rate limiting is handled by the AdvancedElysiaServerBuilder middleware
+          // This is just a placeholder for any additional request processing
+          return;
         } catch (error) {
-          logger.warn("Rate limiting check failed", { error: String(error) });
+          logger.warn("Request middleware error", { error: String(error) });
+          return;
         }
       })
   );

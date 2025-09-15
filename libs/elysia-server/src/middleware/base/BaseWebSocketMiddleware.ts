@@ -224,7 +224,7 @@ export abstract class BaseWebSocketMiddleware<
         const sendResult = asWebSocket(context.ws).send(serialized);
         if (sendResult && typeof sendResult.then === "function") {
           sendResult.catch((err) =>
-            console.error("WebSocket send failed:", err)
+            this.logger.error("WebSocket send failed:", err)
           );
         }
         return true;

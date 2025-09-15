@@ -1,80 +1,60 @@
-import { ServiceRegistry, IServiceRegistry } from "@libs/utils";
-import { Logger, MetricsCollector } from "@libs/monitoring";
-import { AuthService } from "./services/authService";
-import { EnhancedJWTService } from "@libs/auth";
+import { createLogger, ILogger } from "@libs/utils";
+import { MetricsCollector } from "@libs/monitoring";
+
 import { EndpointRegistryService } from "./services/EndpointRegistryService";
-// Import middleware factories if needed
-// import { RequestMiddleware } from "./middleware/request-middleware";
-// import { ErrorMiddleware } from "./middleware/error-middleware";
 
 /**
- * GatewayContainer for API Gateway
- * Registers all gateway-relevant services and middleware for DI
+ * Simple service container for API Gateway
+ * Creates and manages service instances
  */
 export class GatewayContainer {
-  private readonly _registry: IServiceRegistry;
   private _initialized: boolean = false;
-
-  constructor() {
-    this._registry = ServiceRegistry; // Use the singleton instance
-  }
+  private _logger: ILogger | null = null;
+  private _metricsCollector: MetricsCollector | null = null;
+  private _endpointRegistry: EndpointRegistryService | null = null;
 
   /**
-   * Initialize all services in dependency order
+   * Initialize all services
    */
   public initialize(): void {
     if (this._initialized) return;
 
-    // Logger - singleton
-    this._registry.registerSingleton("logger", () =>
-      Logger.getInstance("api-gateway")
-    );
+    // Create logger instance
+    this._logger = createLogger("api-gateway");
 
-    // Metrics collector - singleton (using getInstance pattern)
-    this._registry.registerSingleton("metricsCollector", () =>
-      MetricsCollector.getInstance()
-    );
+    // Create metrics collector instance
+    this._metricsCollector = MetricsCollector.create();
 
-    // JWT Service - singleton
-    this._registry.registerSingleton("JWTService", () =>
-      EnhancedJWTService.getInstance()
-    );
-
-    // Auth Service - singleton
-    this._registry.registerSingleton("AuthService", () => {
-      const logger = this._registry.resolve<Logger>("logger");
-      const metrics =
-        this._registry.resolve<MetricsCollector>("metricsCollector");
-      const jwtService =
-        this._registry.resolve<EnhancedJWTService>("JWTService");
-
-      return new AuthService(logger, metrics, jwtService);
-    });
-
-    // Endpoint Registry Service - singleton
-    this._registry.registerSingleton("EndpointRegistryService", () => {
-      const logger = this._registry.resolve<Logger>("logger");
-
-      return new EndpointRegistryService(logger);
-    });
-
-    // Request Middleware - singleton (if needed)
-    // this._registry.registerSingleton("requestMiddleware", () => RequestMiddleware());
-    // Error Middleware - singleton (if needed)
-    // this._registry.registerSingleton("errorMiddleware", () => ErrorMiddleware());
+    // Create endpoint registry service
+    this._endpointRegistry = new EndpointRegistryService(this._logger);
 
     this._initialized = true;
 
-    this._registry
-      .resolve<Logger>("logger")
-      .info("API Gateway Container initialized");
+    this._logger.info("API Gateway Container initialized");
   }
 
   /**
-   * Get service instance with type safety
+   * Get logger service
    */
-  public getService<T>(key: string): T {
-    return this._registry.safeResolve<T>(key);
+  public getLogger(): ILogger {
+    if (!this._logger) throw new Error("Container not initialized");
+    return this._logger;
+  }
+
+  /**
+   * Get metrics collector service
+   */
+  public getMetricsCollector(): MetricsCollector {
+    if (!this._metricsCollector) throw new Error("Container not initialized");
+    return this._metricsCollector;
+  }
+
+  /**
+   * Get endpoint registry service
+   */
+  public getEndpointRegistry(): EndpointRegistryService {
+    if (!this._endpointRegistry) throw new Error("Container not initialized");
+    return this._endpointRegistry;
   }
 }
 

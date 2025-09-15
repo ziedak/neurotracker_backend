@@ -157,7 +157,9 @@ describe("WebSocketAuthMiddleware Integration", () => {
     await middleware.middleware()(context, next);
 
     expect(next).toHaveBeenCalled();
-    expect(mockJWTService.extractTokenFromHeader).toHaveBeenCalledWith("Bearer test-token");
+    expect(mockJWTService.extractTokenFromHeader).toHaveBeenCalledWith(
+      "Bearer test-token"
+    );
     expect(mockAuthService.verifyToken).toHaveBeenCalledWith("test-token");
     expect(mockPermissionService.createAuthContext).toHaveBeenCalledWith({
       id: "user_123",

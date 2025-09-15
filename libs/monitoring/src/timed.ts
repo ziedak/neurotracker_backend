@@ -1,4 +1,4 @@
-import { MetricsCollector } from "./MetricsCollector";
+import { type IMetricsCollector } from "./MetricsCollector";
 
 // Performance monitoring decorator
 /**
@@ -23,8 +23,8 @@ import { MetricsCollector } from "./MetricsCollector";
  * ```
  */
 export function timed(
-  metricName?: string,
-  metricsCollector?: MetricsCollector
+  metricsCollector: IMetricsCollector,
+  metricName?: string
 ) {
   return function (
     target: any,
@@ -36,7 +36,7 @@ export function timed(
 
     descriptor.value = async function (...args: any[]) {
       const startTime = performance.now();
-      const metrics = metricsCollector || MetricsCollector.getInstance();
+      const metrics = metricsCollector;
 
       try {
         const result = await method.apply(this, args);

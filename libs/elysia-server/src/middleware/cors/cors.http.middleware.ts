@@ -7,12 +7,13 @@ import type { MiddlewareContext } from "../types";
  * Extends HttpMiddlewareConfig with CORS-specific options
  */
 export interface CorsHttpMiddlewareConfig extends HttpMiddlewareConfig {
-  readonly origin?:
+
+  readonly allowedOrigins?:
     | string
     | readonly string[]
     | boolean
     | ((origin: string) => boolean);
-  readonly methods?: readonly string[];
+  readonly allowedMethods?: readonly string[];
   readonly allowedHeaders?: readonly string[];
   readonly exposedHeaders?: readonly string[];
   readonly credentials?: boolean;
@@ -73,8 +74,8 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
       enabled: config.enabled ?? true,
       priority: config.priority ?? DEFAULT_CORS_OPTIONS.PRIORITY,
       skipPaths: config.skipPaths || [],
-      origin: config.origin ?? DEFAULT_CORS_OPTIONS.ORIGIN,
-      methods: config.methods ?? [...DEFAULT_CORS_OPTIONS.METHODS],
+      allowedOrigins: config.allowedOrigins ?? DEFAULT_CORS_OPTIONS.ORIGIN,
+      allowedMethods: config.allowedMethods ?? [...DEFAULT_CORS_OPTIONS.METHODS],
       allowedHeaders: config.allowedHeaders ?? [
         ...DEFAULT_CORS_OPTIONS.ALLOWED_HEADERS,
       ],
@@ -183,7 +184,7 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
     const requestedMethod =
       context.request.headers["access-control-request-method"];
     if (requestedMethod) {
-      const methodAllowed = this.config.methods?.includes(
+      const methodAllowed = this.config.allowedMethods?.includes(
         requestedMethod.toUpperCase()
       );
       if (!methodAllowed) {
@@ -250,8 +251,8 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
     }
 
     // Set allowed methods
-    if (this.config.methods && this.config.methods.length > 0) {
-      headers["Access-Control-Allow-Methods"] = this.config.methods.join(", ");
+    if (this.config.allowedMethods && this.config.allowedMethods.length > 0) {
+      headers["Access-Control-Allow-Methods"] = this.config.allowedMethods.join(", ");
     }
 
     // Set allowed headers
@@ -292,10 +293,10 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
    */
   private extractOrigin(context: MiddlewareContext): string | null {
     const { headers } = context.request;
-    
+
     // HTTP headers are case-insensitive, so check multiple cases
     const origin = headers["origin"] || headers["Origin"] || headers["ORIGIN"];
-    
+
     return typeof origin === "string" ? origin : null;
   }
 
@@ -316,7 +317,8 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
    */
   private validateOrigin(origin: string | null): OriginValidationResult {
     if (!origin) {
-      const wildcardAllowed = this.config.origin === "*" || this.config.origin === true;
+      const wildcardAllowed =
+        this.config.allowedOrigins === "*" || this.config.allowedOrigins === true;
       return {
         allowed: wildcardAllowed,
         matchedOrigin: wildcardAllowed ? "*" : undefined,
@@ -325,23 +327,23 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
     }
 
     try {
-      const { origin: allowedOrigin } = this.config;
+      const { allowedOrigins } = this.config;
 
-      if (allowedOrigin === true || allowedOrigin === "*") {
+      if (allowedOrigins === true || allowedOrigins === "*") {
         return { allowed: true, matchedOrigin: "*" };
       }
 
-      if (typeof allowedOrigin === "string") {
-        const allowed = origin === allowedOrigin;
+      if (typeof allowedOrigins === "string") {
+        const allowed = origin === allowedOrigins;
         return {
           allowed,
-          matchedOrigin: allowed ? allowedOrigin : undefined,
+          matchedOrigin: allowed ? allowedOrigins : undefined,
           reason: allowed ? "exact_match" : "no_match",
         };
       }
 
-      if (Array.isArray(allowedOrigin)) {
-        const matchedOrigin = allowedOrigin.find(
+      if (Array.isArray(allowedOrigins)) {
+        const matchedOrigin = allowedOrigins.find(
           (allowed) => allowed === origin
         );
         return {
@@ -351,8 +353,8 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
         };
       }
 
-      if (typeof allowedOrigin === "function") {
-        const allowed = allowedOrigin(origin);
+      if (typeof allowedOrigins === "function") {
+        const allowed = allowedOrigins(origin);
         return {
           allowed,
           matchedOrigin: allowed ? origin : undefined,
@@ -375,8 +377,9 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
     context: MiddlewareContext,
     origin: string | null
   ): Promise<void> {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
+
     this.logger.error("CORS middleware error", {
       error: errorMessage,
       origin: origin || "null",
@@ -422,16 +425,16 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
    */
   private validateConfiguration(): void {
     const {
-      methods,
+      allowedMethods,
       allowedHeaders,
       exposedHeaders,
       maxAge,
       optionsSuccessStatus,
       credentials,
-      origin,
+      allowedOrigins,
     } = this.config;
 
-    if (methods && methods.length === 0) {
+    if (allowedMethods && allowedMethods.length === 0) {
       throw new Error("CORS methods array cannot be empty");
     }
 
@@ -455,7 +458,7 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
     }
 
     // Validate credentials with wildcard origin
-    if (credentials && (origin === "*" || origin === true)) {
+    if (credentials && (allowedOrigins === "*" || allowedOrigins === true)) {
       throw new Error("Cannot use credentials with wildcard origin");
     }
   }
@@ -466,9 +469,9 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
   static createDevelopmentConfig(): Partial<CorsHttpMiddlewareConfig> {
     return {
       name: "cors-dev",
-      origin: "*",
+      allowedOrigins: "*",
       credentials: true,
-      methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+      allowedMethods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
       allowedHeaders: ["*"],
       maxAge: 0, // Disable preflight caching in development
       enabled: true,
@@ -484,9 +487,9 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
   ): Partial<CorsHttpMiddlewareConfig> {
     return {
       name: "cors-prod",
-      origin: [...allowedOrigins],
+      allowedOrigins: [...allowedOrigins],
       credentials: true,
-      methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+      allowedMethods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
       allowedHeaders: [
         "Content-Type",
         "Authorization",
@@ -506,9 +509,9 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
   static createApiConfig(): Partial<CorsHttpMiddlewareConfig> {
     return {
       name: "cors-api",
-      origin: true,
+      allowedOrigins: true,
       credentials: false,
-      methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+      allowedMethods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
       allowedHeaders: ["Content-Type", "X-API-Key"],
       maxAge: DEFAULT_CORS_OPTIONS.MAX_AGE,
       enabled: true,
@@ -524,9 +527,9 @@ export class CorsHttpMiddleware extends BaseMiddleware<CorsHttpMiddlewareConfig>
   ): Partial<CorsHttpMiddlewareConfig> {
     return {
       name: "cors-strict",
-      origin: [...allowedOrigins],
+   allowedOrigins,
       credentials: true,
-      methods: ["GET", "POST"], // Minimal methods
+      allowedMethods: ["GET", "POST"], // Minimal methods
       allowedHeaders: ["Content-Type", "Authorization"],
       maxAge: 3600, // 1 hour cache
       enabled: true,
@@ -567,9 +570,9 @@ export const CORS_PRESETS = {
     origins: readonly string[]
   ): Partial<CorsHttpMiddlewareConfig> => ({
     name: "cors-websocket",
-    origin: [...origins],
+    allowedOrigins: [...origins],
     credentials: true,
-    methods: ["GET"],
+    allowedMethods: ["GET"],
     allowedHeaders: ["Content-Type", "Authorization", "Upgrade", "Connection"],
     maxAge: DEFAULT_CORS_OPTIONS.MAX_AGE,
     enabled: true,
@@ -578,9 +581,9 @@ export const CORS_PRESETS = {
 
   graphql: (origins: readonly string[]): Partial<CorsHttpMiddlewareConfig> => ({
     name: "cors-graphql",
-    origin: [...origins],
+    allowedOrigins: [...origins],
     credentials: true,
-    methods: ["GET", "POST", "OPTIONS"],
+    allowedMethods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
       "Authorization",

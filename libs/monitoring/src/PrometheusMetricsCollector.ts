@@ -173,13 +173,13 @@ export class PrometheusMetricsCollector implements IMetricsCollector {
   /**
    * Record API request with full context
    */
-  recordApiRequest(
+  async recordApiRequest(
     method: string,
     route: string,
     statusCode: number,
     duration: number,
     service: string = "unknown"
-  ): void {
+  ): Promise<void> {
     const labels = {
       method,
       route,
@@ -202,13 +202,13 @@ export class PrometheusMetricsCollector implements IMetricsCollector {
   /**
    * Record database operation
    */
-  recordDatabaseOperation(
+  async recordDatabaseOperation(
     clientType: "redis" | "postgres" | "clickhouse",
     operation: string,
     duration: number,
     success: boolean,
     service: string = "unknown"
-  ): void {
+  ): Promise<void> {
     const labels = {
       client_type: clientType,
       operation,
@@ -228,11 +228,11 @@ export class PrometheusMetricsCollector implements IMetricsCollector {
   /**
    * Record authentication operation
    */
-  recordAuthOperation(
+  async recordAuthOperation(
     operation: "login" | "register" | "refresh" | "logout",
     result: "success" | "failure" | "error",
     userRole: string = "unknown"
-  ): void {
+  ): Promise<void> {
     const labels = { operation, result, user_role: userRole };
     this.recordCounter("libs_auth_operations_total", 1, labels);
   }
@@ -240,12 +240,12 @@ export class PrometheusMetricsCollector implements IMetricsCollector {
   /**
    * Record WebSocket activity
    */
-  recordWebSocketActivity(
+  async recordWebSocketActivity(
     service: string,
     messageType: string,
     direction: "inbound" | "outbound",
     connectionCount?: number
-  ): void {
+  ): Promise<void> {
     // Message count
     this.recordCounter("elysia_websocket_messages_total", 1, {
       service,
@@ -264,7 +264,7 @@ export class PrometheusMetricsCollector implements IMetricsCollector {
   /**
    * Record Node.js process metrics
    */
-  recordNodeMetrics(service: string): void {
+  async recordNodeMetrics(service: string): Promise<void> {
     const memUsage = process.memoryUsage();
 
     // Memory metrics
@@ -301,7 +301,7 @@ export class PrometheusMetricsCollector implements IMetricsCollector {
   /**
    * Measure and record event loop lag
    */
-  measureEventLoopLag(service: string): void {
+  async measureEventLoopLag(service: string): Promise<void> {
     const start = process.hrtime.bigint();
     setImmediate(() => {
       const lag = Number(process.hrtime.bigint() - start) / 1000000; // Convert to milliseconds

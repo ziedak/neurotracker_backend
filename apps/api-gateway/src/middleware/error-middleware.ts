@@ -1,9 +1,9 @@
 import { Elysia } from "elysia";
-import { Logger } from "@libs/monitoring";
+import { createLogger } from "@libs/utils";
 import { generateId, AppError } from "@libs/utils";
 import { handleError } from "../types";
 
-const logger = Logger.getInstance("api-gateway");
+const logger = createLogger("api-gateway");
 
 export function setupErrorHandling(app: Elysia) {
   return app.onError(({ error, set, request }) => {

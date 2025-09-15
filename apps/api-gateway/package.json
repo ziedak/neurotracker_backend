@@ -1,28 +1,29 @@
 {
   "name": "api-gateway",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "version": "2.0.0",
+  "description": "API Gateway using modern elysia-server library",
+  "main": "src/main.ts",
   "scripts": {
-    "build": "bun build src/main.ts --outdir=dist --target=bun",
+    "build": "tsc --build",
     "dev": "bun --watch src/main.ts",
     "start": "bun src/main.ts"
   },
-  "keywords": [],
+  "keywords": [
+    "api-gateway",
+    "microservices",
+    "elysia",
+    "typescript"
+  ],
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.14.0",
   "dependencies": {
-    "@elysiajs/cors": "^1.3.3",
-    "@elysiajs/node": "^1.3.0",
-    "@elysiajs/swagger": "^1.3.1",
-    "elysia": "^1.3.8",
-    "elysiajs-helmet": "^1.0.2"
+    "@libs/elysia-server": "workspace:*",
+    "@libs/monitoring": "workspace:*",
+    "@libs/utils": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.2.1",
-    "nodemon": "^3.1.10",
-    "tsx": "^4.20.3",
     "typescript": "^5.9.2"
   }
 }

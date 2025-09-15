@@ -125,8 +125,10 @@ describe("ErrorHttpMiddleware", () => {
 
   describe("Error Handling", () => {
     it("should handle standard Error objects", async () => {
-      const consoleSpy = jest.spyOn(console, "error").mockImplementation();
       const testError = new Error("Test error message");
+
+      // Spy on the actual logger instance used by the middleware
+      const loggerSpy = jest.spyOn(middleware["logger"], "error");
 
       nextFunction.mockRejectedValue(testError);
 
@@ -147,12 +149,22 @@ describe("ErrorHttpMiddleware", () => {
         }),
       });
 
-      consoleSpy.mockRestore();
+      // Verify logger was called
+      expect(loggerSpy).toHaveBeenCalledWith(
+        "Server error occurred",
+        testError,
+        expect.objectContaining({
+          message: "Test error message",
+          requestId: "test-request-123",
+          errorType: "Error",
+          statusCode: 500,
+        })
+      );
+
+      loggerSpy.mockRestore();
     });
 
     it("should handle custom error types with mappings", async () => {
-      const consoleSpy = jest.spyOn(console, "error").mockImplementation();
-
       class ValidationError extends Error {
         constructor(message: string) {
           super(message);
@@ -179,13 +191,9 @@ describe("ErrorHttpMiddleware", () => {
           stackTrace: expect.any(String),
         }),
       });
-
-      consoleSpy.mockRestore();
     });
 
     it("should handle HTTP status code errors", async () => {
-      const consoleSpy = jest.spyOn(console, "error").mockImplementation();
-
       class HttpError extends Error {
         constructor(public statusCode: number, message: string) {
           super(message);
@@ -212,13 +220,9 @@ describe("ErrorHttpMiddleware", () => {
           stackTrace: expect.any(String),
         }),
       });
-
-      consoleSpy.mockRestore();
     });
 
     it("should handle non-Error objects", async () => {
-      const consoleSpy = jest.spyOn(console, "error").mockImplementation();
-
       nextFunction.mockRejectedValue("String error");
 
       await expect(
@@ -234,13 +238,9 @@ describe("ErrorHttpMiddleware", () => {
         requestId: "test-request-123",
         statusCode: 500,
       });
-
-      consoleSpy.mockRestore();
     });
 
     it("should handle null/undefined errors", async () => {
-      const consoleSpy = jest.spyOn(console, "error").mockImplementation();
-
       nextFunction.mockRejectedValue(null);
 
       await expect(
@@ -256,8 +256,6 @@ describe("ErrorHttpMiddleware", () => {
         requestId: "test-request-123",
         statusCode: 500,
       });
-
-      consoleSpy.mockRestore();
     });
   });
 
@@ -519,8 +517,6 @@ describe("ErrorHttpMiddleware", () => {
 
   describe("Path Exclusion", () => {
     it("should skip error handling for excluded paths", async () => {
-      const consoleSpy = jest.spyOn(console, "error").mockImplementation();
-
       mockContext.path = "/health";
       const testError = new Error("Test error");
       nextFunction.mockRejectedValue(testError);
@@ -532,8 +528,6 @@ describe("ErrorHttpMiddleware", () => {
       // Should not have modified the response for excluded path
       expect(mockContext.set.status).toBe(200); // Original status preserved
       expect(mockContext.set.body).toBeUndefined(); // No error response set for excluded paths
-
-      consoleSpy.mockRestore();
     });
 
     it("should handle errors for non-excluded paths", async () => {
@@ -551,18 +545,20 @@ describe("ErrorHttpMiddleware", () => {
 
   describe("Error Logging", () => {
     it("should log errors when enabled", async () => {
-      const consoleSpy = jest.spyOn(console, "error").mockImplementation();
-
       const testError = new Error("Test error");
+
+      // Spy on the actual logger instance
+      const loggerSpy = jest.spyOn(middleware["logger"], "error");
+
       nextFunction.mockRejectedValue(testError);
 
       await expect(
         middleware["execute"](mockContext, nextFunction)
       ).resolves.not.toThrow();
 
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(loggerSpy).toHaveBeenCalledWith(
         "Server error occurred",
-        expect.any(Error),
+        testError,
         expect.objectContaining({
           message: "Test error",
           requestId: "test-request-123",
@@ -571,7 +567,7 @@ describe("ErrorHttpMiddleware", () => {
         })
       );
 
-      consoleSpy.mockRestore();
+      loggerSpy.mockRestore();
     });
 
     it("should skip error logging when disabled", async () => {
@@ -582,7 +578,10 @@ describe("ErrorHttpMiddleware", () => {
         logErrors: false,
       });
 
-      const consoleSpy = jest.spyOn(console, "error").mockImplementation();
+      // Spy on the logger for the no-logging middleware
+      const loggerErrorSpy = jest.spyOn(noLogMiddleware["logger"], "error");
+      const loggerWarnSpy = jest.spyOn(noLogMiddleware["logger"], "warn");
+      const loggerInfoSpy = jest.spyOn(noLogMiddleware["logger"], "info");
 
       const testError = new Error("Test error");
       nextFunction.mockRejectedValue(testError);
@@ -591,31 +590,38 @@ describe("ErrorHttpMiddleware", () => {
         noLogMiddleware["execute"](mockContext, nextFunction)
       ).resolves.not.toThrow();
 
-      expect(consoleSpy).not.toHaveBeenCalled();
+      expect(loggerErrorSpy).not.toHaveBeenCalled();
+      expect(loggerWarnSpy).not.toHaveBeenCalled();
+      expect(loggerInfoSpy).not.toHaveBeenCalled();
 
-      consoleSpy.mockRestore();
+      loggerErrorSpy.mockRestore();
+      loggerWarnSpy.mockRestore();
+      loggerInfoSpy.mockRestore();
     });
 
     it("should log different error types appropriately", async () => {
       const testCases = [
-        { error: new Error("Generic error"), expectedLevel: "error" },
-        { error: new Error("4xx error"), expectedLevel: "warn" },
-        { error: new Error("5xx error"), expectedLevel: "error" },
+        { error: new Error("Generic error"), expectedMethod: "error" },
+        { error: new Error("4xx error"), expectedMethod: "warn" },
+        { error: new Error("5xx error"), expectedMethod: "error" },
       ];
 
-      for (const { error, expectedLevel } of testCases) {
-        const consoleSpy = jest
-          .spyOn(console, expectedLevel as keyof Console)
-          .mockImplementation();
+      for (const { error, expectedMethod } of testCases) {
+        // Create a new spy for each test case
+        const loggerSpy = jest.spyOn(
+          middleware["logger"],
+          expectedMethod as keyof (typeof middleware)["logger"]
+        );
+
         nextFunction.mockRejectedValue(error);
 
         await expect(
           middleware["execute"](mockContext, nextFunction)
         ).resolves.not.toThrow();
 
-        expect(consoleSpy).toHaveBeenCalled();
+        expect(loggerSpy).toHaveBeenCalled();
 
-        consoleSpy.mockRestore();
+        loggerSpy.mockRestore();
       }
     });
   });

@@ -1,5 +1,4 @@
-import { Logger } from "@libs/monitoring";
-import { AppError } from "@libs/utils";
+import { ILogger, AppError } from "@libs/utils";
 import type {
   EndpointRegistryService,
   LoadBalancingStrategy,

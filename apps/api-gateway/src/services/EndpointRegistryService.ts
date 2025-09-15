@@ -1,4 +1,4 @@
-import { Logger } from "@libs/monitoring";
+import { ILogger } from "@libs/utils";
 /**
  * ServiceInstance: Represents a service endpoint instance
  */
@@ -59,11 +59,12 @@ export class EndpointRegistryService {
       const idx = this.roundRobinIndex.get(serviceName) ?? 0;
       const instance = instances[idx % instances.length];
       this.roundRobinIndex.set(serviceName, (idx + 1) % instances.length);
-      return instance.url;
+      return instance?.url || null;
     }
     // Default: random
     const index = Math.floor(Math.random() * instances.length);
-    return instances[index].url;
+    const selectedInstance = instances[index];
+    return selectedInstance?.url || null;
   }
 
   /**

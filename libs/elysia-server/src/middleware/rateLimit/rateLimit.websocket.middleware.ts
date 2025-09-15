@@ -533,7 +533,7 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
         );
         if (closeResult && typeof closeResult.then === "function") {
           closeResult.catch((err) =>
-            console.error("WebSocket close failed:", err)
+            this.logger.error("WebSocket close failed:", err)
           );
         }
       } catch (closeError) {
@@ -595,7 +595,7 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
         );
         if (sendResult && typeof sendResult.then === "function") {
           sendResult.catch((err) =>
-            console.error("WebSocket send failed:", err)
+            this.logger.error("WebSocket send failed:", err)
           );
         }
       }
@@ -622,7 +622,7 @@ export class RateLimitWebSocketMiddleware extends BaseWebSocketMiddleware<Advanc
         );
         if (sendResult && typeof sendResult.then === "function") {
           sendResult.catch((err) =>
-            console.error("WebSocket send failed:", err)
+            this.logger.error("WebSocket send failed:", err)
           );
         }
       }

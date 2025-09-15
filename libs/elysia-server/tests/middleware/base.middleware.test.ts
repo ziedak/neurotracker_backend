@@ -42,9 +42,9 @@ describe("Base Middleware Classes", () => {
         ): Promise<void> {
           const startTime = Date.now();
           try {
-            await this.beforeProcess(context);
+            this.beforeProcess(context);
             await next();
-            await this.afterProcess(context);
+            this.afterProcess(context);
 
             // Record execution time metric
             await this.recordTimer(

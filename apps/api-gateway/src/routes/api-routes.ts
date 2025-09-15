@@ -1,6 +1,5 @@
 import { Elysia } from "elysia";
-import { Logger } from "@libs/monitoring";
-import { AppError } from "@libs/utils";
+import { ILogger, AppError } from "@libs/utils";
 import { proxyToService } from "../proxyToService";
 import { handleError } from "../types";
 import type { EndpointRegistryService } from "../services/EndpointRegistryService";

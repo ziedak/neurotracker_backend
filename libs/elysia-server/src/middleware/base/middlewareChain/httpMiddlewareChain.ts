@@ -7,7 +7,7 @@ import { type IMetricsCollector } from "@libs/monitoring";
  */
 export interface HttpMiddlewareChainConfig {
   readonly name: string;
-  readonly middlewares: readonly HttpMiddlewareChainItem[];
+  readonly middlewares?: readonly HttpMiddlewareChainItem[];
 }
 
 /**
@@ -55,7 +55,7 @@ export class HttpMiddlewareChain {
     this.chainName = config.name;
     this.logger = createLogger(`HttpMiddlewareChain:${config.name}`);
 
-    this.middlewares = config.middlewares
+    this.middlewares = (config.middlewares ?? [])
       .filter((m) => m.enabled !== false)
       .map((m) => ({
         name: m.name,

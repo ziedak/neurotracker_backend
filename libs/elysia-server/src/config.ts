@@ -1,30 +1,23 @@
+// Import the actual middleware configuration interfaces
+import type { CorsHttpMiddlewareConfig } from "./middleware/cors/cors.http.middleware";
+import type { SecurityHttpMiddlewareConfig } from "./middleware/security/security.http.middleware";
+import type { AuthHttpMiddlewareConfig } from "./middleware/auth/auth.http.middleware";
+import type { RateLimitHttpMiddlewareConfig } from "./middleware/rateLimit/rateLimit.http.Middleware";
+import type { AuditHttpMiddlewareConfig } from "./middleware/audit/audit.http.middleware";
+import type { ErrorHttpMiddlewareConfig } from "./middleware/error/error.http.middleware";
+import type { LoggingHttpMiddlewareConfig } from "./middleware/logging/logging.http.middleware";
+
 export interface ServerConfig {
   port: number;
   name: string;
   version: string;
   description?: string;
-  cors?: {
-    origin?: string | string[];
-    credentials?: boolean;
-    methods?: string[];
-    allowedHeaders?: string[];
-  };
   swagger?: {
     enabled?: boolean;
     path?: string;
     title?: string;
     version?: string;
     description?: string;
-  };
-  rateLimiting?: {
-    enabled?: boolean;
-    requests?: number;
-    windowMs?: number;
-    skipPaths?: string[];
-  };
-  logging?: {
-    enabled?: boolean;
-    level?: "debug" | "info" | "warn" | "error";
   };
   websocket?: {
     enabled?: boolean;
@@ -37,56 +30,15 @@ export interface ServerConfig {
   };
   middleware?: {
     enabled?: boolean;
-    auth?: {
-      enabled?: boolean;
-      requireAuth?: boolean;
-      roles?: string[];
-      permissions?: string[];
-      allowAnonymous?: boolean;
-      bypassRoutes?: string[];
-      apiKeyAuth?: boolean;
-      jwtAuth?: boolean;
-      sessionAuth?: boolean;
-    };
-    rateLimit?: {
-      enabled?: boolean;
-      algorithm?: "sliding-window" | "token-bucket" | "fixed-window";
-      maxRequests?: number;
-      windowMs?: number;
-      keyStrategy?: "ip" | "user" | "apiKey";
-      standardHeaders?: boolean;
-      skipSuccessfulRequests?: boolean;
-      skipFailedRequests?: boolean;
-    };
-    security?: {
-      enabled?: boolean;
-      cors?: boolean;
-      csp?: boolean;
-      hsts?: boolean;
-      xssFilter?: boolean;
-      noSniff?: boolean;
-      frameOptions?: string;
-    };
-    error?: {
-      enabled?: boolean;
-      includeStackTrace?: boolean;
-      logErrors?: boolean;
-      customErrorMessages?: Record<string, string>;
-    };
-    audit?: {
-      enabled?: boolean;
-      includeBody?: boolean;
-      includeResponse?: boolean;
-      storageStrategy?: "redis" | "clickhouse" | "both";
-      maxBodySize?: number;
-    };
-    requestLogging?: {
-      enabled?: boolean;
-      logLevel?: "debug" | "info" | "warn" | "error";
-      logRequestBody?: boolean;
-      logResponseBody?: boolean;
-      excludePaths?: string[];
-    };
+    // Use actual middleware config interfaces
+    cors?: Partial<CorsHttpMiddlewareConfig>;
+    security?: Partial<SecurityHttpMiddlewareConfig>;
+    auth?: Partial<AuthHttpMiddlewareConfig>;
+    rateLimit?: Partial<RateLimitHttpMiddlewareConfig>;
+    audit?: Partial<AuditHttpMiddlewareConfig>;
+    error?: Partial<ErrorHttpMiddlewareConfig>;
+    logging?: Partial<LoggingHttpMiddlewareConfig>;
+    // Generic prometheus config (no specific middleware for this yet)
     prometheus?: {
       enabled?: boolean;
       endpoint?: string;
@@ -99,25 +51,9 @@ export interface ServerConfig {
 export const DEFAULT_SERVER_CONFIG: Partial<ServerConfig> = {
   port: 3000,
   version: "1.0.0",
-  cors: {
-    origin: ["http://localhost:3000"],
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Request-ID"],
-  },
   swagger: {
     enabled: true,
     path: "/swagger",
-  },
-  rateLimiting: {
-    enabled: true,
-    requests: 1000,
-    windowMs: 60000,
-    skipPaths: ["/swagger", "/swagger/", "/health", "/docs"],
-  },
-  logging: {
-    enabled: true,
-    level: "info",
   },
   websocket: {
     enabled: false,
@@ -130,8 +66,19 @@ export const DEFAULT_SERVER_CONFIG: Partial<ServerConfig> = {
   },
   middleware: {
     enabled: true,
+    cors: {
+      name: "cors",
+      enabled: true,
+      priority: 90,
+      allowedOrigins: ["http://localhost:3000"],
+      credentials: true,
+      allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "X-Request-ID"],
+    },
     auth: {
+      name: "auth",
       enabled: false,
+      priority: 10,
       requireAuth: false,
       allowAnonymous: true,
       bypassRoutes: ["/health", "/metrics", "/docs", "/swagger"],
@@ -140,7 +87,9 @@ export const DEFAULT_SERVER_CONFIG: Partial<ServerConfig> = {
       sessionAuth: false,
     },
     rateLimit: {
+      name: "rate-limit",
       enabled: true,
+      priority: 10,
       algorithm: "sliding-window",
       maxRequests: 1000,
       windowMs: 60000,
@@ -150,29 +99,42 @@ export const DEFAULT_SERVER_CONFIG: Partial<ServerConfig> = {
       skipFailedRequests: false,
     },
     security: {
+      name: "security",
       enabled: true,
-      cors: true,
-      csp: false,
-      hsts: false,
-      xssFilter: true,
-      noSniff: true,
+      priority: 80,
+      contentSecurityPolicy: {
+        enabled: false,
+      },
+      hsts: {
+        enabled: false,
+      },
       frameOptions: "SAMEORIGIN",
+      noSniff: true,
+      xssFilter: true,
     },
     error: {
+      name: "error",
       enabled: true,
+      priority: 100,
       includeStackTrace: false,
       logErrors: true,
       customErrorMessages: {},
     },
     audit: {
+      name: "audit",
       enabled: false,
+      priority: 10,
       includeBody: false,
       includeResponse: false,
       storageStrategy: "redis",
       maxBodySize: 1024 * 5, // 5KB
+      redisTtl: 7 * 24 * 3600, // 7 days
+      retentionDays: 90,
     },
-    requestLogging: {
+    logging: {
+      name: "logging",
       enabled: true,
+      priority: 5,
       logLevel: "info",
       logRequestBody: false,
       logResponseBody: false,

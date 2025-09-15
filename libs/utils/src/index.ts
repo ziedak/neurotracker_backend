@@ -4,12 +4,8 @@ export * from "./executeWithRetry";
 export * from "./AppError";
 export * from "./Scheduler";
 export * from "./helpers";
-export {
-  PinoLogger as Logger,
-  createLogger,
-  ILogger,
-  LogLevel,
-} from "./Logger";
+export { PinoLogger as Logger, createLogger } from "./Logger";
+export type { ILogger, LogLevel } from "./Logger";
 
 // policies such as Retry, Circuit Breaker, Timeout, Bulkhead Isolation, and Fallback
 export { default as lodash } from "lodash";

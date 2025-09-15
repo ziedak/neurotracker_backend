@@ -1,6 +1,7 @@
 export { IpStrategy } from "./IpStrategy";
 export { UserStrategy, createUserStrategy } from "./UserStrategy";
-export { ApiKeyStrategy, RateLimitStrategy } from "./ApiKeyStrategy";
+export { ApiKeyStrategy } from "./ApiKeyStrategy";
+export type { RateLimitStrategy } from "./ApiKeyStrategy";
 
 // Import classes for internal factory use
 import { IpStrategy } from "./IpStrategy";

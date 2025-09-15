@@ -27,7 +27,7 @@ export {
 // ===== CONFIGURATION MANAGEMENT =====
 // export * from "./config/rateLimitConfig";
 export { RateLimitConfigManager } from "./config/rateLimitConfig";
-export { CompleteRateLimitConfig } from "./config/rateLimitConfig";
+export type { CompleteRateLimitConfig } from "./config/rateLimitConfig";
 
 // ===== MONITORING AND OBSERVABILITY =====
 export * from "./rateLimitMonitoring";
