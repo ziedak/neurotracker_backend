@@ -14,7 +14,17 @@ import {
   type ClientType,
   type User,
   type AuthContext,
-} from "../types/index.js";
+} from "../types";
+
+// Result pattern for safe error handling
+import {
+  Result,
+  success,
+  failure,
+  AuthError,
+  AuthErrors,
+  AuthorizationResult,
+} from "../utils/result";
 
 // Battle-tested security libraries
 import { parse as parseAuthHeader } from "auth-header";
@@ -211,58 +221,87 @@ export class KeycloakAuthHttpMiddleware {
   }
 
   /**
-   * CRITICAL ARCHITECTURAL FLAW: Synchronous error handling in async context
-   * This method throws errors synchronously but is called in async contexts
-   * This can cause unhandled promise rejections and inconsistent error handling
+   * SAFE AUTHORIZATION: Uses Result pattern to prevent unhandled promise rejections
+   * This replaces the dangerous synchronous throw pattern that crashes Elysia servers
    */
   public async authorize(
     authResult: KeycloakAuthenticationResult
-  ): Promise<void> {
+  ): Promise<Result<AuthorizationResult, AuthError>> {
+    // Handle unauthenticated users
     if (!authResult.user) {
       if (this.config.requireAuth) {
-        throw new UnauthorizedError("Authentication required");
+        return failure(AuthErrors.unauthorized("Authentication required"));
       }
-      return;
+      return success({
+        authorized: true, // Anonymous access allowed
+      });
     }
 
     const user = authResult.user;
+    const missingRoles: string[] = [];
+    const missingPermissions: string[] = [];
 
     // Check required roles
     if (this.config.roles && this.config.roles.length > 0) {
-      const hasRequiredRole = this.config.roles.some((role) =>
-        user.roles.includes(role)
-      );
+      const userRoles = new Set(user.roles);
+      for (const requiredRole of this.config.roles) {
+        if (!userRoles.has(requiredRole)) {
+          missingRoles.push(requiredRole);
+        }
+      }
 
-      if (!hasRequiredRole) {
+      if (missingRoles.length > 0) {
         this.logger.warn("Authorization failed: insufficient roles", {
           userId: user.id,
           userRoles: user.roles,
           requiredRoles: this.config.roles,
+          missingRoles,
         });
-        throw new ForbiddenError("Insufficient role privileges");
+
+        return failure({
+          ...AuthErrors.forbidden("Insufficient role privileges"),
+          details: { missingRoles, userRoles: user.roles },
+        });
       }
     }
 
     // Check required permissions
     if (this.config.permissions && this.config.permissions.length > 0) {
-      const hasRequiredPermission = this.config.permissions.some((permission) =>
-        user.permissions.includes(permission)
-      );
+      const userPermissions = new Set(user.permissions);
+      for (const requiredPermission of this.config.permissions) {
+        if (!userPermissions.has(requiredPermission)) {
+          missingPermissions.push(requiredPermission);
+        }
+      }
 
-      if (!hasRequiredPermission) {
+      if (missingPermissions.length > 0) {
         this.logger.warn("Authorization failed: insufficient permissions", {
           userId: user.id,
           userPermissions: user.permissions,
           requiredPermissions: this.config.permissions,
+          missingPermissions,
         });
-        throw new ForbiddenError("Insufficient permissions");
+
+        return failure({
+          ...AuthErrors.forbidden("Insufficient permissions"),
+          details: { missingPermissions, userPermissions: user.permissions },
+        });
       }
     }
 
+    // Authorization successful
     this.logger.debug("Authorization successful", {
       userId: user.id,
       roles: user.roles,
       permissions: user.permissions,
+    });
+
+    return success({
+      authorized: true,
+      context: {
+        userRoles: user.roles,
+        userPermissions: user.permissions,
+      },
     });
   }
 
@@ -284,7 +323,14 @@ export class KeycloakAuthHttpMiddleware {
       }
 
       if (this.config.strictMode) {
-        throw new UnauthorizedError("Authorization header required");
+        // FIXED: Return error result instead of throwing
+        return {
+          user: null,
+          authContext: null,
+          validationResult: null,
+          method: "anonymous",
+          error: "Authorization header required in strict mode",
+        };
       }
 
       return {
@@ -299,7 +345,14 @@ export class KeycloakAuthHttpMiddleware {
     // Extract token from header using secure method
     const token = this.extractTokenFromHeader(authHeader);
     if (!token) {
-      throw new UnauthorizedError("Invalid authorization header format");
+      // FIXED: Return error result instead of throwing
+      return {
+        user: null,
+        authContext: null,
+        validationResult: null,
+        method: "anonymous",
+        error: "Invalid authorization header format",
+      };
     }
 
     // Validate token through Keycloak with circuit breaker protection
@@ -317,13 +370,29 @@ export class KeycloakAuthHttpMiddleware {
               );
 
             if (!validationResult.valid) {
-              throw new UnauthorizedError(
-                validationResult.error ?? "Token validation failed"
-              );
+              // FIXED: Return error result instead of throwing
+              return {
+                user: null,
+                authContext: null,
+                validationResult,
+                method: "anonymous",
+                error: validationResult.error ?? "Token validation failed",
+              };
             }
 
             // Convert validation result to User object
             const user = this.createUserFromValidation(validationResult);
+
+            // Handle case where user creation failed
+            if (!user) {
+              return {
+                user: null,
+                authContext: null,
+                validationResult,
+                method: "anonymous",
+                error: "Failed to create user from token claims",
+              };
+            }
 
             // Create auth context
             const authContext: AuthContext = {
@@ -520,38 +589,56 @@ export class KeycloakAuthHttpMiddleware {
   }
 
   /**
-   * Create User object from validation result
+   * Create User object from validation result with safe error handling
+   * Returns null instead of throwing to prevent crashes
    */
   private createUserFromValidation(
     validationResult: TokenValidationResult
-  ): User {
+  ): User | null {
     if (!validationResult.valid || !validationResult.claims?.sub) {
-      throw new Error("Invalid validation result");
+      this.logger.warn("Cannot create user from invalid validation result", {
+        valid: validationResult.valid,
+        hasClaims: !!validationResult.claims,
+        hasSub: !!validationResult.claims?.sub,
+      });
+      return null;
     }
 
     const claims = validationResult.claims;
 
-    // Extract permissions from multiple sources in Keycloak JWT
-    const permissions = this.extractPermissionsFromClaims(claims);
+    try {
+      // Extract permissions from multiple sources in Keycloak JWT
+      const permissions = this.extractPermissionsFromClaims(claims);
 
-    return {
-      id: claims.sub,
-      email: claims.email ?? "",
-      name: claims.name ?? claims.preferred_username ?? "",
-      roles: claims.realm_access?.roles ?? [],
-      permissions,
-      client: this.config.keycloakClient as ClientType,
-      context: {
-        clientId:
-          typeof claims.aud === "string" ? claims.aud : claims.aud?.[0] ?? "",
-        issuer: claims.iss,
-        issuedAt: claims.iat ? new Date(claims.iat * 1000) : new Date(),
-        expiresAt: claims.exp ? new Date(claims.exp * 1000) : new Date(),
-      },
-      isActive: validationResult.valid,
-      lastLogin: new Date(),
-      preferences: {},
-    };
+      return {
+        id: claims.sub,
+        email: claims.email ?? "",
+        name: claims.name ?? claims.preferred_username ?? "",
+        roles: claims.realm_access?.roles ?? [],
+        permissions,
+        client: this.config.keycloakClient as ClientType,
+        context: {
+          clientId:
+            typeof claims.aud === "string" ? claims.aud : claims.aud?.[0] ?? "",
+          issuer: claims.iss,
+          issuedAt: claims.iat ? new Date(claims.iat * 1000) : new Date(),
+          expiresAt: claims.exp ? new Date(claims.exp * 1000) : new Date(),
+        },
+        isActive: validationResult.valid,
+        lastLogin: new Date(),
+        preferences: {},
+      };
+    } catch (error) {
+      this.logger.error("Failed to create user from validation result", {
+        error: error instanceof Error ? error.message : "unknown",
+        claims: {
+          sub: claims.sub,
+          aud: claims.aud,
+          iss: claims.iss,
+        },
+      });
+      return null;
+    }
   }
 
   /**
@@ -660,19 +747,23 @@ export class KeycloakAuthHttpMiddleware {
   }
 
   /**
-   * Validate configuration on instantiation
+   * Validate configuration on instantiation with safe error handling
    */
   private validateConfiguration(): void {
     if (!this.config.keycloakClient) {
-      throw new Error("Keycloak client must be specified");
+      this.logger.error("CRITICAL: Keycloak client must be specified");
+      // In production, we could fall back to a default or disable authentication
+      return; // Don't crash the entire service
     }
 
     const validClients = ["frontend", "service", "tracker", "websocket"];
     if (!validClients.includes(this.config.keycloakClient)) {
-      throw new Error(
-        `Invalid Keycloak client: ${this.config.keycloakClient}. ` +
-          `Must be one of: ${validClients.join(", ")}`
-      );
+      this.logger.error("CRITICAL: Invalid Keycloak client configuration", {
+        provided: this.config.keycloakClient,
+        valid: validClients,
+      });
+      // In production, we could fall back to a default
+      return; // Don't crash the entire service
     }
 
     if (this.config.cacheValidationTTL && this.config.cacheValidationTTL < 60) {

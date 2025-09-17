@@ -35,14 +35,18 @@ const logger = createLogger("keycloak-client-factory");
  */
 export class KeycloakClientFactory implements IKeycloakClientFactory {
   private config: KeycloakMultiClientConfig;
-  private discoveryCache: Map<string, { data: any; timestamp: number }> =
-    new Map();
+  private discoveryCache: Map<
+    string,
+    { data: any; timestamp: number; accessCount: number }
+  > = new Map();
   private pkceManager: PKCEManager;
 
-  // Cache management
-  private readonly maxCacheSize = 100; // Maximum number of cached discovery documents
-  private readonly cacheCleanupInterval = 5 * 60 * 1000; // 5 minutes cleanup interval
-  private cacheCleanupTimer?: ReturnType<typeof setInterval>;
+  // Cache management with enhanced cleanup
+  private readonly maxCacheSize = 50; // Reduced for better memory management
+  private readonly cacheCleanupInterval = 2 * 60 * 1000; // 2 minutes cleanup interval (more aggressive)
+  private readonly maxCacheAge = 15 * 60 * 1000; // 15 minutes max age regardless of config
+  private cacheCleanupTimer?: ReturnType<typeof setInterval> | undefined;
+  private isShuttingDown = false;
 
   // Circuit breaker for HTTP requests to prevent cascading failures
   private readonly httpCircuitBreaker: CircuitBreakerPolicy;
@@ -63,9 +67,10 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     });
 
     // Initialize circuit breaker for HTTP requests using cockatiel
+    // Production-optimized settings for authentication services
     this.httpCircuitBreaker = circuitBreaker(handleAll, {
-      halfOpenAfter: 30000, // Try to close circuit after 30 seconds
-      breaker: new ConsecutiveBreaker(5), // Open after 5 consecutive failures
+      halfOpenAfter: 60000, // Extended recovery time to 60s for Keycloak stability
+      breaker: new ConsecutiveBreaker(10), // Increased failure threshold to 10 consecutive failures
     });
 
     // Start cache cleanup timer
@@ -80,6 +85,87 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
       serverUrl: this.config.clients.frontend.serverUrl,
       clientCount: Object.keys(this.config.clients).length,
     });
+  }
+
+  /**
+   * Enhanced circuit breaker execution with monitoring and logging
+   * Provides visibility into circuit breaker state changes and performance metrics
+   */
+  private async executeWithCircuitBreaker<T>(
+    operation: () => Promise<T>,
+    operationName: string
+  ): Promise<T> {
+    const startTime = Date.now();
+
+    try {
+      logger.debug(
+        `Executing ${operationName} with circuit breaker protection`
+      );
+
+      const result = await this.httpCircuitBreaker.execute(operation);
+
+      const duration = Date.now() - startTime;
+      logger.debug(`${operationName} succeeded`, {
+        duration: `${duration}ms`,
+        circuitBreakerActive: true,
+      });
+
+      return result;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+
+      // Check if this is a circuit breaker rejection
+      if (error instanceof Error && error.message.includes("circuit")) {
+        logger.warn(`${operationName} blocked by circuit breaker`, {
+          duration: `${duration}ms`,
+          error: error.message,
+          recommendation:
+            "Check Keycloak server health - circuit breaker is protecting against failures",
+        });
+      } else {
+        logger.error(`${operationName} failed through circuit breaker`, {
+          duration: `${duration}ms`,
+          error: error instanceof Error ? error.message : String(error),
+          circuitBreakerState: "accumulating_failures",
+        });
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Unified HTTP client method with circuit breaker protection
+   * Eliminates code duplication and provides consistent error handling
+   */
+  private async executeHttpRequest(
+    url: string,
+    options: RequestInit,
+    operationName: string
+  ): Promise<Response> {
+    // Set default headers
+    const defaultHeaders = {
+      "User-Agent": "keycloak-auth-lib/1.0.0",
+      Accept: "application/json",
+    };
+
+    const requestOptions: RequestInit = {
+      ...options,
+      headers: {
+        ...defaultHeaders,
+        ...options.headers,
+      },
+    };
+
+    return this.executeWithCircuitBreaker(async () => {
+      const response = await fetch(url, requestOptions);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      return response;
+    }, operationName);
   }
 
   /**
@@ -157,36 +243,35 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
   }
 
   /**
-   * Get OpenID Connect discovery document
+   * Get OpenID Connect discovery document with enhanced caching and memory management
    */
   public async getDiscoveryDocument(realm: string): Promise<any> {
     const cacheKey = `discovery:${realm}`;
     const cached = this.discoveryCache.get(cacheKey);
+    const now = Date.now();
 
-    if (
-      cached &&
-      Date.now() - cached.timestamp < this.config.discovery.cacheTimeout * 1000
-    ) {
-      return cached.data;
-    }
-
-    // Remove expired entry if it exists
+    // Check if cached entry is still valid (respecting both config timeout and max age)
     if (cached) {
+      const configTimeout = this.config.discovery.cacheTimeout * 1000;
+      const isWithinConfigTimeout = now - cached.timestamp < configTimeout;
+      const isWithinMaxAge = now - cached.timestamp < this.maxCacheAge;
+
+      if (isWithinConfigTimeout && isWithinMaxAge) {
+        // Update access count for LRU tracking
+        cached.accessCount++;
+        return cached.data;
+      }
+
+      // Remove expired entry
       this.discoveryCache.delete(cacheKey);
     }
 
-    // Check cache size before adding new entry
+    // Proactive cleanup before adding new entry
+    this.cleanupExpiredCacheEntries();
+
+    // Check cache size before adding new entry (LRU eviction)
     if (this.discoveryCache.size >= this.maxCacheSize) {
-      // Remove oldest entry (simple FIFO eviction)
-      const firstKey = this.discoveryCache.keys().next().value;
-      if (firstKey) {
-        this.discoveryCache.delete(firstKey);
-        logger.debug("Evicted oldest cache entry due to size limit", {
-          evictedKey: firstKey,
-          currentSize: this.discoveryCache.size,
-          maxSize: this.maxCacheSize,
-        });
-      }
+      this.evictLRUEntries(1);
     }
 
     const serverUrl = this.config.clients.frontend.serverUrl;
@@ -197,30 +282,19 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
         url: discoveryUrl,
       });
 
-      const response = await this.httpCircuitBreaker.execute(async () => {
-        const httpResponse = await fetch(discoveryUrl, {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-            "User-Agent": "keycloak-auth-lib/1.0.0",
-          },
-        });
-
-        if (!httpResponse.ok) {
-          throw new Error(
-            `HTTP ${httpResponse.status}: ${httpResponse.statusText}`
-          );
-        }
-
-        return httpResponse;
-      });
+      const response = await this.executeHttpRequest(
+        discoveryUrl,
+        { method: "GET" },
+        `discovery-document-fetch:${realm}`
+      );
 
       const data = await response.json();
 
-      // Cache the discovery document
+      // Cache the discovery document with enhanced tracking
       this.discoveryCache.set(cacheKey, {
         data,
         timestamp: Date.now(),
+        accessCount: 1,
       });
 
       logger.info("Discovery document retrieved successfully", {
@@ -397,25 +471,17 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     }
 
     try {
-      const response = await this.httpCircuitBreaker.execute(async () => {
-        const httpResponse = await fetch(discovery.token_endpoint, {
+      const response = await this.executeHttpRequest(
+        discovery.token_endpoint,
+        {
           method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
-            Accept: "application/json",
-            "User-Agent": "keycloak-auth-lib/1.0.0",
           },
           body: body.toString(),
-        });
-
-        if (!httpResponse.ok) {
-          throw new Error(
-            `HTTP ${httpResponse.status}: ${httpResponse.statusText}`
-          );
-        }
-
-        return httpResponse;
-      });
+        },
+        "authorization-code-token-exchange"
+      );
 
       const responseData = await response.json();
 
@@ -530,25 +596,17 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     }
 
     try {
-      const response = await this.httpCircuitBreaker.execute(async () => {
-        const httpResponse = await fetch(discovery.token_endpoint, {
+      const response = await this.executeHttpRequest(
+        discovery.token_endpoint,
+        {
           method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
-            Accept: "application/json",
-            "User-Agent": "keycloak-auth-lib/1.0.0",
           },
           body: body.toString(),
-        });
-
-        if (!httpResponse.ok) {
-          throw new Error(
-            `HTTP ${httpResponse.status}: ${httpResponse.statusText}`
-          );
-        }
-
-        return httpResponse;
-      });
+        },
+        "refresh-token"
+      );
 
       const responseData = await response.json();
 
@@ -626,25 +684,17 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     });
 
     try {
-      const response = await this.httpCircuitBreaker.execute(async () => {
-        const httpResponse = await fetch(discovery.token_endpoint, {
+      const response = await this.executeHttpRequest(
+        discovery.token_endpoint,
+        {
           method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
-            Accept: "application/json",
-            "User-Agent": "keycloak-auth-lib/1.0.0",
           },
           body: body.toString(),
-        });
-
-        if (!httpResponse.ok) {
-          throw new Error(
-            `HTTP ${httpResponse.status}: ${httpResponse.statusText}`
-          );
-        }
-
-        return httpResponse;
-      });
+        },
+        `client-credentials:${clientType}`
+      );
 
       const responseData = await response.json();
 
@@ -733,25 +783,17 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     }
 
     try {
-      const response = await this.httpCircuitBreaker.execute(async () => {
-        const httpResponse = await fetch(discovery.token_endpoint, {
+      const response = await this.executeHttpRequest(
+        discovery.token_endpoint,
+        {
           method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
-            Accept: "application/json",
-            "User-Agent": "keycloak-auth-lib/1.0.0",
           },
           body: body.toString(),
-        });
-
-        if (!httpResponse.ok) {
-          throw new Error(
-            `HTTP ${httpResponse.status}: ${httpResponse.statusText}`
-          );
-        }
-
-        return httpResponse;
-      });
+        },
+        `direct-grant:${clientType}`
+      );
 
       const responseData = await response.json();
 
@@ -890,15 +932,23 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
   }
 
   /**
-   * Clean up expired cache entries
+   * Clean up expired cache entries with enhanced logic
    */
   private cleanupExpiredCacheEntries(): void {
+    if (this.isShuttingDown) {
+      return; // Skip cleanup during shutdown
+    }
+
     const now = Date.now();
-    const cacheTimeout = this.config.discovery.cacheTimeout * 1000;
+    const configTimeout = this.config.discovery.cacheTimeout * 1000;
     let removedCount = 0;
 
+    // Remove entries that are expired by either config timeout OR max age
     for (const [key, entry] of this.discoveryCache.entries()) {
-      if (now - entry.timestamp > cacheTimeout) {
+      const isConfigExpired = now - entry.timestamp > configTimeout;
+      const isMaxAgeExpired = now - entry.timestamp > this.maxCacheAge;
+
+      if (isConfigExpired || isMaxAgeExpired) {
         this.discoveryCache.delete(key);
         removedCount++;
       }
@@ -908,23 +958,46 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
       logger.debug("Cleaned up expired discovery cache entries", {
         removedCount,
         remainingCount: this.discoveryCache.size,
+        configTimeout: configTimeout / 1000,
+        maxAge: this.maxCacheAge / 1000,
       });
     }
 
-    // Enforce maximum cache size with LRU eviction
+    // Enforce maximum cache size with LRU eviction if still over limit
     if (this.discoveryCache.size > this.maxCacheSize) {
       const entriesToRemove = this.discoveryCache.size - this.maxCacheSize;
-      const keys = Array.from(this.discoveryCache.keys());
+      this.evictLRUEntries(entriesToRemove);
+    }
+  }
 
-      for (let i = 0; i < entriesToRemove && i < keys.length; i++) {
-        const key = keys[i];
-        if (key) {
-          this.discoveryCache.delete(key);
-          removedCount++;
+  /**
+   * Evict least recently used (LRU) cache entries
+   */
+  private evictLRUEntries(count: number): void {
+    if (count <= 0) return;
+
+    // Sort entries by access count (ascending) and timestamp (ascending for tie-breaking)
+    const entries = Array.from(this.discoveryCache.entries()).sort(
+      ([, a], [, b]) => {
+        if (a.accessCount !== b.accessCount) {
+          return a.accessCount - b.accessCount; // Least accessed first
         }
+        return a.timestamp - b.timestamp; // Oldest first for tie-breaking
       }
+    );
 
-      logger.warn("Enforced maximum cache size limit", {
+    let removedCount = 0;
+    for (let i = 0; i < count && i < entries.length; i++) {
+      const entry = entries[i];
+      if (entry) {
+        const [key] = entry;
+        this.discoveryCache.delete(key);
+        removedCount++;
+      }
+    }
+
+    if (removedCount > 0) {
+      logger.debug("Evicted LRU cache entries", {
         removedCount,
         maxSize: this.maxCacheSize,
         currentSize: this.discoveryCache.size,
@@ -959,6 +1032,62 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
 
     // Validate cache stats
     return validateInput(CacheStatsSchema, stats, "cache statistics");
+  }
+
+  /**
+   * Graceful shutdown - cleanup resources and prevent memory leaks
+   */
+  public async shutdown(): Promise<void> {
+    logger.info("Shutting down KeycloakClientFactory", {
+      cacheSize: this.discoveryCache.size,
+      pkceChallenges: this.pkceManager.getActiveChallengesCount(),
+    });
+
+    this.isShuttingDown = true;
+
+    // Clear cleanup timer
+    if (this.cacheCleanupTimer) {
+      clearInterval(this.cacheCleanupTimer);
+      this.cacheCleanupTimer = undefined;
+    }
+
+    // Clear all caches
+    this.discoveryCache.clear();
+
+    // Cleanup PKCE manager
+    this.pkceManager.cleanup(0); // Force cleanup all challenges
+
+    logger.info("KeycloakClientFactory shutdown completed");
+  }
+
+  /**
+   * Check if the factory is in a healthy state including circuit breaker status
+   */
+  public getHealthStatus(): {
+    healthy: boolean;
+    cacheSize: number;
+    maxCacheSize: number;
+    pkceChallenges: number;
+    shutdownStatus: boolean;
+    circuitBreaker: {
+      configured: boolean;
+      failureThreshold: number;
+      recoveryTimeout: string;
+    };
+  } {
+    return {
+      healthy:
+        !this.isShuttingDown && this.discoveryCache.size <= this.maxCacheSize,
+      cacheSize: this.discoveryCache.size,
+      maxCacheSize: this.maxCacheSize,
+      pkceChallenges: this.pkceManager.getActiveChallengesCount(),
+      shutdownStatus: this.isShuttingDown,
+      circuitBreaker: {
+        configured: true,
+        failureThreshold: 10, // ConsecutiveBreaker threshold we configured
+        recoveryTimeout: "60s", // halfOpenAfter time we configured
+      },
+    };
   }
 }
 

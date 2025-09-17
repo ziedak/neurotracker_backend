@@ -129,18 +129,33 @@ export const DEFAULT_PKCE_CONFIG: PKCEConfig = {
 };
 
 /**
- * PKCE Manager class for handling PKCE flows
+ * PKCE Manager class for handling PKCE flows with proper memory management
  */
 export class PKCEManager {
   private config: PKCEConfig;
-  private activeChallenges = new Map<string, string>(); // state -> codeVerifier
+  private activeChallenges = new Map<
+    string,
+    {
+      codeVerifier: string;
+      timestamp: number;
+      accessed: number;
+    }
+  >(); // Enhanced tracking with timestamps
+
+  // Memory management settings
+  private readonly maxChallenges = 1000; // Maximum stored challenges
+  private readonly defaultMaxAge = 10 * 60 * 1000; // 10 minutes default
+  private readonly cleanupInterval = 5 * 60 * 1000; // 5 minutes cleanup
+  private cleanupTimer?: ReturnType<typeof setInterval> | undefined;
+  private isShuttingDown = false;
 
   constructor(config: Partial<PKCEConfig> = {}) {
     this.config = { ...DEFAULT_PKCE_CONFIG, ...config };
+    this.startCleanupTimer();
   }
 
   /**
-   * Generate and store PKCE pair for a state
+   * Generate and store PKCE pair for a state with timestamp tracking
    * @param state OAuth state parameter
    * @returns PKCE pair
    */
@@ -152,8 +167,19 @@ export class PKCEManager {
       this.config.codeVerifierLength
     );
 
-    // Store code verifier for later retrieval during token exchange
-    this.activeChallenges.set(state, codeVerifier);
+    const now = Date.now();
+
+    // Proactive cleanup before adding if approaching limits
+    if (this.activeChallenges.size >= this.maxChallenges - 10) {
+      this.cleanup(this.defaultMaxAge);
+    }
+
+    // Store code verifier with timestamp for proper cleanup
+    this.activeChallenges.set(state, {
+      codeVerifier,
+      timestamp: now,
+      accessed: now,
+    });
 
     return { codeVerifier, codeChallenge };
   }
@@ -164,24 +190,105 @@ export class PKCEManager {
    * @returns Code verifier if found
    */
   public retrieveAndRemove(state: string): string | undefined {
-    const codeVerifier = this.activeChallenges.get(state);
-    if (codeVerifier) {
+    const challenge = this.activeChallenges.get(state);
+    if (challenge) {
       this.activeChallenges.delete(state);
+      // Update access time for monitoring
+      challenge.accessed = Date.now();
+      return challenge.codeVerifier;
     }
-    return codeVerifier;
+    return undefined;
   }
 
   /**
-   * Cleanup expired challenges
-   * @param maxAge Maximum age in milliseconds
+   * Cleanup expired challenges with proper timestamp-based logic
+   * @param maxAge Maximum age in milliseconds (default: 10 minutes)
    */
-  public cleanup(_maxAge: number = 600000): void {
-    // 10 minutes default
-    // In a production environment, you'd store timestamps and cleanup accordingly
-    // For now, we'll clear all challenges periodically
-    if (this.activeChallenges.size > 100) {
+  public cleanup(maxAge: number = this.defaultMaxAge): number {
+    if (this.isShuttingDown) {
+      // During shutdown, clear everything
+      const count = this.activeChallenges.size;
       this.activeChallenges.clear();
+      return count;
     }
+
+    const now = Date.now();
+    let removedCount = 0;
+
+    // Remove expired challenges based on timestamp
+    for (const [state, challenge] of this.activeChallenges.entries()) {
+      const age = now - challenge.timestamp;
+      if (age > maxAge) {
+        this.activeChallenges.delete(state);
+        removedCount++;
+      }
+    }
+
+    // Enforce maximum size with LRU eviction if still over limit
+    if (this.activeChallenges.size > this.maxChallenges) {
+      const excess = this.activeChallenges.size - this.maxChallenges;
+      removedCount += this.evictOldestChallenges(excess);
+    }
+
+    return removedCount;
+  }
+
+  /**
+   * Evict oldest challenges (LRU-style eviction)
+   * @param count Number of challenges to evict
+   * @returns Number of challenges actually evicted
+   */
+  private evictOldestChallenges(count: number): number {
+    if (count <= 0) return 0;
+
+    // Sort by timestamp (oldest first)
+    const entries = Array.from(this.activeChallenges.entries()).sort(
+      ([, a], [, b]) => a.timestamp - b.timestamp
+    );
+
+    let removedCount = 0;
+    for (let i = 0; i < count && i < entries.length; i++) {
+      const entry = entries[i];
+      if (entry) {
+        const [state] = entry;
+        this.activeChallenges.delete(state);
+        removedCount++;
+      }
+    }
+
+    return removedCount;
+  }
+
+  /**
+   * Start automatic cleanup timer
+   */
+  private startCleanupTimer(): void {
+    this.cleanupTimer = setInterval(() => {
+      const removed = this.cleanup();
+      if (removed > 0) {
+        console.debug(`PKCE cleanup removed ${removed} expired challenges`);
+      }
+    }, this.cleanupInterval);
+
+    // Ensure timer doesn't prevent process exit
+    this.cleanupTimer.unref();
+  }
+
+  /**
+   * Shutdown cleanup timer and clear all challenges
+   */
+  public shutdown(): void {
+    this.isShuttingDown = true;
+
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = undefined;
+    }
+
+    const challengeCount = this.activeChallenges.size;
+    this.activeChallenges.clear();
+
+    console.info(`PKCE Manager shutdown: cleared ${challengeCount} challenges`);
   }
 
   /**
@@ -189,6 +296,33 @@ export class PKCEManager {
    */
   public getActiveChallengesCount(): number {
     return this.activeChallenges.size;
+  }
+
+  /**
+   * Get detailed health statistics for monitoring
+   */
+  public getHealthStats(): {
+    totalChallenges: number;
+    maxChallenges: number;
+    oldestChallengeAge: number;
+    averageAge: number;
+    shutdownStatus: boolean;
+  } {
+    const now = Date.now();
+    const challenges = Array.from(this.activeChallenges.values());
+
+    const ages = challenges.map((c) => now - c.timestamp);
+    const oldestAge = ages.length > 0 ? Math.max(...ages) : 0;
+    const averageAge =
+      ages.length > 0 ? ages.reduce((a, b) => a + b, 0) / ages.length : 0;
+
+    return {
+      totalChallenges: this.activeChallenges.size,
+      maxChallenges: this.maxChallenges,
+      oldestChallengeAge: oldestAge,
+      averageAge: averageAge,
+      shutdownStatus: this.isShuttingDown,
+    };
   }
 }
 

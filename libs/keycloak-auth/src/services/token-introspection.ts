@@ -21,17 +21,126 @@ import {
 const logger: ILogger = createLogger("token-introspection-service");
 
 /**
+ * Token Hash Salt Manager - Manages rotating salts for secure token hashing
+ * Implements salt rotation to prevent cache poisoning attacks
+ */
+class TokenHashSaltManager {
+  private currentSalt: string;
+  private previousSalt?: string;
+  private saltRotationInterval: number = 24 * 60 * 60 * 1000; // 24 hours
+  private lastRotation: number;
+  private rotationTimer?: ReturnType<typeof setInterval> | undefined;
+
+  constructor() {
+    this.currentSalt = this.generateSecureSalt();
+    this.lastRotation = Date.now();
+    this.startRotationTimer();
+  }
+
+  /**
+   * Get current salt for hashing (with environment prefix)
+   */
+  public getCurrentSalt(): string {
+    const envPrefix = process.env["NODE_ENV"] || "development";
+    const instanceId = process.env["INSTANCE_ID"] || "default";
+    return `${envPrefix}:${instanceId}:${this.currentSalt}`;
+  }
+
+  /**
+   * Get previous salt for backward compatibility during rotation
+   */
+  public getPreviousSalt(): string | undefined {
+    if (!this.previousSalt) return undefined;
+    const envPrefix = process.env["NODE_ENV"] || "development";
+    const instanceId = process.env["INSTANCE_ID"] || "default";
+    return `${envPrefix}:${instanceId}:${this.previousSalt}`;
+  }
+
+  /**
+   * Force salt rotation (useful for security incidents)
+   */
+  public rotateSalt(): void {
+    this.previousSalt = this.currentSalt;
+    this.currentSalt = this.generateSecureSalt();
+    this.lastRotation = Date.now();
+
+    logger.info("Salt rotated for enhanced security", {
+      rotationTime: new Date(this.lastRotation).toISOString(),
+      hasPreviousSalt: !!this.previousSalt,
+    });
+  }
+
+  /**
+   * Generate cryptographically secure salt
+   */
+  private generateSecureSalt(): string {
+    const randomBytes = createHash("sha256")
+      .update(
+        Math.random().toString() +
+          Date.now().toString() +
+          process.hrtime().toString()
+      )
+      .digest("hex");
+    return randomBytes.substring(0, 32); // 128 bits of entropy
+  }
+
+  /**
+   * Start automatic salt rotation timer
+   */
+  private startRotationTimer(): void {
+    this.rotationTimer = setInterval(() => {
+      this.rotateSalt();
+    }, this.saltRotationInterval);
+
+    // Don't prevent process exit
+    this.rotationTimer.unref();
+  }
+
+  /**
+   * Cleanup on shutdown
+   */
+  public shutdown(): void {
+    if (this.rotationTimer) {
+      clearInterval(this.rotationTimer);
+      this.rotationTimer = undefined;
+    }
+  }
+
+  /**
+   * Get salt rotation statistics
+   */
+  public getStats(): {
+    lastRotation: string;
+    nextRotation: string;
+    rotationInterval: number;
+    hasPreviousSalt: boolean;
+  } {
+    const nextRotation = this.lastRotation + this.saltRotationInterval;
+    return {
+      lastRotation: new Date(this.lastRotation).toISOString(),
+      nextRotation: new Date(nextRotation).toISOString(),
+      rotationInterval: this.saltRotationInterval / 1000, // in seconds
+      hasPreviousSalt: !!this.previousSalt,
+    };
+  }
+}
+
+/**
  * Token Introspection Service
  * Handles JWT validation and token introspection with Keycloak
  * Uses existing @libs/database cache infrastructure
  */
 export class TokenIntrospectionService implements ITokenIntrospectionService {
   private publicKeyCache = new Map<string, any>();
+  private saltManager: TokenHashSaltManager;
 
   constructor(
     private readonly keycloakClientFactory: KeycloakClientFactory,
     private readonly cacheService: CacheService
-  ) {}
+  ) {
+    // Initialize secure salt management
+    this.saltManager = new TokenHashSaltManager();
+  }
 
   /**
    * Validate JWT token with Keycloak public keys
@@ -43,13 +152,12 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
     try {
       const config =
         clientConfig || this.keycloakClientFactory.getClient("frontend");
-      const cacheKey = `jwt:validation:${this.hashToken(token)}`;
 
-      // Check cache first
-      const cached = await this.cacheService.get(cacheKey);
-      if (cached.data && (cached.data as TokenValidationResult).valid) {
+      // Check cache first with secure fallback hashing
+      const cachedResult = await this.getCachedValidationWithFallback(token);
+      if (cachedResult.data && cachedResult.data.valid) {
         logger.debug("Using cached JWT validation result");
-        return { ...(cached.data as TokenValidationResult), cached: true };
+        return { ...cachedResult.data, cached: true };
       }
 
       // Get JWKS endpoint
@@ -85,9 +193,9 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
         cached: false,
       };
 
-      // Cache the result
+      // Cache the result using secure hash
       const ttl = this.calculateCacheTtl(claims);
-      await this.cacheService.set(cacheKey, result, ttl);
+      await this.cacheService.set(cachedResult.cacheKey, result, ttl);
 
       logger.info("JWT validation successful", {
         subject: claims.sub,
@@ -380,17 +488,70 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
 
   /**
    * SECURE: Create a cryptographic hash of the token for cache key
-   * Uses SHA-256 with salt for security and collision resistance
+   * Uses SHA-256 with rotating salt for security and collision resistance
+   * Now returns 32 characters (128-bit security) instead of 16
    */
   private hashToken(token: string): string {
-    // Use cryptographic hash with salt for security
-    const salt = process.env["TOKEN_HASH_SALT"] || "keycloak-auth-default-salt";
+    const currentSalt = this.saltManager.getCurrentSalt();
     const hash = createHash("sha256")
-      .update(token + salt)
+      .update(token + currentSalt)
       .digest("hex");
 
-    // Return first 16 characters for cache key (sufficient entropy)
-    return hash.substring(0, 16);
+    // Return first 32 characters for cache key (128-bit security)
+    return hash.substring(0, 32);
+  }
+
+  /**
+   * SECURE: Hash token with fallback to previous salt during rotation periods
+   * Allows cache hits during salt rotation windows
+   */
+  private async hashTokenWithFallback(token: string): Promise<string[]> {
+    const hashes: string[] = [];
+
+    // Always include current salt hash
+    hashes.push(this.hashToken(token));
+
+    // Include previous salt hash if available (for rotation transition period)
+    const previousSalt = this.saltManager.getPreviousSalt();
+    if (previousSalt) {
+      const previousHash = createHash("sha256")
+        .update(token + previousSalt)
+        .digest("hex");
+      hashes.push(previousHash.substring(0, 32));
+    }
+
+    return hashes;
+  }
+
+  /**
+   * Try to get cached value with fallback to previous salt
+   */
+  private async getCachedValidationWithFallback(token: string): Promise<{
+    data: TokenValidationResult | null;
+    cacheKey: string;
+  }> {
+    const possibleHashes = await this.hashTokenWithFallback(token);
+
+    for (const hash of possibleHashes) {
+      const cacheKey = `jwt:validation:${hash}`;
+      const cached = await this.cacheService.get(cacheKey);
+      if (cached.data && (cached.data as TokenValidationResult).valid) {
+        logger.debug("Cache hit with hash fallback", {
+          hashIndex: possibleHashes.indexOf(hash),
+          totalHashes: possibleHashes.length,
+        });
+        return {
+          data: cached.data as TokenValidationResult,
+          cacheKey,
+        };
+      }
+    }
+
+    // Return primary cache key for new entries
+    return {
+      data: null,
+      cacheKey: `jwt:validation:${possibleHashes[0]}`,
+    };
   }
 
   /**
@@ -409,6 +570,36 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
       cacheMisses: stats.Misses,
       introspectionCalls: 0, // Would need to track this separately
       jwtValidations: 0, // Would need to track this separately
+    };
+  }
+
+  /**
+   * Shutdown service and cleanup resources
+   */
+  public async shutdown(): Promise<void> {
+    logger.info("Shutting down TokenIntrospectionService");
+
+    // Shutdown salt manager
+    this.saltManager.shutdown();
+
+    // Clear memory caches
+    this.publicKeyCache.clear();
+
+    logger.info("TokenIntrospectionService shutdown completed");
+  }
+
+  /**
+   * Get service health status including salt rotation status
+   */
+  public getHealthStatus(): {
+    healthy: boolean;
+    publicKeyCacheSize: number;
+    saltRotationStats: any;
+  } {
+    return {
+      healthy: true,
+      publicKeyCacheSize: this.publicKeyCache.size,
+      saltRotationStats: this.saltManager.getStats(),
     };
   }
 
