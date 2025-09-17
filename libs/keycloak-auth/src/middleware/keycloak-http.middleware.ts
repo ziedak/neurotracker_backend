@@ -193,7 +193,9 @@ export class KeycloakAuthHttpMiddleware {
   }
 
   /**
-   * Perform authorization checks (roles, permissions) for authenticated user
+   * CRITICAL ARCHITECTURAL FLAW: Synchronous error handling in async context
+   * This method throws errors synchronously but is called in async contexts
+   * This can cause unhandled promise rejections and inconsistent error handling
    */
   public async authorize(
     authResult: KeycloakAuthenticationResult
@@ -247,7 +249,9 @@ export class KeycloakAuthHttpMiddleware {
   }
 
   /**
-   * Attempt authentication using Keycloak token validation
+   * CRITICAL ARCHITECTURAL FLAW: No error boundaries or circuit breaker pattern
+   * If Keycloak is down, this will cascade failures throughout the application
+   * No graceful degradation or fallback mechanisms
    */
   private async authenticateRequest(
     request: Request,
@@ -356,7 +360,9 @@ export class KeycloakAuthHttpMiddleware {
   }
 
   /**
-   * Check if authentication should be bypassed for this request
+   * CRITICAL SECURITY FLAW: No input validation or sanitization
+   * Headers can contain malicious content, paths can be manipulated
+   * No rate limiting integration, vulnerable to header injection attacks
    */
   private shouldBypassAuth(request: Request): boolean {
     const path = new URL(request.url).pathname;
@@ -372,7 +378,12 @@ export class KeycloakAuthHttpMiddleware {
   }
 
   /**
-   * Extract token from Authorization header
+   * CRITICAL SECURITY FLAW: No token format validation
+   * Accepts any string after "Bearer ", vulnerable to:
+   * - Extremely long tokens causing DoS
+   * - Malformed JWTs causing parsing errors
+   * - Special characters in tokens
+   * - No length limits or format validation
    */
   private extractTokenFromHeader(authHeader: string): string | null {
     if (!authHeader || !authHeader.startsWith("Bearer ")) {

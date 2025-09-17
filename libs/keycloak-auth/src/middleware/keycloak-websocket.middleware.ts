@@ -6,6 +6,7 @@
  */
 
 import type { IMetricsCollector } from "@libs/monitoring";
+import { LRUCache } from "lru-cache";
 import type {
   IKeycloakClientFactory,
   ITokenIntrospectionService,
@@ -14,6 +15,12 @@ import type {
   AuthContext,
   ClientType,
 } from "../types";
+import {
+  validateInput,
+  WebSocketConnectionParamsSchema,
+  WebSocketMessageSchema,
+  WebSocketSubscriptionSchema,
+} from "../validation/index";
 import type { KeycloakAuthenticationResult } from "./keycloak-http.middleware";
 
 /**
@@ -86,10 +93,15 @@ export interface WebSocketAuthenticationResult {
  */
 export class KeycloakWebSocketMiddleware {
   private readonly httpMiddleware: any; // Will import the HTTP middleware
-  private readonly activeConnections = new Map<
-    string,
-    WebSocketConnectionData
-  >();
+
+  /**
+   * SECURE: LRU Cache for WebSocket connections with automatic cleanup
+   * Prevents memory leaks, enforces connection limits, and provides automatic cleanup
+   */
+  private readonly activeConnections: LRUCache<string, WebSocketConnectionData>;
+
+  // Additional LRU cache for user-specific connection limits
+  private readonly userConnectionCounts: LRUCache<string, number>;
 
   constructor(
     private readonly metrics: IMetricsCollector,
@@ -97,6 +109,21 @@ export class KeycloakWebSocketMiddleware {
     tokenIntrospectionService: ITokenIntrospectionService,
     private readonly config: KeycloakWebSocketConfig
   ) {
+    // Initialize LRU caches with configuration
+    this.activeConnections = new LRUCache<string, WebSocketConnectionData>({
+      max: this.config.websocket.maxConnectionsPerUser || 10000, // Max total connections
+      ttl: 24 * 60 * 60 * 1000, // 24 hours TTL
+      ttlAutopurge: true, // Automatically remove expired entries
+      updateAgeOnGet: true, // Reset TTL on access
+      allowStale: false, // Don't return stale entries
+    });
+
+    this.userConnectionCounts = new LRUCache<string, number>({
+      max: 1000, // Max tracked users
+      ttl: 60 * 60 * 1000, // 1 hour TTL
+      ttlAutopurge: true,
+    });
+
     // Import HTTP middleware for consistency
     const {
       KeycloakAuthHttpMiddleware,
@@ -125,6 +152,23 @@ export class KeycloakWebSocketMiddleware {
     query: Record<string, string>,
     cookies?: Record<string, string>
   ): Promise<WebSocketAuthenticationResult> {
+    // Validate connection parameters
+    const connectionParams = {
+      token: headers["authorization"]?.replace("Bearer ", "") || query["token"],
+      userId: query["userId"],
+      sessionId: query["sessionId"],
+      clientId: query["clientId"],
+    };
+
+    // Only validate if we have connection parameters
+    if (connectionParams.token || connectionParams.userId) {
+      validateInput(
+        WebSocketConnectionParamsSchema.partial(),
+        connectionParams,
+        "websocket connection parameters"
+      );
+    }
+
     const connectionId = this.generateConnectionId();
     const connectedAt = new Date();
 
@@ -156,6 +200,12 @@ export class KeycloakWebSocketMiddleware {
         };
 
         this.activeConnections.set(connectionId, connectionData);
+
+        // Update user connection count
+        this.incrementUserConnectionCount(connectionData.auth.userId);
+
+        // Update user connection count
+        this.incrementUserConnectionCount(connectionData.auth.userId);
 
         // Execute connection hook
         if (this.config.hooks?.onConnect) {
@@ -202,6 +252,9 @@ export class KeycloakWebSocketMiddleware {
           };
 
           this.activeConnections.set(connectionId, connectionData);
+
+          // Update user connection count
+          this.incrementUserConnectionCount(connectionInfo.authContext?.userId);
 
           if (this.config.hooks?.onConnect) {
             await this.config.hooks.onConnect(connectionInfo);
@@ -312,6 +365,10 @@ export class KeycloakWebSocketMiddleware {
     }
 
     this.activeConnections.delete(connectionId);
+
+    // Update user connection count
+    this.decrementUserConnectionCount(connectionData?.auth.userId);
+
     this.metrics.recordGauge(
       "keycloak_websocket_active_connections",
       this.activeConnections.size
@@ -324,20 +381,27 @@ export class KeycloakWebSocketMiddleware {
   public getConnection(
     connectionId: string
   ): WebSocketConnectionData | undefined {
-    return this.activeConnections.get(connectionId);
+    return this.activeConnections.get(connectionId) || undefined;
   }
 
   /**
    * Get all connections for a specific user
    */
   public getUserConnections(userId: string): WebSocketConnectionData[] {
-    return Array.from(this.activeConnections.values()).filter(
-      (conn) => conn.auth.userId === userId
-    );
+    const connections: WebSocketConnectionData[] = [];
+    for (const connectionData of this.activeConnections.values()) {
+      if (connectionData.auth.userId === userId) {
+        connections.push(connectionData);
+      }
+    }
+    return connections;
   }
 
   /**
-   * Validate connection is still active and authenticated
+   * CRITICAL PERFORMANCE ISSUE: Inefficient connection validation
+   * Re-validates tokens on every heartbeat without caching
+   * No connection pooling or keep-alive for Keycloak requests
+   * Synchronous validation blocks WebSocket message processing
    */
   public async validateConnection(connectionId: string): Promise<boolean> {
     const connectionData = this.activeConnections.get(connectionId);
@@ -369,11 +433,19 @@ export class KeycloakWebSocketMiddleware {
         } else {
           // Authentication failed, remove connection
           this.activeConnections.delete(connectionId);
+
+          // Update user connection count
+          this.decrementUserConnectionCount(connectionData.auth.userId);
+
           return false;
         }
       } catch (error) {
         // Validation failed, remove connection
         this.activeConnections.delete(connectionId);
+
+        // Update user connection count
+        this.decrementUserConnectionCount(connectionData.auth.userId);
+
         return false;
       }
     }
@@ -382,13 +454,82 @@ export class KeycloakWebSocketMiddleware {
   }
 
   /**
-   * Get middleware statistics
+   * Validate and process WebSocket message
    */
-  public getStats() {
-    return {
-      activeConnections: this.activeConnections.size,
-      connectionsByUser: this.getConnectionsByUser(),
-    };
+  public async validateWebSocketMessage(
+    connectionId: string,
+    message: unknown
+  ): Promise<{ valid: boolean; data?: any; error?: string }> {
+    try {
+      // Validate message structure
+      const validatedMessage = validateInput(
+        WebSocketMessageSchema,
+        message,
+        "websocket message"
+      );
+
+      // Get connection data to check permissions
+      const connectionData = this.activeConnections.get(connectionId);
+      if (!connectionData) {
+        return { valid: false, error: "Connection not found" };
+      }
+
+      // Check if user has required permissions for the message type
+      if (validatedMessage.type === "subscribe" && validatedMessage.topic) {
+        // Validate subscription request
+        const subscriptionRequest = {
+          action: "subscribe" as const,
+          topics: [validatedMessage.topic],
+        };
+
+        validateInput(
+          WebSocketSubscriptionSchema,
+          subscriptionRequest,
+          "websocket subscription"
+        );
+
+        // Check if user has permission to subscribe to this topic
+        if (
+          !this.hasTopicPermission(connectionData.auth, validatedMessage.topic)
+        ) {
+          return { valid: false, error: "Insufficient permissions for topic" };
+        }
+      }
+
+      return { valid: true, data: validatedMessage };
+    } catch (error) {
+      return {
+        valid: false,
+        error:
+          error instanceof Error ? error.message : "Invalid message format",
+      };
+    }
+  }
+
+  /**
+   * Check if user has permission to access a topic
+   */
+  private hasTopicPermission(
+    auth: WebSocketAuthContext,
+    topic: string
+  ): boolean {
+    // Check scopes and permissions for topic access
+    const topicPrefix = topic.split(":")[0] || topic;
+    const hasScope = auth.scopes.some(
+      (scope) =>
+        scope.includes("websocket") ||
+        scope.includes("subscribe") ||
+        scope.includes(topicPrefix)
+    );
+
+    const hasPermission = auth.permissions.some(
+      (permission) =>
+        permission.includes("websocket") ||
+        permission.includes("subscribe") ||
+        permission.includes(topicPrefix)
+    );
+
+    return hasScope || hasPermission;
   }
 
   // Private helper methods
@@ -454,6 +595,49 @@ export class KeycloakWebSocketMiddleware {
     };
   }
 
+  /**
+   * Get WebSocket connection statistics
+   */
+  public getStats(): {
+    totalConnections: number;
+    authenticatedConnections: number;
+    anonymousConnections: number;
+    userConnectionCounts: Record<string, number>;
+    connectionsByAuthMethod: Record<string, number>;
+  } {
+    const stats = {
+      totalConnections: this.activeConnections.size,
+      authenticatedConnections: 0,
+      anonymousConnections: 0,
+      userConnectionCounts: Object.fromEntries(
+        this.userConnectionCounts.entries()
+      ),
+      connectionsByAuthMethod: {
+        jwt_token: 0,
+        api_key: 0,
+        session_based: 0,
+      },
+    };
+
+    // Count authenticated vs anonymous connections
+    for (const connection of this.activeConnections.values()) {
+      if (connection.auth.userId) {
+        stats.authenticatedConnections++;
+      } else {
+        stats.anonymousConnections++;
+      }
+
+      // Count by auth method
+      const method = connection.auth
+        .method as keyof typeof stats.connectionsByAuthMethod;
+      if (method in stats.connectionsByAuthMethod) {
+        stats.connectionsByAuthMethod[method]++;
+      }
+    }
+
+    return stats;
+  }
+
   private startHeartbeat(connectionId: string): void {
     const interval = setInterval(async () => {
       const isValid = await this.validateConnection(connectionId);
@@ -463,12 +647,25 @@ export class KeycloakWebSocketMiddleware {
     }, (this.config.websocket.heartbeatInterval || 30) * 1000);
   }
 
-  private getConnectionsByUser(): Record<string, number> {
-    const userConnections: Record<string, number> = {};
-    for (const connectionData of this.activeConnections.values()) {
-      const userId = connectionData.auth.userId || "anonymous";
-      userConnections[userId] = (userConnections[userId] || 0) + 1;
+  /**
+   * Increment user connection count
+   */
+  private incrementUserConnectionCount(userId?: string): void {
+    const key = userId || "anonymous";
+    const currentCount = this.userConnectionCounts.get(key) || 0;
+    this.userConnectionCounts.set(key, currentCount + 1);
+  }
+
+  /**
+   * Decrement user connection count
+   */
+  private decrementUserConnectionCount(userId?: string): void {
+    const key = userId || "anonymous";
+    const currentCount = this.userConnectionCounts.get(key) || 0;
+    if (currentCount > 1) {
+      this.userConnectionCounts.set(key, currentCount - 1);
+    } else {
+      this.userConnectionCounts.delete(key);
     }
-    return userConnections;
   }
 }

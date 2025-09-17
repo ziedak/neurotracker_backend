@@ -4,15 +4,25 @@ import {
   ClientType,
   TokenResponse,
   IKeycloakClientFactory,
-  RawEnvironmentConfig,
-  EnvironmentConfig,
-  EnvironmentConfigSchema,
   AuthenticationError,
 } from "../types/index";
-import { createLogger } from "@libs/utils";
+import CircuitBreaker from "opossum";
 import { PKCEManager } from "../utils/pkce";
+import {
+  validateInput,
+  RawEnvironmentConfigSchema,
+  AuthorizationCodeRequestSchema,
+  RefreshTokenRequestSchema,
+  DirectGrantRequestSchema,
+  LogoutRequestSchema,
+  TokenResponseSchema,
+  CacheStatsSchema,
+  RawEnvironmentConfig,
+} from "../validation/index";
 
-const logger: any = createLogger("keycloak-client-factory");
+import { createLogger } from "@libs/utils";
+
+const logger = createLogger("keycloak-client-factory");
 
 /**
  * Keycloak Client Factory
@@ -20,10 +30,26 @@ const logger: any = createLogger("keycloak-client-factory");
  */
 export class KeycloakClientFactory implements IKeycloakClientFactory {
   private config: KeycloakMultiClientConfig;
-  private discoveryCache: Map<string, any> = new Map();
+  private discoveryCache: Map<string, { data: any; timestamp: number }> =
+    new Map();
   private pkceManager: PKCEManager;
 
+  // Cache management
+  private readonly maxCacheSize = 100; // Maximum number of cached discovery documents
+  private readonly cacheCleanupInterval = 5 * 60 * 1000; // 5 minutes cleanup interval
+  private cacheCleanupTimer?: ReturnType<typeof setInterval>;
+
+  // Circuit breaker for HTTP requests to prevent cascading failures
+  private readonly httpCircuitBreaker: CircuitBreaker;
+
   constructor(envConfig: RawEnvironmentConfig) {
+    // Validate environment configuration
+    const validatedConfig = validateInput(
+      RawEnvironmentConfigSchema,
+      envConfig,
+      "environment configuration"
+    );
+
     // Initialize PKCE manager
     this.pkceManager = new PKCEManager({
       codeVerifierLength: 128,
@@ -31,10 +57,68 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
       allowForConfidentialClients: true,
     });
 
-    // Validate environment configuration
-    const validatedConfig = EnvironmentConfigSchema.parse(envConfig);
+    // Initialize circuit breaker for HTTP requests
+    this.httpCircuitBreaker = new CircuitBreaker(
+      this.makeHttpRequest.bind(this),
+      {
+        timeout: 10000, // 10 second timeout
+        errorThresholdPercentage: 50, // Open circuit if 50% of requests fail
+        resetTimeout: 30000, // Try to close circuit after 30 seconds
+        rollingCountTimeout: 10000, // Rolling window of 10 seconds
+        rollingCountBuckets: 10, // 10 buckets in the rolling window
+        name: "keycloak-http-circuit-breaker",
+        errorFilter: (error: Error) => {
+          // Don't count 4xx errors as failures (client errors)
+          if (error.message.includes("HTTP 4")) {
+            return false;
+          }
+          return true;
+        },
+      }
+    );
 
-    this.config = this.buildMultiClientConfig(validatedConfig);
+    // Add circuit breaker event listeners for monitoring
+    this.httpCircuitBreaker.on("open", () => {
+      logger.warn(
+        "HTTP circuit breaker opened - stopping requests to Keycloak",
+        {
+          name: this.httpCircuitBreaker.name,
+        }
+      );
+    });
+
+    this.httpCircuitBreaker.on("close", () => {
+      logger.info(
+        "HTTP circuit breaker closed - resuming requests to Keycloak",
+        {
+          name: this.httpCircuitBreaker.name,
+        }
+      );
+    });
+
+    this.httpCircuitBreaker.on("halfOpen", () => {
+      logger.info(
+        "HTTP circuit breaker half-open - testing Keycloak connectivity",
+        {
+          name: this.httpCircuitBreaker.name,
+        }
+      );
+    });
+
+    this.httpCircuitBreaker.on("failure", (error: Error) => {
+      logger.error("HTTP circuit breaker failure", {
+        error: error.message,
+        name: this.httpCircuitBreaker.name,
+      });
+    });
+
+    // Start cache cleanup timer
+    this.startCacheCleanupTimer();
+
+    // Build multi-client configuration
+    this.config = this.buildMultiClientConfig(
+      validatedConfig as RawEnvironmentConfig
+    );
     logger.info("Keycloak client factory initialized", {
       realm: this.config.clients.frontend.realm,
       serverUrl: this.config.clients.frontend.serverUrl,
@@ -46,7 +130,7 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
    * Build multi-client configuration from environment variables
    */
   private buildMultiClientConfig(
-    envConfig: EnvironmentConfig
+    envConfig: RawEnvironmentConfig
   ): KeycloakMultiClientConfig {
     const baseConfig = {
       realm: envConfig.KEYCLOAK_REALM,
@@ -95,8 +179,8 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
       },
       redis: {
         keyPrefix: "keycloak:auth:",
-        tokenTtl: envConfig.AUTH_CACHE_TTL,
-        introspectionTtl: envConfig.AUTH_INTROSPECTION_TTL,
+        tokenTtl: parseInt(envConfig.AUTH_CACHE_TTL, 10),
+        introspectionTtl: parseInt(envConfig.AUTH_INTROSPECTION_TTL, 10),
       },
     };
   }
@@ -130,77 +214,77 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
       return cached.data;
     }
 
-    const serverUrl = this.config.clients.frontend.serverUrl;
-    const discoveryUrl = `${serverUrl}/realms/${realm}/.well-known/openid_connect_configuration`;
+    // Remove expired entry if it exists
+    if (cached) {
+      this.discoveryCache.delete(cacheKey);
+    }
 
-    let lastError: Error | null = null;
-
-    for (
-      let attempt = 1;
-      attempt <= this.config.discovery.retryAttempts;
-      attempt++
-    ) {
-      try {
-        logger.debug("Fetching discovery document", {
-          url: discoveryUrl,
-          attempt,
+    // Check cache size before adding new entry
+    if (this.discoveryCache.size >= this.maxCacheSize) {
+      // Remove oldest entry (simple FIFO eviction)
+      const firstKey = this.discoveryCache.keys().next().value;
+      if (firstKey) {
+        this.discoveryCache.delete(firstKey);
+        logger.debug("Evicted oldest cache entry due to size limit", {
+          evictedKey: firstKey,
+          currentSize: this.discoveryCache.size,
+          maxSize: this.maxCacheSize,
         });
-
-        const response = await fetch(discoveryUrl, {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-            "User-Agent": "keycloak-auth-lib/1.0.0",
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-
-        // Cache the discovery document
-        this.discoveryCache.set(cacheKey, {
-          data,
-          timestamp: Date.now(),
-        });
-
-        logger.info("Discovery document retrieved successfully", {
-          realm,
-          issuer: data.issuer,
-          endpoints: {
-            authorization: !!data.authorization_endpoint,
-            token: !!data.token_endpoint,
-            userinfo: !!data.userinfo_endpoint,
-            introspection: !!data.introspection_endpoint,
-          },
-        });
-
-        return data;
-      } catch (error) {
-        lastError = error as Error;
-        logger.warn("Discovery document fetch failed", {
-          attempt,
-          maxAttempts: this.config.discovery.retryAttempts,
-          error: error instanceof Error ? error.message : String(error),
-        });
-
-        if (attempt < this.config.discovery.retryAttempts) {
-          // Exponential backoff
-          await new Promise((resolve) =>
-            setTimeout(resolve, Math.pow(2, attempt) * 1000)
-          );
-        }
       }
     }
 
-    throw new AuthenticationError(
-      `Failed to fetch discovery document after ${this.config.discovery.retryAttempts} attempts: ${lastError?.message}`,
-      "DISCOVERY_FETCH_FAILED",
-      503,
-      { originalError: lastError }
-    );
+    const serverUrl = this.config.clients.frontend.serverUrl;
+    const discoveryUrl = `${serverUrl}/realms/${realm}/.well-known/openid_connect_configuration`;
+
+    try {
+      logger.debug("Fetching discovery document", {
+        url: discoveryUrl,
+      });
+
+      const response = (await this.httpCircuitBreaker.fire(discoveryUrl, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "keycloak-auth-lib/1.0.0",
+        },
+      })) as Response;
+
+      const data = await response.json();
+
+      // Cache the discovery document
+      this.discoveryCache.set(cacheKey, {
+        data,
+        timestamp: Date.now(),
+      });
+
+      logger.info("Discovery document retrieved successfully", {
+        realm,
+        issuer: data.issuer,
+        endpoints: {
+          authorization: !!data.authorization_endpoint,
+          token: !!data.token_endpoint,
+          userinfo: !!data.userinfo_endpoint,
+          introspection: !!data.introspection_endpoint,
+        },
+      });
+
+      return data;
+    } catch (error) {
+      logger.error("Discovery document fetch failed", {
+        error: error instanceof Error ? error.message : String(error),
+        circuitBreakerState:
+          this.httpCircuitBreaker?.status?.stats || "unavailable",
+      });
+
+      throw new AuthenticationError(
+        `Failed to fetch discovery document: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        "DISCOVERY_FETCH_FAILED",
+        503,
+        { originalError: error }
+      );
+    }
   }
 
   /**
@@ -312,6 +396,13 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     code: string,
     codeVerifier?: string
   ): Promise<TokenResponse> {
+    // Validate input parameters
+    validateInput(
+      AuthorizationCodeRequestSchema,
+      { code, codeVerifier },
+      "authorization code request"
+    );
+
     const client = this.getClient("frontend");
     const discovery = await this.getDiscoveryDocument(client.realm);
 
@@ -341,15 +432,18 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     }
 
     try {
-      const response = await fetch(discovery.token_endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "application/json",
-          "User-Agent": "keycloak-auth-lib/1.0.0",
-        },
-        body: body.toString(),
-      });
+      const response = (await this.httpCircuitBreaker.fire(
+        discovery.token_endpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+            "User-Agent": "keycloak-auth-lib/1.0.0",
+          },
+          body: body.toString(),
+        }
+      )) as Response;
 
       const responseData = await response.json();
 
@@ -372,14 +466,21 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
         );
       }
 
+      // Validate token response
+      const validatedTokenResponse = validateInput(
+        TokenResponseSchema,
+        responseData,
+        "token response"
+      );
+
       logger.info("Token exchange successful", {
         clientId: client.clientId,
-        hasRefreshToken: !!responseData.refresh_token,
-        expiresIn: responseData.expires_in,
-        scope: responseData.scope,
+        hasRefreshToken: !!validatedTokenResponse.refresh_token,
+        expiresIn: validatedTokenResponse.expires_in,
+        scope: validatedTokenResponse.scope,
       });
 
-      return responseData as TokenResponse;
+      return validatedTokenResponse as TokenResponse;
     } catch (error) {
       if (error instanceof AuthenticationError) {
         throw error;
@@ -428,6 +529,13 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
    * Refresh access token using refresh token
    */
   public async refreshToken(refreshToken: string): Promise<TokenResponse> {
+    // Validate input parameters
+    validateInput(
+      RefreshTokenRequestSchema,
+      { refreshToken },
+      "refresh token request"
+    );
+
     const client = this.getClient("frontend");
     const discovery = await this.getDiscoveryDocument(client.realm);
 
@@ -450,15 +558,18 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     }
 
     try {
-      const response = await fetch(discovery.token_endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "application/json",
-          "User-Agent": "keycloak-auth-lib/1.0.0",
-        },
-        body: body.toString(),
-      });
+      const response = (await this.httpCircuitBreaker.fire(
+        discovery.token_endpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+            "User-Agent": "keycloak-auth-lib/1.0.0",
+          },
+          body: body.toString(),
+        }
+      )) as Response;
 
       const responseData = await response.json();
 
@@ -481,13 +592,20 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
         );
       }
 
+      // Validate token response
+      const validatedTokenResponse = validateInput(
+        TokenResponseSchema,
+        responseData,
+        "token response"
+      );
+
       logger.info("Token refresh successful", {
         clientId: client.clientId,
-        hasRefreshToken: !!responseData.refresh_token,
-        expiresIn: responseData.expires_in,
+        hasRefreshToken: !!validatedTokenResponse.refresh_token,
+        expiresIn: validatedTokenResponse.expires_in,
       });
 
-      return responseData as TokenResponse;
+      return validatedTokenResponse as TokenResponse;
     } catch (error) {
       if (error instanceof AuthenticationError) {
         throw error;
@@ -529,15 +647,18 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     });
 
     try {
-      const response = await fetch(discovery.token_endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "application/json",
-          "User-Agent": "keycloak-auth-lib/1.0.0",
-        },
-        body: body.toString(),
-      });
+      const response = (await this.httpCircuitBreaker.fire(
+        discovery.token_endpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+            "User-Agent": "keycloak-auth-lib/1.0.0",
+          },
+          body: body.toString(),
+        }
+      )) as Response;
 
       const responseData = await response.json();
 
@@ -594,6 +715,13 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     password: string,
     clientType: "tracker" = "tracker"
   ): Promise<TokenResponse> {
+    // Validate input parameters
+    validateInput(
+      DirectGrantRequestSchema,
+      { username, password },
+      "direct grant request"
+    );
+
     const client = this.getClient(clientType);
     const discovery = await this.getDiscoveryDocument(client.realm);
 
@@ -619,15 +747,18 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     }
 
     try {
-      const response = await fetch(discovery.token_endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "application/json",
-          "User-Agent": "keycloak-auth-lib/1.0.0",
-        },
-        body: body.toString(),
-      });
+      const response = (await this.httpCircuitBreaker.fire(
+        discovery.token_endpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+            "User-Agent": "keycloak-auth-lib/1.0.0",
+          },
+          body: body.toString(),
+        }
+      )) as Response;
 
       const responseData = await response.json();
 
@@ -651,15 +782,22 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
         );
       }
 
+      // Validate token response
+      const validatedTokenResponse = validateInput(
+        TokenResponseSchema,
+        responseData,
+        "token response"
+      );
+
       logger.info("Direct grant token obtained", {
         username,
         clientType,
-        tokenType: responseData.token_type,
-        expiresIn: responseData.expires_in,
-        scope: responseData.scope,
+        tokenType: validatedTokenResponse.token_type,
+        expiresIn: validatedTokenResponse.expires_in,
+        scope: validatedTokenResponse.scope,
       });
 
-      return responseData as TokenResponse;
+      return validatedTokenResponse as TokenResponse;
     } catch (error) {
       if (error instanceof AuthenticationError) {
         throw error;
@@ -680,6 +818,11 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
    * Create logout URL
    */
   public async logout(idTokenHint?: string): Promise<string> {
+    // Validate input parameters if provided
+    if (idTokenHint !== undefined) {
+      validateInput(LogoutRequestSchema, { idTokenHint }, "logout request");
+    }
+
     const client = this.getClient("frontend");
     const discovery = await this.getDiscoveryDocument(client.realm);
 
@@ -740,13 +883,115 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     this.discoveryCache.clear();
     logger.info("Discovery cache cleared");
   }
+
+  /**
+   * Start automatic cache cleanup timer
+   */
+  private startCacheCleanupTimer(): void {
+    this.cacheCleanupTimer = setInterval(() => {
+      this.cleanupExpiredCacheEntries();
+    }, this.cacheCleanupInterval);
+
+    // Ensure timer doesn't prevent process exit
+    this.cacheCleanupTimer.unref();
+  }
+
+  /**
+   * Clean up expired cache entries
+   */
+  private cleanupExpiredCacheEntries(): void {
+    const now = Date.now();
+    const cacheTimeout = this.config.discovery.cacheTimeout * 1000;
+    let removedCount = 0;
+
+    for (const [key, entry] of this.discoveryCache.entries()) {
+      if (now - entry.timestamp > cacheTimeout) {
+        this.discoveryCache.delete(key);
+        removedCount++;
+      }
+    }
+
+    if (removedCount > 0) {
+      logger.debug("Cleaned up expired discovery cache entries", {
+        removedCount,
+        remainingCount: this.discoveryCache.size,
+      });
+    }
+
+    // Enforce maximum cache size with LRU eviction
+    if (this.discoveryCache.size > this.maxCacheSize) {
+      const entriesToRemove = this.discoveryCache.size - this.maxCacheSize;
+      const keys = Array.from(this.discoveryCache.keys());
+
+      for (let i = 0; i < entriesToRemove && i < keys.length; i++) {
+        const key = keys[i];
+        if (key) {
+          this.discoveryCache.delete(key);
+          removedCount++;
+        }
+      }
+
+      logger.warn("Enforced maximum cache size limit", {
+        removedCount,
+        maxSize: this.maxCacheSize,
+        currentSize: this.discoveryCache.size,
+      });
+    }
+  }
+
+  /**
+   * Get cache statistics for monitoring
+   */
+  public getCacheStats(): {
+    size: number;
+    maxSize: number;
+    cleanupInterval: number;
+    entries: Array<{ key: string; age: number; expiresIn: number }>;
+  } {
+    const now = Date.now();
+    const cacheTimeout = this.config.discovery.cacheTimeout * 1000;
+
+    const stats = {
+      size: this.discoveryCache.size,
+      maxSize: this.maxCacheSize,
+      cleanupInterval: this.cacheCleanupInterval,
+      entries: Array.from(this.discoveryCache.entries()).map(
+        ([key, entry]) => ({
+          key,
+          age: now - entry.timestamp,
+          expiresIn: Math.max(0, cacheTimeout - (now - entry.timestamp)),
+        })
+      ),
+    };
+
+    // Validate cache stats
+    return validateInput(CacheStatsSchema, stats, "cache statistics");
+  }
+
+  /**
+   * HTTP request method wrapped by circuit breaker
+   * This method is used by the circuit breaker to make HTTP requests
+   */
+  private async makeHttpRequest(
+    url: RequestInfo,
+    options?: RequestInit
+  ): Promise<Response> {
+    const response = await fetch(url, options);
+
+    // Throw error for non-2xx responses so circuit breaker can track failures
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    return response;
+  }
 }
 
 /**
  * Factory function to create KeycloakClientFactory instance
  */
 export const createKeycloakClientFactory = (
-  envConfig?: Partial<EnvironmentConfig>
+  envConfig?: Partial<RawEnvironmentConfig>
 ): KeycloakClientFactory => {
   const fullConfig: RawEnvironmentConfig = {
     KEYCLOAK_SERVER_URL: process.env["KEYCLOAK_SERVER_URL"] || "",

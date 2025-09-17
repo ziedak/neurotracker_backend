@@ -53,18 +53,28 @@ describe("KeycloakClientFactory", () => {
         global as any
       ).testUtils.createMockDiscoveryDocument();
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockDiscovery),
-      });
+      // Mock the circuit breaker's fire method
+      const mockCircuitBreaker = {
+        fire: jest.fn().mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(mockDiscovery),
+        }),
+      };
+
+      // Replace the circuit breaker instance with our mock
+      const originalCircuitBreaker = (clientFactory as any).httpCircuitBreaker;
+      (clientFactory as any).httpCircuitBreaker = mockCircuitBreaker;
 
       const discovery = await clientFactory.getDiscoveryDocument("test");
 
       expect(discovery).toEqual(mockDiscovery);
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(mockCircuitBreaker.fire).toHaveBeenCalledWith(
         "https://keycloak.example.com/realms/test/.well-known/openid_connect_configuration",
         expect.any(Object)
       );
+
+      // Restore original circuit breaker
+      (clientFactory as any).httpCircuitBreaker = originalCircuitBreaker;
     });
 
     it("should return cached discovery document on second call", async () => {
@@ -72,37 +82,62 @@ describe("KeycloakClientFactory", () => {
         global as any
       ).testUtils.createMockDiscoveryDocument();
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockDiscovery),
-      });
+      // Mock the circuit breaker's fire method
+      const mockCircuitBreaker = {
+        fire: jest.fn().mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(mockDiscovery),
+        }),
+      };
+
+      // Replace the circuit breaker instance with our mock
+      const originalCircuitBreaker = (clientFactory as any).httpCircuitBreaker;
+      (clientFactory as any).httpCircuitBreaker = originalCircuitBreaker;
+
+      // Temporarily replace for first call
+      (clientFactory as any).httpCircuitBreaker = mockCircuitBreaker;
 
       // First call
       await clientFactory.getDiscoveryDocument("test");
 
-      // Second call should use cache
+      // Restore original and second call should use cache
+      (clientFactory as any).httpCircuitBreaker = originalCircuitBreaker;
       const discovery = await clientFactory.getDiscoveryDocument("test");
 
       expect(discovery).toEqual(mockDiscovery);
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(mockCircuitBreaker.fire).toHaveBeenCalledTimes(1);
     });
 
-    it("should retry on failure", async () => {
-      (global.fetch as jest.Mock)
-        .mockRejectedValueOnce(new Error("Network error"))
-        .mockRejectedValueOnce(new Error("Network error"))
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () =>
-            Promise.resolve(
-              (global as any).testUtils.createMockDiscoveryDocument()
-            ),
-        });
+    it("should use circuit breaker for HTTP requests", async () => {
+      // Mock fetch to return a successful response
+      const originalFetch = global.fetch;
+      (global as any).fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve(
+            (global as any).testUtils.createMockDiscoveryDocument()
+          ),
+      });
 
       const discovery = await clientFactory.getDiscoveryDocument("test");
 
       expect(discovery).toBeDefined();
-      expect(global.fetch).toHaveBeenCalledTimes(3);
+      expect((global as any).fetch).toHaveBeenCalledTimes(1);
+      expect((global as any).fetch).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "/realms/test/.well-known/openid_connect_configuration"
+        ),
+        expect.objectContaining({
+          method: "GET",
+          headers: expect.objectContaining({
+            Accept: "application/json",
+            "User-Agent": "keycloak-auth-lib/1.0.0",
+          }),
+        })
+      );
+
+      // Restore original fetch
+      global.fetch = originalFetch;
     });
   });
 
