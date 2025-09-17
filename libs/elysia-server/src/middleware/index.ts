@@ -73,15 +73,3 @@ export type { PrometheusWebSocketMiddlewareConfig } from "./prometheus/prometheu
 // =============================================================================
 export { ElysiaMiddlewareAdapter } from "./adapters/ElysiaMiddlewareAdapter";
 export * from "./utils";
-
-// =============================================================================
-// MODULE EXPORTS (for compatibility)
-// =============================================================================
-export * from "./audit";
-export * from "./auth";
-export * from "./cors";
-export * from "./error";
-export * from "./logging";
-export * from "./prometheus";
-export * from "./rateLimit";
-export * from "./security";

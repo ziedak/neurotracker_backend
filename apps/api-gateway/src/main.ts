@@ -1,4 +1,8 @@
-import { AdvancedElysiaServerBuilder, ServerConfig } from "@libs/elysia-server";
+import {
+  AdvancedElysiaServerBuilder,
+  ServerConfig,
+  type WebSocketMessage,
+} from "@libs/elysia-server";
 import { createLogger } from "@libs/utils";
 import { MetricsCollector, IMetricsCollector } from "@libs/monitoring";
 
@@ -132,14 +136,6 @@ const HEARTBEAT_INTERVAL_MS = 30000;
 const RETRY_BASE_DELAY_MS = 2000;
 
 /**
- * Enhanced WebSocket handler using new middleware system
- */
-interface WebSocketMessage {
-  type: string;
-  payload: any;
-}
-
-/**
  * Start the modernized API Gateway server using AdvancedElysiaServerBuilder
  */
 async function startServer() {
@@ -186,7 +182,7 @@ async function startServer() {
           switch (message.type) {
             case "subscribe_service_events":
               logger.info("Client subscribed to service events", {
-                service: message.payload?.service,
+                service: message.payload,
                 connectionId,
               });
               break;

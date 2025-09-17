@@ -13,7 +13,6 @@
  * @description Examples showing how to replace duplicate sanitization code
  */
 
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /**
  * @fileoverview Migration Guide: Centralized Sanitization Utilities
  * @description Examples showing how to replace duplicate sanitization code
@@ -21,54 +20,55 @@
 
 // BEFORE: Each middleware has its own sanitization methods
 
-class ApiKeyStrategyOld {
-  static maskApiKey(apiKey: string): string {
-    if (apiKey.length <= 8) {
-      return "***";
-    }
-    return `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}`;
-  }
-}
+// class ApiKeyStrategyOld {
+//   static maskApiKey(apiKey: string): string {
+//     if (apiKey.length <= 8) {
+//       return "***";
+//     }
+//     return `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}`;
+//   }
+// }
 
-class LoggingWebSocketMiddlewareOld {
-  private sanitizeHeaders(
-    headers: Record<string, string>
-  ): Record<string, string> {
-    const sanitized: Record<string, string> = {};
-    const sensitiveHeaders = [
-      "authorization",
-      "cookie",
-      "set-cookie",
-      "x-api-key",
-    ];
+// class LoggingWebSocketMiddlewareOld {
+//   private sanitizeHeaders(
+//     headers: Record<string, string>
+//   ): Record<string, string> {
+//     const sanitized: Record<string, string> = {};
+//     const sensitiveHeaders = [
+//       "authorization",
+//       "cookie",
+//       "set-cookie",
+//       "x-api-key",
+//     ];
 
-    for (const [key, value] of Object.entries(headers)) {
-      const lowerKey = key.toLowerCase();
-      if (sensitiveHeaders.includes(lowerKey)) {
-        sanitized[key] = "[REDACTED]";
-      } else {
-        sanitized[key] = value;
-      }
-    }
-    return sanitized;
-  }
+//     for (const [key, value] of Object.entries(headers)) {
+//       const lowerKey = key.toLowerCase();
+//       if (sensitiveHeaders.includes(lowerKey)) {
+//         sanitized[key] = "[REDACTED]";
+//       } else {
+//         sanitized[key] = value;
+//       }
+//     }
+//     return sanitized;
+//   }
 
-  private sanitizePayload(payload: unknown): unknown {
-    const sensitiveFields = ["password", "token", "apikey"];
-    // Custom sanitization logic...
-    return payload;
-  }
-}
+//   private sanitizePayload(payload: unknown): unknown {
+//     const sensitiveFields = ["password", "token", "apikey"];
+//     // Custom sanitization logic...
+//     return payload;
+//   }
+// }
 
-class SecurityWebSocketMiddlewareOld {
-  private sanitizeObject(
-    obj: Record<string, unknown>,
-    sensitiveFields: string[]
-  ): Record<string, unknown> {
-    // Another custom implementation...
-    return obj;
-  }
-}
+// class SecurityWebSocketMiddlewareOld {
+//   sanitizeObject(
+//     obj: Record<string, unknown>,
+//     sensitiveFields: string[]
+//   ): Record<string, unknown> {
+//     if (sensitiveFields.length === 0) return obj;
+//     // Another custom implementation...
+//     return obj;
+//   }
+// }
 
 // ✅ NEW WAY - Using centralized sanitization utilities
 
@@ -100,6 +100,12 @@ class ApiKeyStrategy {
 
 // ✅ NEW - logging.websocket.middleware.ts
 class LoggingWebSocketMiddleware {
+  mockfn() {
+    this.sanitizeHeaders({ Authorization: "token" });
+    this.sanitizePayload({ password: "1234" });
+    this.sanitizeCustomPayload({ custom_field: "value" });
+  }
+
   // Simple header sanitization
   private sanitizeHeaders(
     headers: Record<string, string>
@@ -127,9 +133,7 @@ class LoggingWebSocketMiddleware {
 // ✅ NEW - security.websocket.middleware.ts
 class SecurityWebSocketMiddleware {
   // Use pre-configured security sanitizer
-  private sanitizeObject(
-    obj: Record<string, unknown>
-  ): Record<string, unknown> {
+  sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
     return middlewareSanitizers.security.sanitize(obj).data as Record<
       string,
       unknown
@@ -137,7 +141,7 @@ class SecurityWebSocketMiddleware {
   }
 
   // Or use the general utility
-  private sanitizeMessage(payload: unknown): unknown {
+  sanitizeMessage(payload: unknown): unknown {
     return sanitizePayload(payload, ["custom_field", "internal_data"]);
   }
 }

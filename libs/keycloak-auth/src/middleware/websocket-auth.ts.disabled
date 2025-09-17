@@ -1,0 +1,464 @@
+import { Elysia, t } from "elysia";
+import {
+  WebSocketConnectionData,
+  WebSocketAuthContext,
+  WebSocketAuthConfig,
+  WebSocketAuthError,
+  ElysiaWebSocket,
+} from "../types/index.js";
+import { WebSocketTokenValidator } from "../services/websocket-token-validator.js";
+import { createLogger } from "@libs/utils";
+
+// Create logger with explicit type
+const logger: any = createLogger("websocket-auth-middleware");
+
+/**
+ * Elysia WebSocket Authentication Middleware
+ * Integrates Keycloak authentication with Elysia's native WebSocket support
+ */
+export class ElysiaWebSocketAuthMiddleware {
+  constructor(
+    private readonly tokenValidator: WebSocketTokenValidator,
+    private readonly config: WebSocketAuthConfig
+  ) {}
+
+  /**
+   * Create Elysia WebSocket middleware plugin
+   */
+  public createPlugin(name: string = "websocket-auth") {
+    return new Elysia({ name }).derive(async ({ headers, query, cookie }) => {
+      // Extract authentication data for WebSocket connection
+      const authData = await this.extractAuthData(headers, query, cookie);
+
+      return {
+        wsAuth: authData,
+      };
+    });
+  }
+
+  /**
+   * Create authenticated WebSocket handler
+   */
+  public createAuthenticatedWebSocket<T = any>(
+    path: string,
+    options: {
+      requireAuth?: boolean;
+      requiredScopes?: string[];
+      requiredPermissions?: string[];
+      anonymousFallback?: boolean;
+    } = {}
+  ) {
+    const {
+      requireAuth = true,
+      requiredScopes = [],
+      requiredPermissions = [],
+      anonymousFallback = false,
+    } = options;
+
+    return {
+      [path]: {
+        // Schema validation for WebSocket upgrade request
+        query: t.Optional(
+          t.Object({
+            token: t.Optional(t.String()),
+          })
+        ),
+        headers: t.Optional(
+          t.Object({
+            authorization: t.Optional(t.String()),
+            "x-api-key": t.Optional(t.String()),
+          })
+        ),
+
+        // Before upgrade validation
+        beforeHandle: async ({ headers, query, cookie, set }: any) => {
+          if (!this.config.connectionAuth.enabled) {
+            logger.debug(
+              "WebSocket authentication disabled, allowing connection"
+            );
+            return;
+          }
+
+          try {
+            // Extract token from request
+            const tokenResult = this.tokenValidator.extractToken(
+              headers as Record<string, string>,
+              query as Record<string, string>,
+              cookie as Record<string, string>
+            );
+
+            if (!tokenResult && requireAuth && !anonymousFallback) {
+              logger.warn(
+                "WebSocket connection rejected: no authentication token",
+                { path }
+              );
+              set.status = 401;
+              return { error: "Authentication required" };
+            }
+
+            if (tokenResult) {
+              // Validate the token
+              const connectionId = this.generateConnectionId();
+              const authContext =
+                await this.tokenValidator.validateConnectionToken(
+                  tokenResult.token,
+                  tokenResult.method,
+                  connectionId
+                );
+
+              // Check permissions
+              if (
+                !this.tokenValidator.hasPermission(
+                  authContext,
+                  requiredScopes,
+                  requiredPermissions
+                )
+              ) {
+                logger.warn(
+                  "WebSocket connection rejected: insufficient permissions",
+                  {
+                    path,
+                    connectionId,
+                    requiredScopes,
+                    requiredPermissions,
+                    userScopes: authContext.scopes,
+                    userPermissions: authContext.permissions,
+                  }
+                );
+                set.status = 403;
+                return { error: "Insufficient permissions" };
+              }
+
+              logger.info("WebSocket connection authenticated", {
+                path,
+                connectionId,
+                userId: authContext.userId,
+                clientId: authContext.clientId,
+                method: authContext.method,
+              });
+            }
+          } catch (error) {
+            if (error instanceof WebSocketAuthError) {
+              logger.warn("WebSocket authentication failed", {
+                path,
+                error: error.message,
+                code: error.code,
+              });
+              set.status = error.statusCode;
+              return { error: error.message };
+            }
+
+            logger.error("WebSocket authentication error", {
+              path,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            set.status = 500;
+            return { error: "Authentication service error" };
+          }
+        },
+
+        // WebSocket lifecycle handlers
+        open: async (ws: ElysiaWebSocket<WebSocketConnectionData>) => {
+          try {
+            // Re-authenticate on connection open (connection upgrade succeeded)
+            const authResult = await this.authenticateConnection(ws);
+
+            if (authResult.auth) {
+              // Store authentication context in WebSocket data
+              ws.data = {
+                auth: authResult.auth,
+                query: ws.data?.query || {},
+                headers: ws.data?.headers || {},
+                connectionTime: Date.now(),
+              };
+
+              logger.info("WebSocket connection opened and authenticated", {
+                connectionId: authResult.auth.connectionId,
+                userId: authResult.auth.userId,
+                clientId: authResult.auth.clientId,
+              });
+
+              // Subscribe to user-specific topics if needed
+              this.setupUserTopics(ws, authResult.auth);
+            } else if (anonymousFallback) {
+              // Create anonymous context
+              ws.data = {
+                auth: this.createAnonymousContext(),
+                query: ws.data?.query || {},
+                headers: ws.data?.headers || {},
+                connectionTime: Date.now(),
+              };
+
+              logger.info("WebSocket connection opened (anonymous)", {
+                connectionId: ws.data.auth.connectionId,
+              });
+            } else {
+              logger.warn(
+                "WebSocket connection rejected: authentication required"
+              );
+              ws.close(1008, "Authentication required");
+              return;
+            }
+
+            // Set up periodic auth refresh if configured
+            if (this.config.session.enableRefresh) {
+              this.setupAuthRefresh(ws);
+            }
+          } catch (error) {
+            logger.error("WebSocket connection setup failed", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+            ws.close(1011, "Server error during connection setup");
+          }
+        },
+
+        // Message handler with optional per-message authentication
+        message: async (
+          ws: ElysiaWebSocket<WebSocketConnectionData>,
+          message: any
+        ) => {
+          try {
+            // Check if message-level auth is enabled and required
+            if (
+              this.config.messageAuth.enabled &&
+              this.shouldValidateMessage(message)
+            ) {
+              await this.validateMessageAuth(ws, message);
+            }
+
+            // Update last activity
+            ws.data.auth.lastValidated = new Date();
+
+            logger.debug("WebSocket message processed", {
+              connectionId: ws.data.auth.connectionId,
+              messageType: typeof message,
+            });
+
+            return message; // Pass message to application handler
+          } catch (error) {
+            if (error instanceof WebSocketAuthError) {
+              logger.warn("WebSocket message authentication failed", {
+                connectionId: ws.data.auth.connectionId,
+                error: error.message,
+              });
+              ws.send(
+                JSON.stringify({
+                  error: "Authentication failed",
+                  code: error.code,
+                })
+              );
+              return;
+            }
+
+            logger.error("WebSocket message processing error", {
+              connectionId: ws.data.auth.connectionId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            ws.send(JSON.stringify({ error: "Message processing failed" }));
+          }
+        },
+
+        // Connection close handler
+        close: async (ws: ElysiaWebSocket<WebSocketConnectionData>) => {
+          const connectionId = ws.data?.auth?.connectionId || "unknown";
+          logger.info("WebSocket connection closed", { connectionId });
+
+          // Clean up any connection-specific resources
+          await this.cleanupConnection(ws);
+        },
+      },
+    };
+  }
+
+  /**
+   * Extract authentication data from request
+   */
+  private async extractAuthData(
+    headers: Record<string, string | undefined>,
+    query: Record<string, string | undefined>,
+    cookie: Record<string, string | undefined>
+  ): Promise<any> {
+    const cleanHeaders = Object.fromEntries(
+      Object.entries(headers).filter(([, value]) => value !== undefined)
+    ) as Record<string, string>;
+
+    const cleanQuery = Object.fromEntries(
+      Object.entries(query).filter(([, value]) => value !== undefined)
+    ) as Record<string, string>;
+
+    const cleanCookie = Object.fromEntries(
+      Object.entries(cookie || {}).filter(([, value]) => value !== undefined)
+    ) as Record<string, string>;
+
+    return {
+      headers: cleanHeaders,
+      query: cleanQuery,
+      cookie: cleanCookie,
+    };
+  }
+
+  /**
+   * Authenticate WebSocket connection
+   */
+  private async authenticateConnection(
+    ws: ElysiaWebSocket<WebSocketConnectionData>
+  ): Promise<{ auth?: WebSocketAuthContext }> {
+    // This would be called with the actual request data
+    // For now, return a placeholder
+    return { auth: undefined };
+  }
+
+  /**
+   * Create anonymous authentication context
+   */
+  private createAnonymousContext(): WebSocketAuthContext {
+    return {
+      method: "jwt_token",
+      clientId: "anonymous",
+      scopes: ["anonymous"],
+      permissions: ["anonymous:connect"],
+      connectionId: this.generateConnectionId(),
+      connectedAt: new Date(),
+      lastValidated: new Date(),
+    };
+  }
+
+  /**
+   * Setup user-specific topics and subscriptions
+   */
+  private setupUserTopics(
+    ws: ElysiaWebSocket<WebSocketConnectionData>,
+    auth: WebSocketAuthContext
+  ): void {
+    // Subscribe to user-specific topics
+    if (auth.userId) {
+      ws.subscribe(`user:${auth.userId}`);
+      logger.debug("Subscribed to user topic", {
+        connectionId: auth.connectionId,
+        userId: auth.userId,
+      });
+    }
+
+    // Subscribe to client-specific topics
+    if (auth.clientId && auth.clientId !== "anonymous") {
+      ws.subscribe(`client:${auth.clientId}`);
+      logger.debug("Subscribed to client topic", {
+        connectionId: auth.connectionId,
+        clientId: auth.clientId,
+      });
+    }
+
+    // Subscribe to role-based topics
+    auth.permissions.forEach((permission) => {
+      ws.subscribe(`permission:${permission}`);
+    });
+  }
+
+  /**
+   * Setup periodic authentication refresh
+   */
+  private setupAuthRefresh(ws: ElysiaWebSocket<WebSocketConnectionData>): void {
+    const refreshInterval = this.config.session.refreshInterval * 1000;
+
+    const intervalId = setInterval(async () => {
+      try {
+        ws.data.auth = await this.tokenValidator.refreshAuthContext(ws);
+        logger.debug("WebSocket auth context refreshed", {
+          connectionId: ws.data.auth.connectionId,
+        });
+      } catch (error) {
+        logger.error("Auth refresh failed, closing connection", {
+          connectionId: ws.data.auth.connectionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        clearInterval(intervalId);
+        ws.close(1008, "Authentication expired");
+      }
+    }, refreshInterval);
+
+    // Store interval ID for cleanup
+    (ws as any)._authRefreshInterval = intervalId;
+  }
+
+  /**
+   * Check if message requires authentication validation
+   */
+  private shouldValidateMessage(message: any): boolean {
+    if (!this.config.messageAuth.validateOnSensitiveActions) {
+      return false;
+    }
+
+    const messageStr =
+      typeof message === "string" ? message : JSON.stringify(message);
+    return this.config.messageAuth.requiredActionsPattern.some((pattern) =>
+      pattern.test(messageStr)
+    );
+  }
+
+  /**
+   * Validate message-level authentication
+   */
+  private async validateMessageAuth(
+    ws: ElysiaWebSocket<WebSocketConnectionData>,
+    _message: any
+  ): Promise<void> {
+    const auth = ws.data.auth;
+    const now = new Date();
+    const lastValidated = auth.lastValidated.getTime();
+    const maxAge = this.config.session.maxIdleTime * 1000;
+
+    if (now.getTime() - lastValidated > maxAge) {
+      throw new WebSocketAuthError("Authentication expired", {
+        connectionId: auth.connectionId,
+        lastValidated: auth.lastValidated,
+        maxAge,
+      });
+    }
+
+    // Additional message-specific validation could go here
+  }
+
+  /**
+   * Cleanup connection resources
+   */
+  private async cleanupConnection(
+    ws: ElysiaWebSocket<WebSocketConnectionData>
+  ): Promise<void> {
+    // Clear auth refresh interval
+    const intervalId = (ws as any)._authRefreshInterval;
+    if (intervalId) {
+      clearInterval(intervalId);
+    }
+
+    // Unsubscribe from all topics
+    const auth = ws.data?.auth;
+    if (auth) {
+      if (auth.userId) {
+        ws.unsubscribe(`user:${auth.userId}`);
+      }
+      if (auth.clientId && auth.clientId !== "anonymous") {
+        ws.unsubscribe(`client:${auth.clientId}`);
+      }
+      auth.permissions.forEach((permission) => {
+        ws.unsubscribe(`permission:${permission}`);
+      });
+    }
+  }
+
+  /**
+   * Generate unique connection ID
+   */
+  private generateConnectionId(): string {
+    return `ws_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  }
+}
+
+/**
+ * Factory function to create WebSocket authentication middleware
+ */
+export const createWebSocketAuthMiddleware = (
+  tokenValidator: WebSocketTokenValidator,
+  config: WebSocketAuthConfig
+): ElysiaWebSocketAuthMiddleware => {
+  return new ElysiaWebSocketAuthMiddleware(tokenValidator, config);
+};

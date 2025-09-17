@@ -65,6 +65,7 @@ export function asWebSocket(ws: unknown): WebSocketLike {
 }
 
 export interface WebSocketContext {
+  mockWSContext?: Buffer<ArrayBuffer>; // Optional - used for testing
   ws: unknown; // Actual Elysia WebSocket - type varies by version
   connectionId: string;
   message: WebSocketMessage;

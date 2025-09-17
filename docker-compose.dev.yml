@@ -44,11 +44,13 @@ services:
     environment:
       - KEYCLOAK_ADMIN=admin
       - KEYCLOAK_ADMIN_PASSWORD=admin
-      - DB_VENDOR=POSTGRES
-      - DB_ADDR=postgres
-      - DB_DATABASE=neurotracker
-      - DB_USER=postgres
-      - DB_PASSWORD=TEST
+      - KC_DB=postgres
+      - KC_DB_URL=jdbc:postgresql://postgres:5432/neurotracker
+      - KC_DB_USERNAME=postgres
+      - KC_DB_PASSWORD=TEST
+      - KC_HOSTNAME_STRICT=false
+      - KC_HTTP_ENABLED=true
+    command: start-dev
     depends_on:
       - postgres
   api-gateway:

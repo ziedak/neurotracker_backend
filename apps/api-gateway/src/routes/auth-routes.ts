@@ -35,7 +35,7 @@ const RegisterSchema = t.Object({
 export function setupAuthRoutes(
   app: Elysia,
   logger: ILogger,
-  authService?: AuthenticationService
+  authService: AuthenticationService
 ): Elysia {
   if (!authService) {
     logger.warn(

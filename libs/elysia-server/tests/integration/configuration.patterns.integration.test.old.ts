@@ -724,7 +724,7 @@ describe("Configuration Pattern Integration Tests", () => {
           logging: { enabled: true, logLevel: "info" as const },
         },
 
-        updateConfig: function (newConfig: any) {
+        updateConfig (newConfig: any) {
           const oldConfig = { ...this.currentConfig };
           this.currentConfig = { ...this.currentConfig, ...newConfig };
 

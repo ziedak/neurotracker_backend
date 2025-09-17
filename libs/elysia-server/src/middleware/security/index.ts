@@ -11,7 +11,7 @@
  * - Permission policy controls
  */
 
-import { type IMetricsCollector } from "@libs/monitoring";
+import type { IMetricsCollector } from "@libs/monitoring";
 import {
   SecurityHttpMiddleware,
   type SecurityHttpMiddlewareConfig,

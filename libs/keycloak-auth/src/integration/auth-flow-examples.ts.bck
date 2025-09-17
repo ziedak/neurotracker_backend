@@ -1,0 +1,521 @@
+/**
+ * Complete Authentication Flow Integration Examples
+ *
+ * Demonstrates how client factory authentication flows integrate with
+ * HTTP and WebSocket middleware for complete authentication scenarios.
+ */
+
+import { Elysia } from "elysia";
+import { CacheService } from "@libs/database";
+import type { IMetricsCollector } from "@libs/monitoring";
+import {
+  createKeycloakClientFactory,
+  createTokenIntrospectionService,
+  keycloakAuth,
+  keycloakWebSocket,
+} from "../index";
+
+/**
+ * Complete Frontend Authentication Flow Example
+ * Shows Authorization Code flow + HTTP middleware integration
+ */
+export function createFrontendAuthFlowExample(
+  metrics: IMetricsCollector,
+  cacheService: CacheService
+) {
+  // Create services
+  const clientFactory = createKeycloakClientFactory();
+  const tokenService = createTokenIntrospectionService(
+    clientFactory,
+    cacheService
+  );
+
+  return (
+    new Elysia()
+      // Apply HTTP authentication middleware
+      .use(
+        keycloakAuth(metrics, clientFactory, tokenService, {
+          pluginName: "frontend-auth",
+          keycloakClient: "frontend",
+          requireAuth: false, // Allow login endpoints
+          bypassRoutes: ["/auth/login", "/auth/callback", "/health"],
+        })
+      )
+
+      // Frontend login initiation
+      .get("/auth/login", async () => {
+        const state = Math.random().toString(36).substring(7);
+        const nonce = Math.random().toString(36).substring(7);
+
+        // Create authorization URL using client factory
+        const authUrl = await clientFactory.createAuthorizationUrl(
+          state,
+          nonce
+        );
+        return {
+          authorizationUrl: authUrl,
+          state,
+          message: "Redirect user to authorizationUrl for Keycloak login",
+        };
+      })
+
+      // Frontend callback handling
+      .get("/auth/callback", async ({ query }) => {
+        const { code } = query as { code?: string };
+
+        if (!code) {
+          throw new Error("Authorization code required");
+        }
+        try {
+          // Exchange authorization code for tokens using client factory
+          const tokenResponse = await clientFactory.exchangeCodeForToken(code);
+
+          return {
+            message: "Authentication successful",
+            tokenType: tokenResponse.token_type,
+            expiresIn: tokenResponse.expires_in,
+            // Note: In production, store tokens securely (httpOnly cookies, etc.)
+            accessToken: tokenResponse.access_token.substring(0, 20) + "...",
+            refreshToken: tokenResponse.refresh_token ? "present" : "none",
+          };
+        } catch (error) {
+          console.error("Token exchange failed:", error);
+          throw new Error("Authentication failed");
+        }
+      })
+
+      // Protected route (requires valid JWT token)
+      .get("/api/profile", ({ user, authContext }) => {
+        // This endpoint is automatically protected by middleware
+        if (!user) {
+          throw new Error("Authentication required");
+        }
+        return {
+          user: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            roles: user.roles,
+            permissions: user.permissions,
+          },
+          message: "Profile accessed successfully with JWT token",
+        };
+      })
+  );
+}
+
+/**
+ * Service-to-Service Authentication Flow Example
+ * Shows Client Credentials flow + HTTP middleware integration
+ */
+export function createServiceAuthFlowExample(
+  metrics: IMetricsCollector,
+  cacheService: CacheService
+) {
+  const clientFactory = createKeycloakClientFactory();
+  const tokenService = createTokenIntrospectionService(
+    clientFactory,
+    cacheService
+  );
+
+  return (
+    new Elysia()
+      // Apply service authentication middleware
+      .use(
+        keycloakAuth(metrics, clientFactory, tokenService, {
+          pluginName: "service-auth",
+          keycloakClient: "service",
+          requireAuth: true, // All endpoints require authentication
+          bypassRoutes: ["/health", "/auth/service-token"],
+        })
+      )
+
+      // Service token acquisition
+      .post("/auth/service-token", async () => {
+        try {
+          // Get service token using Client Credentials flow
+          const tokenResponse = await clientFactory.getClientCredentialsToken(
+            "service"
+          );
+
+          return {
+            message: "Service token obtained successfully",
+            tokenType: tokenResponse.token_type,
+            expiresIn: tokenResponse.expires_in,
+            scope: tokenResponse.scope,
+            // Note: Return token to calling service for API requests
+            accessToken: tokenResponse.access_token,
+          };
+        } catch (error) {
+          console.error("Service token acquisition failed:", error);
+          throw new Error("Service authentication failed");
+        }
+      })
+
+      // Protected service endpoint
+      .post("/api/internal/process", ({ user, body }) => {
+        // This endpoint requires service-level authentication
+        if (!user || !user.permissions.includes("service:process")) {
+          throw new Error("Insufficient permissions");
+        }
+
+        return {
+          message: "Internal processing completed",
+          processedBy: user.id,
+          timestamp: new Date().toISOString(),
+          data: body,
+        };
+      })
+  );
+}
+
+/**
+ * TrackerJS Authentication Flow Example
+ * Shows Direct Grant flow + HTTP middleware integration
+ */
+export function createTrackerAuthFlowExample(
+  metrics: IMetricsCollector,
+  cacheService: CacheService
+) {
+  const clientFactory = createKeycloakClientFactory();
+  const tokenService = createTokenIntrospectionService(
+    clientFactory,
+    cacheService
+  );
+
+  return (
+    new Elysia()
+      // Apply tracker authentication middleware
+      .use(
+        keycloakAuth(metrics, clientFactory, tokenService, {
+          pluginName: "tracker-auth",
+          keycloakClient: "tracker",
+          requireAuth: false, // Allow login endpoints
+          bypassRoutes: ["/auth/tracker-login", "/health"],
+        })
+      )
+
+      // TrackerJS authentication endpoint
+      .post("/auth/tracker-login", async ({ body }) => {
+        const { username, password } = body as {
+          username?: string;
+          password?: string;
+        };
+
+        if (!username || !password) {
+          throw new Error("Username and password required");
+        }
+
+        try {
+          // Use Direct Grant flow for TrackerJS
+          const tokenResponse = await clientFactory.getDirectGrantToken(
+            username,
+            password,
+            "tracker"
+          );
+
+          return {
+            message: "TrackerJS authentication successful",
+            tokenType: tokenResponse.token_type,
+            expiresIn: tokenResponse.expires_in,
+            scope: tokenResponse.scope,
+            // Note: TrackerJS can use this token for subsequent API calls
+            accessToken: tokenResponse.access_token,
+          };
+        } catch (error) {
+          console.error("TrackerJS authentication failed:", error);
+          throw new Error("Invalid credentials");
+        }
+      })
+
+      // Protected tracker endpoint
+      .post("/api/tracker/event", ({ user, body }) => {
+        // This endpoint requires tracker authentication
+        if (!user || !user.permissions.includes("tracker:events")) {
+          throw new Error("Tracker permission required");
+        }
+
+        return {
+          message: "Event tracked successfully",
+          trackedBy: user.id,
+          timestamp: new Date().toISOString(),
+          event: body,
+        };
+      })
+  );
+}
+
+/**
+ * WebSocket Authentication Flow Integration Example
+ * Shows WebSocket authentication with multiple client types
+ */
+export function createWebSocketAuthFlowExample(
+  metrics: IMetricsCollector,
+  cacheService: CacheService
+) {
+  const clientFactory = createKeycloakClientFactory();
+  const tokenService = createTokenIntrospectionService(
+    clientFactory,
+    cacheService
+  );
+
+  return (
+    new Elysia()
+      // Apply WebSocket authentication middleware
+      .use(
+        keycloakWebSocket(metrics, clientFactory, tokenService, {
+          pluginName: "websocket-auth-flows",
+          wsPath: "/ws/authenticated",
+          httpConfig: {
+            name: "websocket-auth",
+            keycloakClient: "websocket",
+            requireAuth: false, // Allow connection with token validation
+          },
+          websocket: {
+            allowAnonymous: false, // Require authentication
+            heartbeatInterval: 30, // 30 seconds
+            tokenRefreshThreshold: 300, // 5 minutes before expiry
+          },
+        })
+      )
+
+      // WebSocket endpoint with authentication flows
+      .ws("/ws/authenticated", {
+        message: async (ws, message) => {
+          try {
+            const messageData = JSON.parse(message as string);
+            const { type, payload } = messageData;
+
+            // Access authenticated user context
+            const authData = ws.data.auth;
+            if (!authData || !authData.user) {
+              ws.send(
+                JSON.stringify({
+                  error: "Authentication required",
+                  type: "auth_error",
+                })
+              );
+              return;
+            }
+
+            switch (type) {
+              case "get_profile":
+                ws.send(
+                  JSON.stringify({
+                    type: "profile",
+                    data: {
+                      user: authData.user,
+                      permissions: authData.permissions,
+                      connectionTime: authData.connectedAt,
+                    },
+                  })
+                );
+                break;
+
+              case "subscribe_channel":
+                // Check channel permissions
+                if (
+                  !authData.permissions.includes(`channel:${payload.channel}`)
+                ) {
+                  ws.send(
+                    JSON.stringify({
+                      error: "Insufficient permissions for channel",
+                      type: "permission_error",
+                    })
+                  );
+                  return;
+                }
+
+                ws.send(
+                  JSON.stringify({
+                    type: "subscribed",
+                    channel: payload.channel,
+                    message: `Subscribed to ${payload.channel} successfully`,
+                  })
+                );
+                break;
+
+              default:
+                ws.send(
+                  JSON.stringify({
+                    error: "Unknown message type",
+                    type: "error",
+                  })
+                );
+            }
+          } catch (error) {
+            ws.send(
+              JSON.stringify({
+                error: "Invalid message format",
+                type: "error",
+              })
+            );
+          }
+        },
+
+        close: () => {
+          console.log("Authenticated WebSocket connection closed");
+        },
+      })
+
+      // HTTP endpoint to get WebSocket connection info
+      .get("/api/websocket-info", () => ({
+        message: "WebSocket authentication flow information",
+        endpoint: "/ws/authenticated",
+        authentication: {
+          required: true,
+          methods: ["JWT Bearer token", "API Key", "Query parameter"],
+          examples: {
+            header: "Authorization: Bearer <jwt-token>",
+            query: "?token=<jwt-token>",
+            apiKey: "X-API-Key: <api-key>",
+          },
+        },
+        flows: {
+          frontend: "Use Authorization Code flow token",
+          service: "Use Client Credentials flow token",
+          tracker: "Use Direct Grant flow token",
+        },
+      }))
+  );
+}
+
+/**
+ * Complete Multi-Flow Demo Application
+ * Demonstrates all authentication flows working together
+ */
+export function createCompleteAuthFlowDemo(
+  metrics: IMetricsCollector,
+  cacheService: CacheService
+) {
+  const clientFactory = createKeycloakClientFactory();
+  const tokenService = createTokenIntrospectionService(
+    clientFactory,
+    cacheService
+  );
+
+  return (
+    new Elysia()
+      // Apply authentication middleware with multiple client support
+      .use(
+        keycloakAuth(metrics, clientFactory, tokenService, {
+          pluginName: "multi-flow-demo",
+          keycloakClient: "frontend", // Default client
+          requireAuth: false,
+          bypassRoutes: ["/", "/health", "/auth/*", "/demo/*"],
+        })
+      )
+
+      // Demo information endpoint
+      .get("/", () => ({
+        title: "Keycloak Authentication Flow Integration Demo",
+        description:
+          "Complete demonstration of all authentication flows with middleware",
+        flows: {
+          "Authorization Code": "/demo/frontend-flow",
+          "Client Credentials": "/demo/service-flow",
+          "Direct Grant": "/demo/tracker-flow",
+          "WebSocket Auth": "/demo/websocket-flow",
+        },
+        middleware: {
+          "HTTP Authentication": "Validates JWT tokens from any flow",
+          "WebSocket Authentication": "Validates WebSocket connections",
+          "Permission System": "Extracts permissions from Keycloak claims",
+        },
+      }))
+
+      // Frontend flow demo
+      .get("/demo/frontend-flow", async () => {
+        const state = Math.random().toString(36).substring(7);
+        const nonce = Math.random().toString(36).substring(7);
+        const authUrl = await clientFactory.createAuthorizationUrl(
+          state,
+          nonce
+        );
+        return {
+          flow: "Authorization Code Flow",
+          step1: "Redirect user to Keycloak",
+          authorizationUrl: authUrl,
+          step2: "Handle callback with authorization code",
+          step3: "Exchange code for tokens",
+          step4: "Use access token for API requests",
+        };
+      })
+
+      // Service flow demo
+      .get("/demo/service-flow", async () => {
+        try {
+          const tokenResponse = await clientFactory.getClientCredentialsToken(
+            "service"
+          );
+
+          return {
+            flow: "Client Credentials Flow",
+            result: "Service token obtained successfully",
+            tokenType: tokenResponse.token_type,
+            expiresIn: tokenResponse.expires_in,
+            usage: "Use this token for service-to-service API calls",
+          };
+        } catch (error) {
+          return {
+            flow: "Client Credentials Flow",
+            error: "Failed to obtain service token",
+            message: "Check service client configuration in Keycloak",
+          };
+        }
+      })
+
+      // Tracker flow demo
+      .post("/demo/tracker-flow", async ({ body }) => {
+        const { username, password } = body as {
+          username?: string;
+          password?: string;
+        };
+
+        if (!username || !password) {
+          return {
+            flow: "Direct Grant Flow",
+            error: "Username and password required",
+            example: { username: "tracker-user", password: "password" },
+          };
+        }
+
+        try {
+          const tokenResponse = await clientFactory.getDirectGrantToken(
+            username,
+            password
+          );
+
+          return {
+            flow: "Direct Grant Flow",
+            result: "TrackerJS authentication successful",
+            tokenType: tokenResponse.token_type,
+            expiresIn: tokenResponse.expires_in,
+            usage: "Use this token for tracker API calls",
+          };
+        } catch (error) {
+          return {
+            flow: "Direct Grant Flow",
+            error: "Authentication failed",
+            message: "Check TrackerJS user credentials in Keycloak",
+          };
+        }
+      })
+
+      // WebSocket flow demo info
+      .get("/demo/websocket-flow", () => ({
+        flow: "WebSocket Authentication Flow",
+        endpoint: "/ws/authenticated",
+        description: "WebSocket connections with authentication",
+        connectionMethods: {
+          "JWT Header": "Authorization: Bearer <token>",
+          "Query Parameter": "?token=<jwt-token>",
+          "API Key": "X-API-Key: <api-key>",
+        },
+        messageExample: {
+          type: "get_profile",
+          payload: {},
+        },
+      }))
+  );
+}

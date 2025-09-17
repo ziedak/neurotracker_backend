@@ -210,6 +210,9 @@ export class DataSanitizer {
    * Apply masking strategy to sensitive values
    */
   private applyMasking(value: unknown, fieldName: string): unknown {
+
+    if (!this.isSensitiveField(fieldName)) return value;
+
     if (typeof value !== "string") {
       return this.config.redactValue;
     }
@@ -368,6 +371,7 @@ export function sanitizeHeaders(
 export function sanitizePayload<T>(payload: T, customFields: string[] = []): T {
   return sanitizers.logging.sanitize({
     ...payload,
+    ...customFields
     // Add custom fields to the default sensitive patterns
   } as T & { sensitiveFields?: string[] }).data;
 }

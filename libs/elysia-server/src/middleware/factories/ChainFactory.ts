@@ -45,7 +45,7 @@ import { MiddlewareContext, WebSocketContext } from "../types";
  */
 export interface HttpChainItem {
   readonly name: string;
-  readonly middleware: BaseMiddleware<any>;
+  readonly middleware: BaseMiddleware<HttpMiddlewareConfig>;
   readonly priority?: number;
   readonly enabled?: boolean;
   readonly config?: Partial<HttpMiddlewareConfig>;
@@ -56,7 +56,7 @@ export interface HttpChainItem {
  */
 export interface WebSocketChainItem {
   readonly name: string;
-  readonly middleware: BaseWebSocketMiddleware<any>;
+  readonly middleware: BaseWebSocketMiddleware<WebSocketMiddlewareConfig>;
   readonly priority?: number;
   readonly enabled?: boolean;
   readonly config?: Partial<WebSocketMiddlewareConfig>;

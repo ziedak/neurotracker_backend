@@ -72,10 +72,11 @@ export class KeycloakService {
 
   /**
    * Enhanced user authentication with comprehensive validation
+   * SECURITY FIX: Now properly validates passwords via Keycloak Direct Grant
    */
   async authenticateUserEnhanced(
     email: string,
-    _password: string, // Password handled by Keycloak server-side
+    password: string,
     options?: {
       validateAccountStatus?: boolean;
       recordLoginAttempt?: boolean;
@@ -90,14 +91,10 @@ export class KeycloakService {
         await this.initialize();
       }
 
-      // Enhanced user lookup with email verification
-      const users = await this.client.users.find({
-        email,
-        enabled: true,
-        emailVerified: true,
-      });
-
-      if (!users || users.length === 0) {
+      // SECURITY FIX: Perform actual password authentication via Keycloak Direct Grant
+      const authResult = await this.performDirectGrantAuthentication(email, password);
+      
+      if (!authResult.success) {
         // Record failed login attempt if enabled
         if (options?.recordLoginAttempt && this.deps.monitoring) {
           await this.deps.monitoring.recordAuthEvent({
@@ -106,8 +103,8 @@ export class KeycloakService {
             ipAddress: options.ipAddress,
             userAgent: options.userAgent,
             timestamp: new Date(),
-            metadata: { reason: "user_not_found", email },
-            severity: "low",
+            metadata: { reason: "invalid_credentials", email },
+            severity: "medium",
           });
         }
 
@@ -115,6 +112,27 @@ export class KeycloakService {
           success: false,
           error: "Invalid credentials",
           code: "INVALID_CREDENTIALS",
+        };
+      }
+
+      // Get user details after successful authentication
+      const users = await this.client.users.find({
+        email,
+        enabled: true,
+        emailVerified: true,
+      });
+
+      if (!users || users.length === 0) {
+        // This should not happen after successful authentication, but handle gracefully
+        this.deps.monitoring.logger.error("User not found after successful Keycloak authentication", {
+          email,
+          authResult: authResult.accessToken ? "[REDACTED]" : "no_token"
+        });
+        
+        return {
+          success: false,
+          error: "Authentication error",
+          code: "AUTH_ERROR",
         };
       }
 
@@ -561,6 +579,71 @@ export class KeycloakService {
   // ===================================================================
   // PRIVATE METHODS
   // ===================================================================
+
+  /**
+   * Perform Direct Grant authentication with Keycloak
+   * This method validates user credentials against Keycloak server
+   */
+  private async performDirectGrantAuthentication(
+    username: string, 
+    password: string
+  ): Promise<{ success: boolean; accessToken?: string; refreshToken?: string; error?: string }> {
+    try {
+      // Create a separate client instance for user authentication (not admin)
+      const userClient = new KcAdminClient({
+        baseUrl: this.config.keycloak.serverUrl,
+        realmName: this.config.keycloak.realm,
+      });
+
+      // Perform Direct Grant authentication
+      await userClient.auth({
+        username: username,
+        password: password,
+        grantType: "password",
+        clientId: this.config.keycloak.clientId,
+        clientSecret: this.config.keycloak.clientSecret,
+      });
+
+      // Check if authentication was successful by accessing the stored access token
+      const accessToken = userClient.accessToken;
+      const refreshToken = userClient.refreshToken;
+      
+      if (accessToken) {
+        this.deps.monitoring.logger.info("Direct Grant authentication successful", {
+          username,
+          hasAccessToken: !!accessToken,
+          hasRefreshToken: !!refreshToken,
+        });
+
+        return {
+          success: true,
+          accessToken: accessToken,
+          refreshToken: refreshToken,
+        };
+      } else {
+        this.deps.monitoring.logger.warn("Direct Grant authentication failed - no access token stored", {
+          username,
+        });
+
+        return {
+          success: false,
+          error: "Authentication failed - no token received",
+        };
+      }
+    } catch (error) {
+      this.deps.monitoring.logger.warn("Direct Grant authentication failed", {
+        username,
+        error: error instanceof Error ? error.message : String(error),
+        errorType: error instanceof Error ? error.constructor.name : "unknown",
+      });
+
+      // Don't expose detailed error information to prevent enumeration attacks
+      return {
+        success: false,
+        error: "Invalid credentials",
+      };
+    }
+  }
 }
 
 // ===================================================================

@@ -999,7 +999,7 @@ describe("Cross-Protocol Integration Tests", () => {
               : context.metadata?.headers;
 
           for (const requiredHeader of this.policies.requiredHeaders) {
-            if (!headers || !headers[requiredHeader]) {
+            if (!headers?.[requiredHeader]) {
               violations.push(`missing_header_${requiredHeader}`);
             }
           }

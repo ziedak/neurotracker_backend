@@ -1,0 +1,23 @@
+POST http://localhost:8080/realms/master/protocol/openid-connect/token HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+Accept: application/json
+
+grant_type:password
+client_id:app_api
+username:zied@test.com
+password:admin
+
+
+POST http://localhost:8080/realms/master/protocol/openid-connect/token HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+Accept: application/json
+
+grant_type=client_credentials
+client_id=app_api
+client_secret=AssApzvR6vAfz16lautxujVi2G9f5bwV
+scope=openid
+
+grant_type:client_credentials
+client_id:app_api
+client_secret:AssApzvR6vAfz16lautxujVi2G9f5bwV
+scope:openid

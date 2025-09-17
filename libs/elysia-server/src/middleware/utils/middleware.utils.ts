@@ -195,11 +195,16 @@ export function isValidPath(path: string): boolean {
 }
 
 /**
- * Match path against a pattern (supports wildcards)
+ * Match path against a pattern (supports wildcards).
+ * Wildcard semantics:
+ *   - `*` matches exactly one path segment (no slashes).
+ *   - `/*` at the end matches any number of segments (multi-segment).
+ * Example: "/api/*" matches "/api/foo" but not "/api/foo/bar"; "/api/*" with trailing slash matches "/api/foo/bar".
  * @param pattern - Pattern to match against (e.g., "/api/*")
  * @param path - Path to test
  * @returns True if path matches pattern
  */
+const _regexCache: Record<string, RegExp> = {};
 export function matchPathPattern(pattern: string, path: string): boolean {
   if (!pattern || !path) {
     return false;
@@ -212,21 +217,20 @@ export function matchPathPattern(pattern: string, path: string): boolean {
 
   // Wildcard matching
   if (pattern.includes("*")) {
-    // Wildcard matching
-    if (pattern.includes("*")) {
-      // Handle different wildcard patterns
-      if (pattern.endsWith("/*")) {
-        // Prefix pattern like "/api/*" - matches any path starting with the prefix
-        const prefix = pattern.slice(0, -1); // Remove the "/*"
-        return path.startsWith(prefix);
-      } else {
-        // General wildcard pattern - convert to regex with strict segment matching
+    // Handle different wildcard patterns
+    if (pattern.endsWith("/*")) {
+      // Prefix pattern like "/api/*" - matches any path starting with the prefix
+      const prefix = pattern.slice(0, -1); // Remove the "/*"
+      return path.startsWith(prefix);
+    } else {
+      // General wildcard pattern - convert to regex with strict segment matching
+      if (!_regexCache[pattern]) {
         const regexPattern = pattern
           .replace(/\*/g, "([^/]+)") // * matches exactly one segment (no slashes)
           .replace(/\//g, "\\/");
-        const regex = new RegExp(`^${regexPattern}$`);
-        return regex.test(path);
+        _regexCache[pattern] = new RegExp(`^${regexPattern}$`);
       }
+      return _regexCache[pattern].test(path);
     }
   }
 

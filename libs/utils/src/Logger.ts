@@ -22,10 +22,10 @@ const advancedLogger = pino({  custom config  });
 export type LogLevel = "debug" | "info" | "warn" | "error" | "fatal" | "trace";
 
 export interface ILogger {
-  info(message: string, meta?: any): void | Promise<void>;
-  warn(message: string, meta?: any): void | Promise<void>;
-  error(message: string, error?: any, meta?: any): void | Promise<void>;
-  debug(message: string, meta?: any): void | Promise<void>;
+  info(message: string, meta?: any): void;
+  warn(message: string, meta?: any): void;
+  error(message: string, error?: any, meta?: any): void;
+  debug(message: string, meta?: any): void;
   child(context: Record<string, any>): ILogger;
   setLevel(level: LogLevel): void;
 }

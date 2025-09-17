@@ -34,8 +34,8 @@ describe("CorsHttpMiddleware", () => {
       name: "test-cors",
       enabled: true,
       priority: 1,
-      origin: ["https://example.com", "https://app.example.com"],
-      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      allowedOrigins: ["https://example.com", "https://app.example.com"],
+      allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
       exposedHeaders: ["X-Custom-Header", "X-Request-ID"],
       credentials: true,
@@ -89,8 +89,8 @@ describe("CorsHttpMiddleware", () => {
 
       expect(defaultMiddleware).toBeDefined();
       expect(defaultMiddleware["config"].name).toBe("cors");
-      expect(defaultMiddleware["config"].origin).toBe("*");
-      expect(defaultMiddleware["config"].methods).toEqual([
+      expect(defaultMiddleware["config"].allowedOrigins).toBe("*");
+      expect(defaultMiddleware["config"].allowedMethods).toEqual([
         "GET",
         "POST",
         "PUT",
@@ -103,7 +103,7 @@ describe("CorsHttpMiddleware", () => {
 
     it("should initialize with custom configuration", () => {
       expect(middleware["config"].name).toBe("test-cors");
-      expect(middleware["config"].origin).toEqual([
+      expect(middleware["config"].allowedOrigins).toEqual([
         "https://example.com",
         "https://app.example.com",
       ]);
@@ -158,7 +158,7 @@ describe("CorsHttpMiddleware", () => {
 
     it("should handle preflight with wildcard origin", async () => {
       const wildcardMiddleware = new CorsHttpMiddleware(mockMetricsCollector, {
-        origin: "*",
+        allowedOrigins: "*",
       });
 
       mockContext.request.method = "OPTIONS";
@@ -232,7 +232,7 @@ describe("CorsHttpMiddleware", () => {
 
     it("should handle wildcard origin configuration", async () => {
       const wildcardMiddleware = new CorsHttpMiddleware(mockMetricsCollector, {
-        origin: "*",
+        allowedOrigins: "*",
         credentials: false, // Must be false with wildcard
       });
 
@@ -272,7 +272,7 @@ describe("CorsHttpMiddleware", () => {
 
     it("should handle origin with port number", async () => {
       const portMiddleware = new CorsHttpMiddleware(mockMetricsCollector, {
-        origin: ["https://example.com:8080"],
+        allowedOrigins: ["https://example.com:8080"],
       });
 
       mockContext.request.headers.origin = "https://example.com:8080";
@@ -286,7 +286,7 @@ describe("CorsHttpMiddleware", () => {
 
     it("should handle localhost origins for development", async () => {
       const devMiddleware = new CorsHttpMiddleware(mockMetricsCollector, {
-        origin: ["http://localhost:3000", "http://127.0.0.1:3000"],
+        allowedOrigins: ["http://localhost:3000", "http://127.0.0.1:3000"],
       });
 
       mockContext.request.headers.origin = "http://localhost:3000";
@@ -405,10 +405,10 @@ describe("CorsHttpMiddleware", () => {
       ).toBeUndefined();
     });
 
-    it("should enforce no credentials with wildcard origin", async () => {
+    it("should enforce no credentials with wildcard origin", () => {
       expect(() => {
         new CorsHttpMiddleware(mockMetricsCollector, {
-          origin: "*",
+          allowedOrigins: "*",
           credentials: true, // This should fail
         });
       }).toThrow("Cannot use credentials with wildcard origin");
@@ -545,7 +545,7 @@ describe("CorsHttpMiddleware", () => {
     it("should reject empty methods", () => {
       expect(() => {
         new CorsHttpMiddleware(mockMetricsCollector, {
-          methods: [],
+          allowedMethods: [],
         });
       }).toThrow("CORS methods array cannot be empty");
     });
