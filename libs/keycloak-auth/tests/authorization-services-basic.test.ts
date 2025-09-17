@@ -201,6 +201,6 @@ describe("Authorization Services - Simple Tests", () => {
 
     await expect(
       client.registerResource({ name: "", scopes: [] })
-    ).rejects.toThrow("Invalid input");
+    ).rejects.toThrow("Resource name is required");
   });
 });

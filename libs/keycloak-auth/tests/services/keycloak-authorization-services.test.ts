@@ -66,23 +66,25 @@ describe("KeycloakAuthorizationServicesClient", () => {
     } as any;
 
     // Setup mock cache service
-    mockCacheService = new CacheService(
-      "redis://test"
+    mockCacheService = new (CacheService as jest.MockedClass<
+      typeof CacheService
+    >)(
+      {} as any // Mock IMetricsCollector
     ) as jest.Mocked<CacheService>;
-    mockCacheService.get.mockResolvedValue({ data: null });
+    mockCacheService.get.mockResolvedValue({
+      data: null,
+      source: "cache",
+      latency: 10,
+      compressed: false,
+    });
     mockCacheService.set.mockResolvedValue();
     mockCacheService.invalidatePattern.mockResolvedValue(5);
 
-    // Create client instance
+    // Create client instance with cache service
     client = new KeycloakAuthorizationServicesClient(
       mockClientFactory,
       MOCK_REALM_URL,
-      mockCacheService,
-      {
-        enableCaching: true,
-        cacheTtl: 300,
-        enableLogging: true,
-      }
+      mockCacheService
     );
   });
 
@@ -111,9 +113,7 @@ describe("KeycloakAuthorizationServicesClient", () => {
     it("should initialize without cache service", () => {
       const noCacheClient = new KeycloakAuthorizationServicesClient(
         mockClientFactory,
-        MOCK_REALM_URL,
-        undefined,
-        { enableCaching: false }
+        MOCK_REALM_URL
       );
       expect(noCacheClient).toBeInstanceOf(KeycloakAuthorizationServicesClient);
     });
@@ -141,7 +141,7 @@ describe("KeycloakAuthorizationServicesClient", () => {
 
       expect(decision.granted).toBe(true);
       expect(decision.scopes).toEqual(mockScopes);
-      expect(decision.context?.upgradeToken).toBe(true);
+      expect(decision.context?.["upgradeToken"]).toBe(true);
     });
 
     it("should deny access for unauthorized request", async () => {
@@ -162,7 +162,7 @@ describe("KeycloakAuthorizationServicesClient", () => {
 
       expect(decision.granted).toBe(false);
       expect(decision.reason).toBe("access_denied");
-      expect(decision.context?.status).toBe(403);
+      expect(decision.context?.["status"]).toBe(403);
     });
 
     it("should use cached authorization decisions", async () => {
@@ -171,7 +171,12 @@ describe("KeycloakAuthorizationServicesClient", () => {
         scopes: mockScopes,
       };
 
-      mockCacheService.get.mockResolvedValueOnce({ data: cachedDecision });
+      mockCacheService.get.mockResolvedValueOnce({
+        data: cachedDecision,
+        source: "cache",
+        latency: 5,
+        compressed: false,
+      });
 
       const decision = await client.checkAuthorization(
         MOCK_ACCESS_TOKEN,
@@ -218,7 +223,7 @@ describe("KeycloakAuthorizationServicesClient", () => {
 
       expect(decision.granted).toBe(false);
       expect(decision.reason).toBe("authorization_check_error");
-      expect(decision.context?.error).toContain("Network error");
+      expect(decision.context?.["error"]).toContain("Network error");
     });
 
     it("should work without scopes", async () => {
@@ -496,15 +501,33 @@ describe("KeycloakAuthorizationServicesClient", () => {
       );
 
       const cleared = await noCacheClient.clearAuthorizationCache();
-
       expect(cleared).toBe(0);
     });
   });
 
   describe("Token Management", () => {
     it("should cache admin tokens to avoid repeated requests", async () => {
+      // Mock the fetch call for getResources
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { id: "1", name: "resource1" },
+          { id: "2", name: "resource2" },
+        ],
+      });
+
       // Make multiple calls that require admin token
       await client.getResources();
+
+      // Mock second call
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { id: "1", name: "resource1" },
+          { id: "2", name: "resource2" },
+        ],
+      });
+
       await client.getResources();
 
       // Should only call getClientCredentialsToken once (tokens are cached)
@@ -514,12 +537,24 @@ describe("KeycloakAuthorizationServicesClient", () => {
     });
 
     it("should refresh expired admin tokens", async () => {
+      // Mock first fetch call
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: "1", name: "resource1" }],
+      });
+
       // First call
       await client.getResources();
 
       // Mock time passing (simulate token expiration)
       const originalNow = Date.now;
       Date.now = jest.fn(() => originalNow() + 4000000); // 1+ hours later
+
+      // Mock second fetch call
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: "1", name: "resource1" }],
+      });
 
       // Second call should get new token
       await client.getResources();

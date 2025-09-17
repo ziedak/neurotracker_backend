@@ -3,6 +3,12 @@ import {
   createTokenIntrospectionService,
 } from "../../src/index";
 
+// Mock jose module at the top level
+jest.mock("jose", () => ({
+  jwtVerify: jest.fn(),
+  createRemoteJWKSet: jest.fn(),
+}));
+
 describe("TokenIntrospectionService", () => {
   let service: TokenIntrospectionService;
   let mockCacheService: any;
@@ -54,14 +60,69 @@ describe("TokenIntrospectionService", () => {
     });
 
     it("should cache JWT validation results", async () => {
-      const mockToken = "new.jwt.token";
+      const mockToken = "valid.jwt.token";
+      const mockConfig = {
+        realm: "test-realm",
+        serverUrl: "https://keycloak.example.com",
+        clientId: "test-client",
+        clientSecret: "test-secret",
+        scopes: ["openid", "profile"],
+        flow: "authorization_code" as const,
+        type: "frontend" as const,
+      };
 
-      mockCacheService.get.mockResolvedValueOnce({ data: null });
-      mockCacheService.set.mockResolvedValueOnce(true);
+      // Mock cache miss first
+      mockCacheService.get.mockResolvedValueOnce({
+        data: null,
+        source: "miss",
+        latency: 0,
+        compressed: false,
+      });
 
-      await service.validateJWT(mockToken);
+      // Mock successful JWT verification
+      const mockDiscovery = {
+        issuer: "https://keycloak.example.com/realms/test-realm",
+        jwks_uri:
+          "https://keycloak.example.com/realms/test-realm/protocol/openid-connect/certs",
+      };
 
-      expect(mockCacheService.set).toHaveBeenCalled();
+      const mockFactory = {
+        getClient: jest.fn().mockReturnValue(mockConfig),
+        getDiscoveryDocument: jest.fn().mockResolvedValue(mockDiscovery),
+      };
+
+      // Create service with mocked factory
+      const testService = new TokenIntrospectionService(
+        mockFactory as any,
+        mockCacheService
+      );
+
+      // Mock jwtVerify to succeed
+      const mockClaims = {
+        iss: "https://keycloak.example.com/realms/test-realm",
+        sub: "user123",
+        aud: "test-client",
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        iat: Math.floor(Date.now() / 1000),
+      };
+
+      // Mock the jwtVerify function (already mocked at top level)
+      const { jwtVerify } = require("jose");
+      (jwtVerify as jest.Mock).mockResolvedValueOnce({
+        payload: mockClaims,
+      });
+
+      await testService.validateJWT(mockToken, mockConfig);
+
+      expect(mockCacheService.set).toHaveBeenCalledWith(
+        expect.stringContaining("jwt:validation:"),
+        expect.objectContaining({
+          valid: true,
+          claims: mockClaims,
+          cached: false,
+        }),
+        expect.any(Number)
+      );
     });
   });
 
@@ -137,13 +198,38 @@ describe("TokenIntrospectionService", () => {
   describe("error handling", () => {
     it("should handle network errors gracefully", async () => {
       const token = "network.error.token";
+      const mockConfig = {
+        realm: "test-realm",
+        serverUrl: "https://keycloak.example.com",
+        clientId: "test-client",
+        scopes: ["openid", "profile"],
+        flow: "authorization_code" as const,
+        type: "frontend" as const,
+      };
 
-      mockCacheService.get.mockResolvedValueOnce({ data: null });
-      (global.fetch as jest.Mock).mockRejectedValueOnce(
-        new Error("Network error")
+      // Mock cache miss
+      mockCacheService.get.mockResolvedValueOnce({
+        data: null,
+        source: "miss",
+        latency: 0,
+        compressed: false,
+      });
+
+      // Mock discovery document fetch to fail with network error
+      const mockFactory = {
+        getClient: jest.fn().mockReturnValue(mockConfig),
+        getDiscoveryDocument: jest
+          .fn()
+          .mockRejectedValue(new Error("Network error")),
+      };
+
+      // Create service with mocked factory
+      const testService = new TokenIntrospectionService(
+        mockFactory as any,
+        mockCacheService
       );
 
-      const result = await service.validateJWT(token);
+      const result = await testService.validateJWT(token, mockConfig);
 
       expect(result.valid).toBe(false);
       expect(result.error).toContain("Network error");

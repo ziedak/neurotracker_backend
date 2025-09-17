@@ -297,6 +297,15 @@ export class KeycloakAuthorizationServicesClient {
   public async registerResource(
     resource: ResourceRepresentation
   ): Promise<ResourceRepresentation> {
+    // Validate input
+    if (!resource.name || resource.name.trim() === "") {
+      throw new AuthenticationError(
+        "Resource name is required",
+        "INVALID_RESOURCE_DATA",
+        400
+      );
+    }
+
     const adminToken = await this.getAdminToken();
     const endpoint = `${this.realmBaseUrl}/authz/admin/resources`;
 
@@ -347,6 +356,15 @@ export class KeycloakAuthorizationServicesClient {
   public async createPolicy(
     policy: PolicyRepresentation
   ): Promise<PolicyRepresentation> {
+    // Validate input
+    if (!policy.name || policy.name.trim() === "") {
+      throw new AuthenticationError(
+        "Policy name is required",
+        "INVALID_POLICY_DATA",
+        400
+      );
+    }
+
     const adminToken = await this.getAdminToken();
     const endpoint = `${this.realmBaseUrl}/authz/admin/policies/${policy.type}`;
 

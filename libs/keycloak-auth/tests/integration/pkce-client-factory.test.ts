@@ -4,13 +4,13 @@
  */
 
 import { KeycloakClientFactory } from "../../src/client/keycloak-client-factory";
-import { EnvironmentConfig } from "../../src/types";
+import { RawEnvironmentConfig } from "../../src/types";
 
 describe("PKCE Integration with Client Factory", () => {
   let clientFactory: KeycloakClientFactory;
 
   // Mock environment configuration for testing
-  const mockEnvConfig: EnvironmentConfig = {
+  const mockEnvConfig: RawEnvironmentConfig = {
     KEYCLOAK_SERVER_URL: "https://keycloak.example.com",
     KEYCLOAK_REALM: "test-realm",
     KEYCLOAK_FRONTEND_CLIENT_ID: "frontend-client",
