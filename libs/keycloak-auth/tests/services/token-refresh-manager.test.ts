@@ -10,10 +10,10 @@ import {
   type TokenRefreshEvent,
 } from "../../src/services/token-refresh-manager";
 import { KeycloakClientFactory } from "../../src/client/keycloak-client-factory";
-import { TokenResponse, EnvironmentConfig } from "../../src/types";
+import { TokenResponse, RawEnvironmentConfig } from "../../src/types";
 
 // Mock environment config for testing
-const mockEnvConfig: EnvironmentConfig = {
+const mockEnvConfig: RawEnvironmentConfig = {
   KEYCLOAK_SERVER_URL: "https://keycloak.example.com",
   KEYCLOAK_REALM: "test-realm",
   KEYCLOAK_FRONTEND_CLIENT_ID: "frontend-client",
@@ -23,8 +23,8 @@ const mockEnvConfig: EnvironmentConfig = {
   KEYCLOAK_TRACKER_CLIENT_SECRET: "tracker-secret",
   KEYCLOAK_WEBSOCKET_CLIENT_ID: "websocket-client",
   REDIS_URL: "redis://localhost:6379",
-  AUTH_CACHE_TTL: 3600,
-  AUTH_INTROSPECTION_TTL: 300,
+  AUTH_CACHE_TTL: "3600",
+  AUTH_INTROSPECTION_TTL: "300",
 };
 
 describe("TokenRefreshManager", () => {
@@ -62,7 +62,9 @@ describe("TokenRefreshManager", () => {
   });
 
   afterEach(() => {
-    refreshManager.dispose();
+    if (refreshManager) {
+      refreshManager.dispose();
+    }
     jest.clearAllTimers();
     jest.useRealTimers();
   });
@@ -119,7 +121,7 @@ describe("TokenRefreshManager", () => {
       const sessionId = "refresh-test-1";
       const shortLivedToken = {
         ...mockTokenResponse,
-        expires_in: 200, // 200 seconds
+        expires_in: 600, // 600 seconds (10 minutes) - longer than 5-minute buffer
       };
 
       refreshManager.addManagedToken(sessionId, shortLivedToken);
@@ -127,8 +129,8 @@ describe("TokenRefreshManager", () => {
       // Should not need refresh initially
       expect(refreshManager.needsRefresh(sessionId)).toBe(false);
 
-      // Fast forward to near expiry
-      jest.advanceTimersByTime(100 * 1000); // 100 seconds
+      // Fast forward to within refresh buffer (400 seconds remaining < 300 second buffer)
+      jest.advanceTimersByTime(200 * 1000); // 200 seconds
 
       // Should need refresh now (within 5-minute buffer)
       expect(refreshManager.needsRefresh(sessionId)).toBe(true);

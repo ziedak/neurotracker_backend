@@ -4,6 +4,7 @@ import {
   ClientType,
   TokenResponse,
   IKeycloakClientFactory,
+  RawEnvironmentConfig,
   EnvironmentConfig,
   EnvironmentConfigSchema,
   AuthenticationError,
@@ -22,7 +23,7 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
   private discoveryCache: Map<string, any> = new Map();
   private pkceManager: PKCEManager;
 
-  constructor(envConfig: EnvironmentConfig) {
+  constructor(envConfig: RawEnvironmentConfig) {
     // Initialize PKCE manager
     this.pkceManager = new PKCEManager({
       codeVerifierLength: 128,
@@ -747,7 +748,7 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
 export const createKeycloakClientFactory = (
   envConfig?: Partial<EnvironmentConfig>
 ): KeycloakClientFactory => {
-  const fullConfig: EnvironmentConfig = {
+  const fullConfig: RawEnvironmentConfig = {
     KEYCLOAK_SERVER_URL: process.env["KEYCLOAK_SERVER_URL"] || "",
     KEYCLOAK_REALM: process.env["KEYCLOAK_REALM"] || "",
     KEYCLOAK_FRONTEND_CLIENT_ID:
@@ -761,12 +762,21 @@ export const createKeycloakClientFactory = (
     KEYCLOAK_WEBSOCKET_CLIENT_ID:
       process.env["KEYCLOAK_WEBSOCKET_CLIENT_ID"] || "",
     REDIS_URL: process.env["REDIS_URL"] || "redis://localhost:6379",
-    AUTH_CACHE_TTL: parseInt(process.env["AUTH_CACHE_TTL"] || "3600", 10),
-    AUTH_INTROSPECTION_TTL: parseInt(
-      process.env["AUTH_INTROSPECTION_TTL"] || "300",
-      10
-    ),
-    ...envConfig,
+    AUTH_CACHE_TTL: process.env["AUTH_CACHE_TTL"] || "3600",
+    AUTH_INTROSPECTION_TTL: process.env["AUTH_INTROSPECTION_TTL"] || "300",
+    // Handle number-to-string conversion for backward compatibility
+    ...(envConfig && {
+      ...Object.fromEntries(
+        Object.entries(envConfig)
+          .filter(([, value]) => value !== undefined)
+          .map(([key, value]) => {
+            if (key === "AUTH_CACHE_TTL" || key === "AUTH_INTROSPECTION_TTL") {
+              return [key, String(value)];
+            }
+            return [key, value];
+          })
+      ),
+    }),
   };
 
   return new KeycloakClientFactory(fullConfig);

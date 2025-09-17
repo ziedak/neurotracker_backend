@@ -11,7 +11,42 @@ import { z } from "zod";
 // =============================================================================
 
 /**
- * Elysia WebSocket instance type (compatible with Bun's ServerWebSocket)
+ * Elysia WebSocket instance type (compatible with Bu/**
+ * Environment configuration interface (raw values before validation)
+ */
+export interface RawEnvironmentConfig {
+  KEYCLOAK_SERVER_URL: string;
+  KEYCLOAK_REALM: string;
+  KEYCLOAK_FRONTEND_CLIENT_ID: string;
+  KEYCLOAK_SERVICE_CLIENT_ID: string;
+  KEYCLOAK_SERVICE_CLIENT_SECRET: string;
+  KEYCLOAK_TRACKER_CLIENT_ID: string;
+  KEYCLOAK_TRACKER_CLIENT_SECRET: string;
+  KEYCLOAK_WEBSOCKET_CLIENT_ID: string;
+  REDIS_URL: string;
+  AUTH_CACHE_TTL: string;
+  AUTH_INTROSPECTION_TTL: string;
+}
+
+/**
+ * Environment configuration interface (validated values)
+ */
+export interface EnvironmentConfig {
+  KEYCLOAK_SERVER_URL: string;
+  KEYCLOAK_REALM: string;
+  KEYCLOAK_FRONTEND_CLIENT_ID: string;
+  KEYCLOAK_SERVICE_CLIENT_ID: string;
+  KEYCLOAK_SERVICE_CLIENT_SECRET: string;
+  KEYCLOAK_TRACKER_CLIENT_ID: string;
+  KEYCLOAK_TRACKER_CLIENT_SECRET: string;
+  KEYCLOAK_WEBSOCKET_CLIENT_ID: string;
+  REDIS_URL: string;
+  AUTH_CACHE_TTL: number;
+  AUTH_INTROSPECTION_TTL: number;
+}
+
+/**
+ * WebSocket connection type from Elysia
  * This represents the WebSocket connection provided by Elysia
  */
 export interface ElysiaWebSocket<T = any> {
