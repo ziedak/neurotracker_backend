@@ -16,6 +16,16 @@ import {
   type AuthContext,
 } from "../types/index.js";
 
+// Battle-tested security libraries
+import { parse as parseAuthHeader } from "auth-header";
+import {
+  handleAll,
+  circuitBreaker,
+  ConsecutiveBreaker,
+  CircuitBreakerPolicy,
+} from "cockatiel";
+import { escape as escapeHtml } from "validator";
+
 /**
  * Keycloak-specific HTTP middleware configuration
  */
@@ -116,6 +126,7 @@ export interface KeycloakAuthenticationResult {
  */
 export class KeycloakAuthHttpMiddleware {
   private readonly logger: ReturnType<typeof createLogger>;
+  private readonly circuitBreakerPolicy: CircuitBreakerPolicy;
 
   constructor(
     private readonly metrics: IMetricsCollector,
@@ -124,6 +135,13 @@ export class KeycloakAuthHttpMiddleware {
     private readonly config: Required<KeycloakAuthHttpMiddlewareConfig>
   ) {
     this.logger = createLogger(`KeycloakAuth:${this.config.name}`);
+
+    // Initialize circuit breaker for Keycloak service protection
+    this.circuitBreakerPolicy = circuitBreaker(handleAll, {
+      halfOpenAfter: 30000, // Try to recover after 30 seconds
+      breaker: new ConsecutiveBreaker(5), // Open after 5 consecutive failures
+    });
+
     this.validateConfiguration();
   }
 
@@ -249,9 +267,9 @@ export class KeycloakAuthHttpMiddleware {
   }
 
   /**
-   * CRITICAL ARCHITECTURAL FLAW: No error boundaries or circuit breaker pattern
-   * If Keycloak is down, this will cascade failures throughout the application
-   * No graceful degradation or fallback mechanisms
+   * SECURE AUTHENTICATION WITH CIRCUIT BREAKER PROTECTION
+   * Uses battle-tested cockatiel library for resilience against service failures
+   * Provides graceful degradation when Keycloak is unavailable
    */
   private async authenticateRequest(
     request: Request,
@@ -278,71 +296,95 @@ export class KeycloakAuthHttpMiddleware {
       };
     }
 
-    // Extract token from header
+    // Extract token from header using secure method
     const token = this.extractTokenFromHeader(authHeader);
     if (!token) {
       throw new UnauthorizedError("Invalid authorization header format");
     }
 
-    // Validate token through Keycloak
+    // Validate token through Keycloak with circuit breaker protection
     try {
-      const clientConfig = this.keycloakClientFactory.getClient(
-        this.config.keycloakClient
+      const validationResult = await this.circuitBreakerPolicy.execute(
+        async (): Promise<KeycloakAuthenticationResult> => {
+          try {
+            const clientConfig = this.keycloakClientFactory.getClient(
+              this.config.keycloakClient
+            );
+            const validationResult =
+              await this.tokenIntrospectionService.validateJWT(
+                token,
+                clientConfig
+              );
+
+            if (!validationResult.valid) {
+              throw new UnauthorizedError(
+                validationResult.error ?? "Token validation failed"
+              );
+            }
+
+            // Convert validation result to User object
+            const user = this.createUserFromValidation(validationResult);
+
+            // Create auth context
+            const authContext: AuthContext = {
+              authenticated: true,
+              method: "jwt",
+              token: authHeader.substring(7), // Remove 'Bearer '
+              claims: validationResult.claims!,
+              clientId: validationResult.claims?.aud
+                ? typeof validationResult.claims.aud === "string"
+                  ? validationResult.claims.aud
+                  : validationResult.claims.aud[0] || this.config.keycloakClient
+                : this.config.keycloakClient,
+              userId: validationResult.claims?.sub || user.id,
+              scopes: validationResult.claims?.scope?.split(" ") ?? [],
+              permissions: user.permissions,
+              validatedAt: new Date(),
+              cached: validationResult.cached,
+              ...(validationResult.claims?.session_state && {
+                sessionId: validationResult.claims.session_state,
+              }),
+            };
+
+            this.logger.debug("Keycloak authentication successful", {
+              requestId,
+              userId: user.id,
+              client: this.config.keycloakClient,
+            });
+
+            return {
+              user,
+              authContext,
+              validationResult,
+              method: "jwks",
+              error: null,
+            };
+          } catch (error) {
+            // This will trigger the circuit breaker if too many failures occur
+            throw error;
+          }
+        }
       );
-      const validationResult = await this.tokenIntrospectionService.validateJWT(
-        token,
-        clientConfig
-      );
 
-      if (!validationResult.valid) {
-        throw new UnauthorizedError(
-          validationResult.error ?? "Token validation failed"
-        );
-      }
-
-      // Convert validation result to User object
-      const user = this.createUserFromValidation(validationResult);
-
-      // Create auth context
-      const authContext: AuthContext = {
-        authenticated: true,
-        method: "jwt",
-        token: authHeader.substring(7), // Remove 'Bearer '
-        claims: validationResult.claims!,
-        clientId: validationResult.claims?.aud
-          ? typeof validationResult.claims.aud === "string"
-            ? validationResult.claims.aud
-            : validationResult.claims.aud[0] || this.config.keycloakClient
-          : this.config.keycloakClient,
-        userId: validationResult.claims?.sub || user.id,
-        scopes: validationResult.claims?.scope?.split(" ") ?? [],
-        permissions: user.permissions,
-        validatedAt: new Date(),
-        cached: validationResult.cached,
-        ...(validationResult.claims?.session_state && {
-          sessionId: validationResult.claims.session_state,
-        }),
-      };
-
-      this.logger.debug("Keycloak authentication successful", {
-        requestId,
-        userId: user.id,
-        client: this.config.keycloakClient,
-      });
-
-      return {
-        user,
-        authContext,
-        validationResult,
-        method: "jwks", // Default assumption - could be enhanced
-        error: null,
-      };
+      return validationResult;
     } catch (error) {
       this.logger.warn("Keycloak authentication failed", {
         error: error instanceof Error ? error.message : "unknown",
         requestId,
         client: this.config.keycloakClient,
       });
+
+      // Check if this is a circuit breaker failure
+      if (error instanceof Error && error.message.includes("circuit breaker")) {
+        // Return a specific circuit breaker response
+        return {
+          user: null,
+          authContext: null,
+          validationResult: null,
+          method: "anonymous",
+          error: "Service temporarily unavailable",
+        };
+      }
 
       if (this.config.strictMode) {
         throw error;
@@ -360,36 +402,121 @@ export class KeycloakAuthHttpMiddleware {
   }
 
   /**
-   * CRITICAL SECURITY FLAW: No input validation or sanitization
-   * Headers can contain malicious content, paths can be manipulated
-   * No rate limiting integration, vulnerable to header injection attacks
+   * SECURE BYPASS VALIDATION: Using battle-tested validator library
+   * Provides input sanitization and path traversal protection
+   * Prevents malicious path manipulation and injection attacks
    */
   private shouldBypassAuth(request: Request): boolean {
-    const path = new URL(request.url).pathname;
+    try {
+      const rawPath = new URL(request.url).pathname;
 
-    return (
-      this.config.bypassRoutes?.some((route) => {
-        if (route.endsWith("*")) {
-          return path.startsWith(route.slice(0, -1));
-        }
-        return path === route || path.startsWith(`${route}/`);
-      }) ?? false
-    );
+      // Sanitize the path to prevent injection attacks
+      const sanitizedPath = escapeHtml(rawPath);
+
+      // Additional path validation
+      if (sanitizedPath !== rawPath) {
+        this.logger.warn("Path contains potentially malicious characters", {
+          originalPath: rawPath,
+          sanitizedPath,
+        });
+        return false; // Reject paths with suspicious characters
+      }
+
+      // Prevent path traversal attacks
+      if (sanitizedPath.includes("..") || sanitizedPath.includes("\\")) {
+        this.logger.warn("Path traversal attempt detected", {
+          path: sanitizedPath,
+        });
+        return false;
+      }
+
+      // Validate path format (basic URL path validation)
+      if (!sanitizedPath.startsWith("/")) {
+        return false;
+      }
+
+      return (
+        this.config.bypassRoutes?.some((route) => {
+          // Sanitize route pattern as well
+          const sanitizedRoute = escapeHtml(route);
+
+          if (sanitizedRoute.endsWith("*")) {
+            const prefix = sanitizedRoute.slice(0, -1);
+            return sanitizedPath.startsWith(prefix);
+          }
+          return (
+            sanitizedPath === sanitizedRoute ||
+            sanitizedPath.startsWith(`${sanitizedRoute}/`)
+          );
+        }) ?? false
+      );
+    } catch (error) {
+      this.logger.warn("Failed to validate bypass path", {
+        error: error instanceof Error ? error.message : "unknown",
+        url: request.url,
+      });
+      return false; // Fail-safe: don't bypass on error
+    }
   }
 
   /**
-   * CRITICAL SECURITY FLAW: No token format validation
-   * Accepts any string after "Bearer ", vulnerable to:
-   * - Extremely long tokens causing DoS
-   * - Malformed JWTs causing parsing errors
-   * - Special characters in tokens
-   * - No length limits or format validation
+   * SECURE TOKEN EXTRACTION: Using battle-tested auth-header library
+   * Provides proper format validation, length limits, and security checks
+   * Prevents header injection attacks and malformed token handling
    */
   private extractTokenFromHeader(authHeader: string): string | null {
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    try {
+      // Use battle-tested auth-header library for secure parsing
+      const parsed = parseAuthHeader(authHeader);
+
+      // Validate header format
+      if (!parsed || parsed.scheme !== "Bearer" || !parsed.token) {
+        return null;
+      }
+
+      // Additional security checks
+      const token = parsed.token;
+
+      // Ensure token is a string (auth-header can return string or string[])
+      const tokenString = Array.isArray(token) ? token[0] : token;
+      if (!tokenString || typeof tokenString !== "string") {
+        return null;
+      }
+
+      // Prevent extremely long tokens (DoS protection)
+      if (tokenString.length > 4096) {
+        this.logger.warn("Token too long, rejecting for security", {
+          tokenLength: tokenString.length,
+          maxAllowed: 4096,
+        });
+        return null;
+      }
+
+      // Basic JWT format validation (header.payload.signature)
+      if (!tokenString.includes(".")) {
+        return null;
+      }
+
+      const parts = tokenString.split(".");
+      if (parts.length !== 3) {
+        return null;
+      }
+
+      // Validate each part is valid base64url
+      for (const part of parts) {
+        if (!/^[A-Za-z0-9_-]*$/.test(part)) {
+          return null;
+        }
+      }
+
+      return tokenString;
+    } catch (error) {
+      this.logger.warn("Failed to parse authorization header", {
+        error: error instanceof Error ? error.message : "unknown",
+        headerLength: authHeader.length,
+      });
       return null;
     }
-    return authHeader.substring(7);
   }
 
   /**

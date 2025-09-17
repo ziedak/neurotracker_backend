@@ -53,13 +53,20 @@ describe("KeycloakClientFactory", () => {
         global as any
       ).testUtils.createMockDiscoveryDocument();
 
-      // Mock the circuit breaker's fire method
+      // Mock the circuit breaker's execute method
       const mockCircuitBreaker = {
-        fire: jest.fn().mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(mockDiscovery),
+        execute: jest.fn().mockImplementation(async (fn) => {
+          // Simulate the circuit breaker executing the function
+          return await fn();
         }),
       };
+
+      // Mock global fetch for the test
+      const originalFetch = global.fetch;
+      (global as any).fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockDiscovery),
+      });
 
       // Replace the circuit breaker instance with our mock
       const originalCircuitBreaker = (clientFactory as any).httpCircuitBreaker;
@@ -68,13 +75,13 @@ describe("KeycloakClientFactory", () => {
       const discovery = await clientFactory.getDiscoveryDocument("test");
 
       expect(discovery).toEqual(mockDiscovery);
-      expect(mockCircuitBreaker.fire).toHaveBeenCalledWith(
-        "https://keycloak.example.com/realms/test/.well-known/openid_connect_configuration",
-        expect.any(Object)
+      expect(mockCircuitBreaker.execute).toHaveBeenCalledWith(
+        expect.any(Function)
       );
 
-      // Restore original circuit breaker
+      // Restore originals
       (clientFactory as any).httpCircuitBreaker = originalCircuitBreaker;
+      global.fetch = originalFetch;
     });
 
     it("should return cached discovery document on second call", async () => {
@@ -82,16 +89,23 @@ describe("KeycloakClientFactory", () => {
         global as any
       ).testUtils.createMockDiscoveryDocument();
 
-      // Mock the circuit breaker's fire method
+      // Mock the circuit breaker's execute method
       const mockCircuitBreaker = {
-        fire: jest.fn().mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(mockDiscovery),
+        execute: jest.fn().mockImplementation(async (fn) => {
+          return await fn();
         }),
       };
 
+      // Mock global fetch for the test (should only be called once due to caching)
+      const originalFetch = global.fetch;
+      (global as any).fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockDiscovery),
+      });
+
       // Replace the circuit breaker instance with our mock
       const originalCircuitBreaker = (clientFactory as any).httpCircuitBreaker;
+      (clientFactory as any).httpCircuitBreaker = mockCircuitBreaker;
       (clientFactory as any).httpCircuitBreaker = originalCircuitBreaker;
 
       // Temporarily replace for first call
@@ -105,7 +119,10 @@ describe("KeycloakClientFactory", () => {
       const discovery = await clientFactory.getDiscoveryDocument("test");
 
       expect(discovery).toEqual(mockDiscovery);
-      expect(mockCircuitBreaker.fire).toHaveBeenCalledTimes(1);
+      expect(mockCircuitBreaker.execute).toHaveBeenCalledTimes(1);
+
+      // Restore fetch
+      global.fetch = originalFetch;
     });
 
     it("should use circuit breaker for HTTP requests", async () => {

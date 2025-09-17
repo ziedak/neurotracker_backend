@@ -10,7 +10,7 @@
     { "path": "../../libs/config" },
     { "path": "../../libs/messaging" },
     { "path": "../../libs/database" },
-    { "path": "../../libs/auth" },
+    { "path": "../../libs/keycloak-auth" },
     { "path": "../../libs/monitoring" },
     { "path": "../../libs/elysia-server" }
   ],

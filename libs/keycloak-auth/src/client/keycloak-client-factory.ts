@@ -6,7 +6,12 @@ import {
   IKeycloakClientFactory,
   AuthenticationError,
 } from "../types/index";
-import CircuitBreaker from "opossum";
+import {
+  circuitBreaker,
+  handleAll,
+  ConsecutiveBreaker,
+  CircuitBreakerPolicy,
+} from "cockatiel";
 import { PKCEManager } from "../utils/pkce";
 import {
   validateInput,
@@ -40,7 +45,7 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
   private cacheCleanupTimer?: ReturnType<typeof setInterval>;
 
   // Circuit breaker for HTTP requests to prevent cascading failures
-  private readonly httpCircuitBreaker: CircuitBreaker;
+  private readonly httpCircuitBreaker: CircuitBreakerPolicy;
 
   constructor(envConfig: RawEnvironmentConfig) {
     // Validate environment configuration
@@ -57,59 +62,10 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
       allowForConfidentialClients: true,
     });
 
-    // Initialize circuit breaker for HTTP requests
-    this.httpCircuitBreaker = new CircuitBreaker(
-      this.makeHttpRequest.bind(this),
-      {
-        timeout: 10000, // 10 second timeout
-        errorThresholdPercentage: 50, // Open circuit if 50% of requests fail
-        resetTimeout: 30000, // Try to close circuit after 30 seconds
-        rollingCountTimeout: 10000, // Rolling window of 10 seconds
-        rollingCountBuckets: 10, // 10 buckets in the rolling window
-        name: "keycloak-http-circuit-breaker",
-        errorFilter: (error: Error) => {
-          // Don't count 4xx errors as failures (client errors)
-          if (error.message.includes("HTTP 4")) {
-            return false;
-          }
-          return true;
-        },
-      }
-    );
-
-    // Add circuit breaker event listeners for monitoring
-    this.httpCircuitBreaker.on("open", () => {
-      logger.warn(
-        "HTTP circuit breaker opened - stopping requests to Keycloak",
-        {
-          name: this.httpCircuitBreaker.name,
-        }
-      );
-    });
-
-    this.httpCircuitBreaker.on("close", () => {
-      logger.info(
-        "HTTP circuit breaker closed - resuming requests to Keycloak",
-        {
-          name: this.httpCircuitBreaker.name,
-        }
-      );
-    });
-
-    this.httpCircuitBreaker.on("halfOpen", () => {
-      logger.info(
-        "HTTP circuit breaker half-open - testing Keycloak connectivity",
-        {
-          name: this.httpCircuitBreaker.name,
-        }
-      );
-    });
-
-    this.httpCircuitBreaker.on("failure", (error: Error) => {
-      logger.error("HTTP circuit breaker failure", {
-        error: error.message,
-        name: this.httpCircuitBreaker.name,
-      });
+    // Initialize circuit breaker for HTTP requests using cockatiel
+    this.httpCircuitBreaker = circuitBreaker(handleAll, {
+      halfOpenAfter: 30000, // Try to close circuit after 30 seconds
+      breaker: new ConsecutiveBreaker(5), // Open after 5 consecutive failures
     });
 
     // Start cache cleanup timer
@@ -241,13 +197,23 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
         url: discoveryUrl,
       });
 
-      const response = (await this.httpCircuitBreaker.fire(discoveryUrl, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          "User-Agent": "keycloak-auth-lib/1.0.0",
-        },
-      })) as Response;
+      const response = await this.httpCircuitBreaker.execute(async () => {
+        const httpResponse = await fetch(discoveryUrl, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            "User-Agent": "keycloak-auth-lib/1.0.0",
+          },
+        });
+
+        if (!httpResponse.ok) {
+          throw new Error(
+            `HTTP ${httpResponse.status}: ${httpResponse.statusText}`
+          );
+        }
+
+        return httpResponse;
+      });
 
       const data = await response.json();
 
@@ -272,8 +238,7 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     } catch (error) {
       logger.error("Discovery document fetch failed", {
         error: error instanceof Error ? error.message : String(error),
-        circuitBreakerState:
-          this.httpCircuitBreaker?.status?.stats || "unavailable",
+        circuitBreakerState: "circuit-breaker-active",
       });
 
       throw new AuthenticationError(
@@ -432,9 +397,8 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     }
 
     try {
-      const response = (await this.httpCircuitBreaker.fire(
-        discovery.token_endpoint,
-        {
+      const response = await this.httpCircuitBreaker.execute(async () => {
+        const httpResponse = await fetch(discovery.token_endpoint, {
           method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -442,8 +406,16 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
             "User-Agent": "keycloak-auth-lib/1.0.0",
           },
           body: body.toString(),
+        });
+
+        if (!httpResponse.ok) {
+          throw new Error(
+            `HTTP ${httpResponse.status}: ${httpResponse.statusText}`
+          );
         }
-      )) as Response;
+
+        return httpResponse;
+      });
 
       const responseData = await response.json();
 
@@ -558,9 +530,8 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     }
 
     try {
-      const response = (await this.httpCircuitBreaker.fire(
-        discovery.token_endpoint,
-        {
+      const response = await this.httpCircuitBreaker.execute(async () => {
+        const httpResponse = await fetch(discovery.token_endpoint, {
           method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -568,8 +539,16 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
             "User-Agent": "keycloak-auth-lib/1.0.0",
           },
           body: body.toString(),
+        });
+
+        if (!httpResponse.ok) {
+          throw new Error(
+            `HTTP ${httpResponse.status}: ${httpResponse.statusText}`
+          );
         }
-      )) as Response;
+
+        return httpResponse;
+      });
 
       const responseData = await response.json();
 
@@ -647,9 +626,8 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     });
 
     try {
-      const response = (await this.httpCircuitBreaker.fire(
-        discovery.token_endpoint,
-        {
+      const response = await this.httpCircuitBreaker.execute(async () => {
+        const httpResponse = await fetch(discovery.token_endpoint, {
           method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -657,8 +635,16 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
             "User-Agent": "keycloak-auth-lib/1.0.0",
           },
           body: body.toString(),
+        });
+
+        if (!httpResponse.ok) {
+          throw new Error(
+            `HTTP ${httpResponse.status}: ${httpResponse.statusText}`
+          );
         }
-      )) as Response;
+
+        return httpResponse;
+      });
 
       const responseData = await response.json();
 
@@ -747,9 +733,8 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     }
 
     try {
-      const response = (await this.httpCircuitBreaker.fire(
-        discovery.token_endpoint,
-        {
+      const response = await this.httpCircuitBreaker.execute(async () => {
+        const httpResponse = await fetch(discovery.token_endpoint, {
           method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -757,8 +742,16 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
             "User-Agent": "keycloak-auth-lib/1.0.0",
           },
           body: body.toString(),
+        });
+
+        if (!httpResponse.ok) {
+          throw new Error(
+            `HTTP ${httpResponse.status}: ${httpResponse.statusText}`
+          );
         }
-      )) as Response;
+
+        return httpResponse;
+      });
 
       const responseData = await response.json();
 
@@ -966,24 +959,6 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
 
     // Validate cache stats
     return validateInput(CacheStatsSchema, stats, "cache statistics");
-  }
-
-  /**
-   * HTTP request method wrapped by circuit breaker
-   * This method is used by the circuit breaker to make HTTP requests
-   */
-  private async makeHttpRequest(
-    url: RequestInfo,
-    options?: RequestInit
-  ): Promise<Response> {
-    const response = await fetch(url, options);
-
-    // Throw error for non-2xx responses so circuit breaker can track failures
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    return response;
   }
 }
 

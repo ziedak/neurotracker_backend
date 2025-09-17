@@ -12,7 +12,7 @@
     { "path": "../../libs/elysia-server" },
     { "path": "../../libs/database" },
     { "path": "../../libs/monitoring" },
-    { "path": "../../libs/auth" }
+    { "path": "../../libs/keycloak-auth" }
   ],
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]

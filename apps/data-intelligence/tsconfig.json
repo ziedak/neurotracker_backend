@@ -6,7 +6,7 @@
     "rootDir": "src"
   },
   "references": [
-    { "path": "../../libs/auth" },
+    { "path": "../../libs/keycloak-auth" },
     { "path": "../../libs/utils" },
     { "path": "../../libs/config" },
     { "path": "../../libs/messaging" },

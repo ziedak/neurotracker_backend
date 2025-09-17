@@ -10,7 +10,7 @@
   "dependencies": {
     "@libs/elysia-server": "workspace:*",
     "@libs/monitoring": "workspace:*",
-    "@libs/auth": "workspace:*",
+    "@libs/keycloak-auth": "workspace:*",
     "@libs/database": "workspace:*"
   },
   "devDependencies": {

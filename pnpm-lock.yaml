@@ -39,15 +39,15 @@ importers:
 
   apps/ai-engine:
     dependencies:
-      '@libs/auth':
-        specifier: workspace:*
-        version: link:../../libs/auth
       '@libs/database':
         specifier: workspace:*
         version: link:../../libs/database
       '@libs/elysia-server':
         specifier: workspace:*
         version: link:../../libs/elysia-server
+      '@libs/keycloak-auth':
+        specifier: workspace:*
+        version: link:../../libs/keycloak-auth
       '@libs/monitoring':
         specifier: workspace:*
         version: link:../../libs/monitoring
@@ -110,15 +110,15 @@ importers:
 
   apps/dashboard:
     dependencies:
-      '@libs/auth':
-        specifier: workspace:*
-        version: link:../../libs/auth
       '@libs/database':
         specifier: workspace:*
         version: link:../../libs/database
       '@libs/elysia-server':
         specifier: workspace:*
         version: link:../../libs/elysia-server
+      '@libs/keycloak-auth':
+        specifier: workspace:*
+        version: link:../../libs/keycloak-auth
       '@libs/monitoring':
         specifier: workspace:*
         version: link:../../libs/monitoring
@@ -132,15 +132,15 @@ importers:
 
   apps/data-intelligence:
     dependencies:
-      '@libs/auth':
-        specifier: workspace:*
-        version: link:../../libs/auth
       '@libs/database':
         specifier: workspace:*
         version: link:../../libs/database
       '@libs/elysia-server':
         specifier: workspace:*
         version: link:../../libs/elysia-server
+      '@libs/keycloak-auth':
+        specifier: workspace:*
+        version: link:../../libs/keycloak-auth
       '@libs/monitoring':
         specifier: workspace:*
         version: link:../../libs/monitoring
@@ -209,9 +209,6 @@ importers:
 
   apps/intervention-engine:
     dependencies:
-      '@libs/auth':
-        specifier: workspace:*
-        version: link:../../libs/auth
       '@libs/config':
         specifier: workspace:*
         version: link:../../libs/config
@@ -221,6 +218,9 @@ importers:
       '@libs/elysia-server':
         specifier: workspace:*
         version: link:../../libs/elysia-server
+      '@libs/keycloak-auth':
+        specifier: workspace:*
+        version: link:../../libs/keycloak-auth
       '@libs/messaging':
         specifier: workspace:*
         version: link:../../libs/messaging
@@ -270,88 +270,6 @@ importers:
       tsx:
         specifier: ^4.20.3
         version: 4.20.4
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.2
-
-  libs/auth:
-    dependencies:
-      '@casl/ability':
-        specifier: ^6.7.1
-        version: 6.7.3
-      '@elysiajs/jwt':
-        specifier: ^1.3.2
-        version: 1.3.2(elysia@1.3.8(exact-mirror@0.1.5(@sinclair/typebox@0.34.41))(file-type@21.0.0)(typescript@5.9.2))
-      '@keycloak/keycloak-admin-client':
-        specifier: ^25.0.2
-        version: 25.0.6
-      '@libs/config':
-        specifier: workspace:*
-        version: link:../config
-      '@libs/database':
-        specifier: workspace:*
-        version: link:../database
-      '@libs/elysia-server':
-        specifier: workspace:*
-        version: link:../elysia-server
-      '@libs/monitoring':
-        specifier: workspace:*
-        version: link:../monitoring
-      '@libs/utils':
-        specifier: workspace:*
-        version: link:../utils
-      bcryptjs:
-        specifier: ^3.0.2
-        version: 3.0.2
-      elysia:
-        specifier: ^1.3.8
-        version: 1.3.8(exact-mirror@0.1.5(@sinclair/typebox@0.34.41))(file-type@21.0.0)(typescript@5.9.2)
-      ioredis:
-        specifier: ^5.7.0
-        version: 5.7.0
-      jose:
-        specifier: ^6.0.12
-        version: 6.0.12
-      lodash:
-        specifier: ^4.17.21
-        version: 4.17.21
-      uuid:
-        specifier: ^10.0.0
-        version: 10.0.0
-      zod:
-        specifier: ^4.1.5
-        version: 4.1.5
-    devDependencies:
-      '@types/bcryptjs':
-        specifier: ^3.0.0
-        version: 3.0.0
-      '@types/jest':
-        specifier: ^29.5.12
-        version: 29.5.14
-      '@types/lodash':
-        specifier: ^4.17.20
-        version: 4.17.20
-      '@types/node':
-        specifier: ^24.3.0
-        version: 24.3.0
-      '@types/uuid':
-        specifier: ^10.0.0
-        version: 10.0.0
-      '@typescript-eslint/eslint-plugin':
-        specifier: ^6.21.0
-        version: 6.21.0(@typescript-eslint/parser@6.21.0(eslint@8.57.1)(typescript@5.9.2))(eslint@8.57.1)(typescript@5.9.2)
-      '@typescript-eslint/parser':
-        specifier: ^6.21.0
-        version: 6.21.0(eslint@8.57.1)(typescript@5.9.2)
-      eslint:
-        specifier: ^8.57.0
-        version: 8.57.1
-      jest:
-        specifier: ^29.7.0
-        version: 29.7.0(@types/node@24.3.0)(ts-node@10.9.2(@types/node@24.3.0)(typescript@5.9.2))
-      tsx:
-        specifier: ^4.20.5
-        version: 4.20.5
       typescript:
         specifier: ^5.9.2
         version: 5.9.2
@@ -461,12 +379,12 @@ importers:
       '@elysiajs/swagger':
         specifier: ^1.3.1
         version: 1.3.1(elysia@1.4.4(exact-mirror@0.1.5(@sinclair/typebox@0.34.41))(file-type@21.0.0)(typescript@5.9.2))
-      '@libs/auth':
-        specifier: workspace:*
-        version: link:../auth
       '@libs/database':
         specifier: workspace:*
         version: link:../database
+      '@libs/keycloak-auth':
+        specifier: workspace:*
+        version: link:../keycloak-auth
       '@libs/messaging':
         specifier: workspace:*
         version: link:../messaging
@@ -537,12 +455,21 @@ importers:
       '@libs/utils':
         specifier: workspace:*
         version: link:../utils
-      '@types/opossum':
-        specifier: ^8.1.9
-        version: 8.1.9
+      auth-header:
+        specifier: ^1.0.0
+        version: 1.0.0
+      cockatiel:
+        specifier: ^3.2.1
+        version: 3.2.1
       elysia:
         specifier: '>=0.7.0'
         version: 1.4.4(exact-mirror@0.1.5(@sinclair/typebox@0.34.41))(file-type@21.0.0)(typescript@5.9.2)
+      generic-pool:
+        specifier: ^3.9.0
+        version: 3.9.0
+      http-auth-utils:
+        specifier: ^6.0.1
+        version: 6.0.1
       jose:
         specifier: ^5.1.3
         version: 5.10.0
@@ -552,25 +479,28 @@ importers:
       lru-cache:
         specifier: ^10.4.3
         version: 10.4.3
-      opossum:
-        specifier: ^8.5.0
-        version: 8.5.0
+      validator:
+        specifier: ^13.15.15
+        version: 13.15.15
       zod:
         specifier: ^3.22.4
         version: 3.25.76
     devDependencies:
+      '@types/auth-header':
+        specifier: ^1.0.6
+        version: 1.0.6
       '@types/jest':
         specifier: ^29.5.5
         version: 29.5.14
       '@types/jsonwebtoken':
         specifier: ^9.0.5
         version: 9.0.10
-      '@types/lru-cache':
-        specifier: ^7.10.10
-        version: 7.10.10
       '@types/node':
         specifier: ^20.8.0
         version: 20.19.15
+      '@types/validator':
+        specifier: ^13.15.3
+        version: 13.15.3
       '@typescript-eslint/eslint-plugin':
         specifier: ^6.7.4
         version: 6.21.0(@typescript-eslint/parser@6.21.0(eslint@8.57.1)(typescript@5.9.2))(eslint@8.57.1)(typescript@5.9.2)
@@ -879,9 +809,6 @@ packages:
   '@borewit/text-codec@0.1.1':
     resolution: {integrity: sha512-5L/uBxmjaCIX5h8Z+uu+kA9BQLkc/Wl06UGR5ajNRxu+/XjonB5i8JpgFMrPj3LXTCPA0pv8yxUvbUi+QthGGA==}
 
-  '@casl/ability@6.7.3':
-    resolution: {integrity: sha512-A4L28Ko+phJAsTDhRjzCOZWECQWN2jzZnJPnROWWHjJpyMq1h7h9ZqjwS2WbIUa3Z474X1ZPSgW0f1PboZGC0A==}
-
   '@clickhouse/client-common@1.12.1':
     resolution: {integrity: sha512-ccw1N6hB4+MyaAHIaWBwGZ6O2GgMlO99FlMj0B0UEGfjxM9v5dYVYql6FpP19rMwrVAroYs/IgX2vyZEBvzQLg==}
 
@@ -897,11 +824,6 @@ packages:
     resolution: {integrity: sha512-pb0SCzBfFbFSYA/U40HHO7R+YrcXBJXOWgL20eSViK33ol1e20ru2/KUaZYo5IMUn63yaTJI/bQERuQ+77ND8g==}
     peerDependencies:
       elysia: '>= 1.4.0'
-
-  '@elysiajs/jwt@1.3.2':
-    resolution: {integrity: sha512-1Ysb+THWmwy/AKqn9Q1SaBeYK6f499VEVV0E+YifKQjadJT5W+0qKhncOdfqrb4NufUtd65BxULdPQGKJwYo1Q==}
-    peerDependencies:
-      elysia: '>= 1.3.0'
 
   '@elysiajs/swagger@1.3.1':
     resolution: {integrity: sha512-LcbLHa0zE6FJKWPWKsIC/f+62wbDv3aXydqcNPVPyqNcaUgwvCajIi+5kHEU6GO3oXUCpzKaMsb3gsjt8sLzFQ==}
@@ -1231,10 +1153,6 @@ packages:
   '@jridgewell/trace-mapping@0.3.9':
     resolution: {integrity: sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ==}
 
-  '@keycloak/keycloak-admin-client@25.0.6':
-    resolution: {integrity: sha512-rUvo6L0aT9+y/R2wFhDKb+lRD5rwj36XwnIGIbmC2HeQVfgroYB5u/79yc/Mo0inBFNIG8VuiwjRzU878fRE0Q==}
-    engines: {node: '>=18'}
-
   '@krsbx/prisma-repo@0.2.7':
     resolution: {integrity: sha512-gP3Laa59INlmy+CuhaVicqt8itplpvGpWNrjFXNF8Pomn2YJQAX8jOw19SnDS8GFXJZt2yP7+4qxfV7f9q/w2w==}
     engines: {node: '>=14.0'}
@@ -1379,9 +1297,6 @@ packages:
   '@sinclair/typebox@0.27.8':
     resolution: {integrity: sha512-+Fj43pSMwJs4KRrH/938Uf+uAELIgVBmQzg/q1YG10djyfA3TnrU8N8XzqCh/okZdszqBQTZf96idMfE5lnwTA==}
 
-  '@sinclair/typebox@0.34.39':
-    resolution: {integrity: sha512-keEoFsevmLwAedzacnTVmra66GViRH3fhWO1M+nZ8rUgpPJyN4mcvqlGr3QMrQXx4L8KNwW0q9/BeHSEoO4teg==}
-
   '@sinclair/typebox@0.34.41':
     resolution: {integrity: sha512-6gS8pZzSXdyRHTIqoqSVknxolr1kzfy4/CeDnrzsVz8TTIWUbOBr6gnzOmTYJ3eXQNh4IYHIGi5aIL7sOZ2G/g==}
 
@@ -1419,6 +1334,9 @@ packages:
   '@types/amqplib@0.10.7':
     resolution: {integrity: sha512-IVj3avf9AQd2nXCx0PGk/OYq7VmHiyNxWFSb5HhU9ATh+i+gHWvVcljFTcTWQ/dyHJCTrzCixde+r/asL2ErDA==}
 
+  '@types/auth-header@1.0.6':
+    resolution: {integrity: sha512-TjQyS7b+msxND/uuvza7FWSiBBLtI5y9vB55rpTeMcO2M5DSs4ony9WNKDvZLJL2w5aJH2A4C+ht1c9MPHhJWQ==}
+
   '@types/babel__core@7.20.5':
     resolution: {integrity: sha512-qoQprZvz5wQFJwMDqeseRXWv3rqMvhgpbXFfVyWhbx9X47POIA6i/+dXefEmZKoAgOaTdaIgNSMqMIU61yRyzA==}
 
@@ -1430,10 +1348,6 @@ packages:
 
   '@types/babel__traverse@7.28.0':
     resolution: {integrity: sha512-8PvcXf70gTDZBgt9ptxJ8elBeBjcLOAcOtoO/mPJjtji1+CdGbHgm77om1GrsPxsiE+uXIpNSK64UYaIwQXd4Q==}
-
-  '@types/bcryptjs@3.0.0':
-    resolution: {integrity: sha512-WRZOuCuaz8UcZZE4R5HXTco2goQSI2XxjGY3hbM/xDvwmqFWd4ivooImsMx65OKM6CtNKbnZ5YL+YwAwK7c1dg==}
-    deprecated: This is a stub types definition. bcryptjs provides its own type definitions, so you do not need this installed.
 
   '@types/cookiejar@2.1.5':
     resolution: {integrity: sha512-he+DHOWReW0nghN24E1WUqM0efK4kI9oTqDm6XmK8ZPe2djZ90BSNdGnIyCLzCPw7/pogPlGbzI2wHGGmi4O/Q==}
@@ -1481,10 +1395,6 @@ packages:
   '@types/lru-cache@5.1.1':
     resolution: {integrity: sha512-ssE3Vlrys7sdIzs5LOxCzTVMsU7i9oa/IaW92wF32JFb3CVczqOkru2xspuKczHEbG3nvmPY7IFqVmGGHdNbYw==}
 
-  '@types/lru-cache@7.10.10':
-    resolution: {integrity: sha512-nEpVRPWW9EBmx2SCfNn3ClYxPL7IktPX12HhIoSc/H5mMjdeW3+YsXIpseLQ2xF35+OcpwKQbEUw5VtqE4PDNA==}
-    deprecated: This is a stub types definition. lru-cache provides its own type definitions, so you do not need this installed.
-
   '@types/methods@1.1.4':
     resolution: {integrity: sha512-ymXWVrDiCxTBE3+RIrrP533E70eA+9qu7zdWoHuOmGujkYtzf4HQF96b8nwHLqhuf4ykX61IGRIB38CC6/sImQ==}
 
@@ -1506,9 +1416,6 @@ packages:
   '@types/normalize-package-data@2.4.4':
     resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
 
-  '@types/opossum@8.1.9':
-    resolution: {integrity: sha512-Jm/tYxuJFefiwRYs+/EOsUP3ktk0c8siMgAHPLnA4PXF4wKghzcjqf88dY+Xii5jId5Txw4JV0FMKTpjbd7KJA==}
-
   '@types/pg@8.15.5':
     resolution: {integrity: sha512-LF7lF6zWEKxuT3/OR8wAZGzkg4ENGXFNyiV/JeOt9z5B+0ZVwbql9McqX5c/WStFq1GaGso7H1AzP/qSzmlCKQ==}
 
@@ -1527,11 +1434,11 @@ packages:
   '@types/supertest@6.0.3':
     resolution: {integrity: sha512-8WzXq62EXFhJ7QsH3Ocb/iKQ/Ty9ZVWnVzoTKc9tyyFRRF3a74Tk2+TLFgaFFw364Ere+npzHKEJ6ga2LzIL7w==}
 
-  '@types/uuid@10.0.0':
-    resolution: {integrity: sha512-7gqG38EyHgyP1S+7+xomFtL+ZNHcKv6DwNaCZmJmo1vgMugyF3TCnXVg4t1uk89mLNwnLtnY3TpOpCOyp1/xHQ==}
-
   '@types/uuid@9.0.8':
     resolution: {integrity: sha512-jg+97EGIcY9AGHJJRaaPVgetKDsrTgbRjQ5Msgjh/DQKEFl0DtyRr/VCOyD1T2R1MNeWPK/u7JoGhlDZnKBAfA==}
+
+  '@types/validator@13.15.3':
+    resolution: {integrity: sha512-7bcUmDyS6PN3EuD9SlGGOxM77F8WLVsrwkxyWxKnxzmXoequ6c7741QBrANq6htVRGOITJ7z72mTP6Z4XyuG+Q==}
 
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
@@ -1717,18 +1624,6 @@ packages:
     resolution: {integrity: sha512-T+S1KqRD4sg/bHfLwrpF/K3gQLBM1n7Rp7OjjikjTEssI2YJzQpi5WXoynOaQ93ERIuq3O8RBTOUYDKszUCEHw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
 
-  '@ucast/core@1.10.2':
-    resolution: {integrity: sha512-ons5CwXZ/51wrUPfoduC+cO7AS1/wRb0ybpQJ9RrssossDxVy4t49QxWoWgfBDvVKsz9VXzBk9z0wqTdZ+Cq8g==}
-
-  '@ucast/js@3.0.4':
-    resolution: {integrity: sha512-TgG1aIaCMdcaEyckOZKQozn1hazE0w90SVdlpIJ/er8xVumE11gYAtSbw/LBeUnA4fFnFWTcw3t6reqseeH/4Q==}
-
-  '@ucast/mongo2js@1.4.0':
-    resolution: {integrity: sha512-vR9RJ3BHlkI3RfKJIZFdVktxWvBCQRiSTeJSWN9NPxP5YJkpfXvcBWAMLwvyJx4HbB+qib5/AlSDEmQiuQyx2w==}
-
-  '@ucast/mongo@2.4.3':
-    resolution: {integrity: sha512-XcI8LclrHWP83H+7H2anGCEeDq0n+12FU2mXCTz6/Tva9/9ddK/iacvvhCyW6cijAAOILmt0tWplRyRhVyZLsA==}
-
   '@ungap/structured-clone@1.3.0':
     resolution: {integrity: sha512-WmoN8qaIAo7WTYWbAZuG8PYEhn5fkz7dZrqTBZ7dtt//lL2Gwms1IcnQ5yHqjDfX8Ft5j4YzDM23f87zBfDe9g==}
 
@@ -1844,6 +1739,9 @@ packages:
     resolution: {integrity: sha512-kNOjDqAh7px0XWNI+4QbzoiR/nTkHAWNud2uvnJquD1/x5a7EQZMJT0AczqK0Qn67oY/TTQ1LbUKajZpp3I9tQ==}
     engines: {node: '>=8.0.0'}
 
+  auth-header@1.0.0:
+    resolution: {integrity: sha512-CPPazq09YVDUNNVWo4oSPTQmtwIzHusZhQmahCKvIsk0/xH6U3QsMAv3sM+7+Q0B1K2KJ/Q38OND317uXs4NHA==}
+
   axios@1.11.0:
     resolution: {integrity: sha512-1Lx3WLFQWm3ooKDYZD1eXmoGO9fxYQjrycfHFC8P0sCfQVXyROp0p9PFWBehewBOdCwHc+f/b8I0fMto5eSfwA==}
 
@@ -1880,10 +1778,6 @@ packages:
 
   baseline-browser-mapping@2.8.2:
     resolution: {integrity: sha512-NvcIedLxrs9llVpX7wI+Jz4Hn9vJQkCPKrTaHIE0sW/Rj1iq6Fzby4NbyTZjQJNoypBXNaG7tEHkTgONZpwgxQ==}
-    hasBin: true
-
-  bcryptjs@3.0.2:
-    resolution: {integrity: sha512-k38b3XOZKv60C4E2hVsXTolJWfkGRMbILBIe2IBITXciy5bOsTKot5kDrf3ZfufQtQOUN5mXceUEpU1rTl9Uog==}
     hasBin: true
 
   binary-extensions@2.3.0:
@@ -1963,10 +1857,6 @@ packages:
   camelcase@6.3.0:
     resolution: {integrity: sha512-Gmy6FhYlCY7uOElZUSbxo2UCDH8owEk996gkbrpsgGtrJLM3J7jGxl9Ic7Qwwj4ivOE5AWZWRMecDdF7hqGjFA==}
     engines: {node: '>=10'}
-
-  camelize-ts@3.0.0:
-    resolution: {integrity: sha512-cgRwKKavoDKLTjO4FQTs3dRBePZp/2Y9Xpud0FhuCOTE86M2cniKN4CCXgRnsyXNMmQMifVHcv6SPaMtTx6ofQ==}
-    engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
 
   caniuse-lite@1.0.30001741:
     resolution: {integrity: sha512-QGUGitqsc8ARjLdgAfxETDhRbJ0REsP6O3I96TAth/mVjh2cYzN2u+3AzPP3aVSm2FehEItaJw1xd+IGBXWeSw==}
@@ -2229,13 +2119,6 @@ packages:
 
   electron-to-chromium@1.5.218:
     resolution: {integrity: sha512-uwwdN0TUHs8u6iRgN8vKeWZMRll4gBkz+QMqdS7DDe49uiK68/UX92lFb61oiFPrpYZNeZIqa4bA7O6Aiasnzg==}
-
-  elysia@1.3.8:
-    resolution: {integrity: sha512-kxYFhegJbUEf5otzmisEvGt3R7d/dPBNVERO2nHo0kFqKBHyj5slArc90mSRKLfi1vamMtPcz67rL6Zeg5F2yg==}
-    peerDependencies:
-      exact-mirror: '>= 0.0.9'
-      file-type: '>= 20.0.0'
-      typescript: '>= 5.0.0'
 
   elysia@1.4.3-beta.0:
     resolution: {integrity: sha512-UzanGZSqoKKcKgg+I4YB+ZOGeJNA7mlA8JPj7klYi0LDVcj/vtXKGRmsp4jEzZO+LjSpFuYTZcwHi4rCnvJj1w==}
@@ -2560,6 +2443,10 @@ packages:
   function-bind@1.1.2:
     resolution: {integrity: sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA==}
 
+  generic-pool@3.9.0:
+    resolution: {integrity: sha512-hymDOu5B53XvN4QT9dBmZxPX4CWhBPPLguTZ9MMFeFa/Kg0xWVfylOVNlJji/E7yTZWFd/q9GO5TxDLq156D7g==}
+    engines: {node: '>= 4'}
+
   gensync@1.0.0-beta.2:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
@@ -2674,6 +2561,10 @@ packages:
 
   html-escaper@2.0.2:
     resolution: {integrity: sha512-H2iMtd0I4Mt5eYiapRdIDjp+XzelXQ0tFE4JS7YFwFevXXMmOp9myNrUvCg0D6ws8iqkRPBfKHgbwig1SmlLfg==}
+
+  http-auth-utils@6.0.1:
+    resolution: {integrity: sha512-nzW90LW+YP4NjX+z8sQCE4yVrQGXTDtF8ye6thyoTG78r5h5tWRz8IU8MvmQuONePJiBhUmtvAtmuYQRlh+M7g==}
+    engines: {node: '>=20.11.1'}
 
   http-proxy-agent@7.0.0:
     resolution: {integrity: sha512-+ZT+iBxVUQ1asugqnD6oWoRiS25AkjNfG085dKJGtGxkdwLQrMKU5wJr2bOOFAXzKcTuqq+7fZlTMgG3SRfIYQ==}
@@ -2958,9 +2849,6 @@ packages:
 
   jose@5.10.0:
     resolution: {integrity: sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==}
-
-  jose@6.0.12:
-    resolution: {integrity: sha512-T8xypXs8CpmiIi78k0E+Lk7T2zlK4zDyg+o1CZ4AkOHgDg98ogdP2BeZ61lTFKFyoEwJ9RgAgN+SdM3iPgNonQ==}
 
   joycon@3.1.1:
     resolution: {integrity: sha512-34wB/Y7MW7bzjKRjUKTa46I2Z7eV62Rkhva+KkopW7Qvv/OSWBqvkSY7vusOPrNuZcUG3tApvdVgNB8POj3SPw==}
@@ -3302,10 +3190,6 @@ packages:
 
   openapi-types@12.1.3:
     resolution: {integrity: sha512-N4YtSYJqghVu4iek2ZUvcN/0aqH1kRDuNqzcycDxhOUpg7GdvLa2F3DgS6yBNhInhv2r/6I0Flkn7CqL8+nIcw==}
-
-  opossum@8.5.0:
-    resolution: {integrity: sha512-LZNvs+p9/ZbG4oN6unnjh4hTxkB0dyHKI2p7azVt8w+//GKDpfHss6WR7KebbpzGEssYwtSd8Mvwxqcmxg10NA==}
-    engines: {node: ^24 || ^22 || ^21 || ^20 || ^18 || ^16}
 
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
@@ -4078,23 +3962,11 @@ packages:
   uri-js@4.4.1:
     resolution: {integrity: sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg==}
 
-  url-join@5.0.0:
-    resolution: {integrity: sha512-n2huDr9h9yzd6exQVnH/jU5mr+Pfx08LRXXZhkLLetAMESRj+anQsTAh940iMrIetKAmry9coFuZQ2jY8/p3WA==}
-    engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
-
   url-parse@1.5.10:
     resolution: {integrity: sha512-WypcfiRhfeUP9vvF0j6rw0J3hrWrw6iZv3+22h6iRMJ/8z1Tj6XfLP4DsUix5MhMPnXpiHDoKyoZ/bdCkwBCiQ==}
 
-  url-template@3.1.1:
-    resolution: {integrity: sha512-4oszoaEKE/mQOtAmdMWqIRHmkxWkUZMnXFnjQ5i01CuRSK3uluxcH1MRVVVWmhlnzT1SCDfKxxficm2G37qzCA==}
-    engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
-
   util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
-
-  uuid@10.0.0:
-    resolution: {integrity: sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ==}
-    hasBin: true
 
   uuid@12.0.0:
     resolution: {integrity: sha512-USe1zesMYh4fjCA8ZH5+X5WIVD0J4V1Jksm1bFTVBX2F/cwSXt0RO5w/3UXbdLKmZX65MiWV+hwhSS8p6oBTGA==}
@@ -4122,6 +3994,10 @@ packages:
 
   validate-npm-package-license@3.0.4:
     resolution: {integrity: sha512-DpKm2Ui/xN7/HQKCtpZxoRWBhZ9Z0kqtygG8XCgNQ8ZlDnxuQmWhj566j8fN4Cu3/JmbhsDo7fcAJq4s9h27Ew==}
+
+  validator@13.15.15:
+    resolution: {integrity: sha512-BgWVbCI72aIQy937xbawcs+hrVaN/CZ2UwutgaJ36hGqRrLNM+f5LUT/YPRbo8IV/ASeFzXszezV+y2+rq3l8A==}
+    engines: {node: '>= 0.10'}
 
   walker@1.0.8:
     resolution: {integrity: sha512-ts/8E8l5b7kY0vlWLewOkDXMmPdLcVV4GmOQLyxuSswIJsweeFZtAsMF7k1Nszz+TYBQrlYRmzOnr398y1JemQ==}
@@ -4189,6 +4065,10 @@ packages:
   yargs@17.7.2:
     resolution: {integrity: sha512-7dSzzRQ++CKnNI/krKnYRV7JKKPUXMEh61soaHKg9mrWEhzFWhFnxPxGl+69cD1Ou63C13NUPCnmIcrvqCuM6w==}
     engines: {node: '>=12'}
+
+  yerror@8.0.0:
+    resolution: {integrity: sha512-FemWD5/UqNm8ffj8oZIbjWXIF2KE0mZssggYpdaQkWDDgXBQ/35PNIxEuz6/YLn9o0kOxDBNJe8x8k9ljD7k/g==}
+    engines: {node: '>=18.16.0'}
 
   yn@3.1.1:
     resolution: {integrity: sha512-Ux4ygGWsu2c7isFWe8Yu1YluJmqVhxqK2cLXNQA5AcC3QfbGNpM7fu0Y8b/z16pXLnFxZYvWhd3fhBY9DLmC6Q==}
@@ -4422,10 +4302,6 @@ snapshots:
 
   '@borewit/text-codec@0.1.1': {}
 
-  '@casl/ability@6.7.3':
-    dependencies:
-      '@ucast/mongo2js': 1.4.0
-
   '@clickhouse/client-common@1.12.1': {}
 
   '@clickhouse/client@1.12.1':
@@ -4439,11 +4315,6 @@ snapshots:
   '@elysiajs/cors@1.4.0(elysia@1.4.4(exact-mirror@0.1.5(@sinclair/typebox@0.34.41))(file-type@21.0.0)(typescript@5.9.2))':
     dependencies:
       elysia: 1.4.4(exact-mirror@0.1.5(@sinclair/typebox@0.34.41))(file-type@21.0.0)(typescript@5.9.2)
-
-  '@elysiajs/jwt@1.3.2(elysia@1.3.8(exact-mirror@0.1.5(@sinclair/typebox@0.34.41))(file-type@21.0.0)(typescript@5.9.2))':
-    dependencies:
-      elysia: 1.3.8(exact-mirror@0.1.5(@sinclair/typebox@0.34.41))(file-type@21.0.0)(typescript@5.9.2)
-      jose: 6.0.12
 
   '@elysiajs/swagger@1.3.1(elysia@1.4.4(exact-mirror@0.1.5(@sinclair/typebox@0.34.41))(file-type@21.0.0)(typescript@5.9.2))':
     dependencies:
@@ -4920,12 +4791,6 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@keycloak/keycloak-admin-client@25.0.6':
-    dependencies:
-      camelize-ts: 3.0.0
-      url-join: 5.0.0
-      url-template: 3.1.1
-
   '@krsbx/prisma-repo@0.2.7(@prisma/client@6.15.0(prisma@6.15.0(typescript@5.9.2))(typescript@5.9.2))(lodash@4.17.21)':
     dependencies:
       '@prisma/client': 6.15.0(prisma@6.15.0(typescript@5.9.2))(typescript@5.9.2)
@@ -5178,9 +5043,6 @@ snapshots:
 
   '@sinclair/typebox@0.27.8': {}
 
-  '@sinclair/typebox@0.34.39':
-    optional: true
-
   '@sinclair/typebox@0.34.41':
     optional: true
 
@@ -5218,6 +5080,8 @@ snapshots:
     dependencies:
       '@types/node': 24.3.3
 
+  '@types/auth-header@1.0.6': {}
+
   '@types/babel__core@7.20.5':
     dependencies:
       '@babel/parser': 7.28.4
@@ -5238,10 +5102,6 @@ snapshots:
   '@types/babel__traverse@7.28.0':
     dependencies:
       '@babel/types': 7.28.4
-
-  '@types/bcryptjs@3.0.0':
-    dependencies:
-      bcryptjs: 3.0.2
 
   '@types/cookiejar@2.1.5': {}
 
@@ -5295,10 +5155,6 @@ snapshots:
 
   '@types/lru-cache@5.1.1': {}
 
-  '@types/lru-cache@7.10.10':
-    dependencies:
-      lru-cache: 10.4.3
-
   '@types/methods@1.1.4': {}
 
   '@types/ms@2.1.0': {}
@@ -5320,10 +5176,6 @@ snapshots:
       undici-types: 7.10.0
 
   '@types/normalize-package-data@2.4.4': {}
-
-  '@types/opossum@8.1.9':
-    dependencies:
-      '@types/node': 24.3.3
 
   '@types/pg@8.15.5':
     dependencies:
@@ -5349,9 +5201,9 @@ snapshots:
       '@types/methods': 1.1.4
       '@types/superagent': 8.1.9
 
-  '@types/uuid@10.0.0': {}
-
   '@types/uuid@9.0.8': {}
+
+  '@types/validator@13.15.3': {}
 
   '@types/ws@8.18.1':
     dependencies:
@@ -5623,22 +5475,6 @@ snapshots:
       '@typescript-eslint/types': 8.43.0
       eslint-visitor-keys: 4.2.1
 
-  '@ucast/core@1.10.2': {}
-
-  '@ucast/js@3.0.4':
-    dependencies:
-      '@ucast/core': 1.10.2
-
-  '@ucast/mongo2js@1.4.0':
-    dependencies:
-      '@ucast/core': 1.10.2
-      '@ucast/js': 3.0.4
-      '@ucast/mongo': 2.4.3
-
-  '@ucast/mongo@2.4.3':
-    dependencies:
-      '@ucast/core': 1.10.2
-
   '@ungap/structured-clone@1.3.0': {}
 
   '@unhead/schema@1.11.20':
@@ -5765,6 +5601,8 @@ snapshots:
 
   atomic-sleep@1.0.0: {}
 
+  auth-header@1.0.0: {}
+
   axios@1.11.0:
     dependencies:
       follow-redirects: 1.15.11
@@ -5833,8 +5671,6 @@ snapshots:
   base64-js@1.5.1: {}
 
   baseline-browser-mapping@2.8.2: {}
-
-  bcryptjs@3.0.2: {}
 
   binary-extensions@2.3.0: {}
 
@@ -5923,8 +5759,6 @@ snapshots:
   camelcase@5.3.1: {}
 
   camelcase@6.3.0: {}
-
-  camelize-ts@3.0.0: {}
 
   caniuse-lite@1.0.30001741: {}
 
@@ -6214,17 +6048,6 @@ snapshots:
       fast-check: 3.23.2
 
   electron-to-chromium@1.5.218: {}
-
-  elysia@1.3.8(exact-mirror@0.1.5(@sinclair/typebox@0.34.41))(file-type@21.0.0)(typescript@5.9.2):
-    dependencies:
-      cookie: 1.0.2
-      exact-mirror: 0.1.5(@sinclair/typebox@0.34.41)
-      fast-decode-uri-component: 1.0.1
-      file-type: 21.0.0
-      typescript: 5.9.2
-    optionalDependencies:
-      '@sinclair/typebox': 0.34.39
-      openapi-types: 12.1.3
 
   elysia@1.4.3-beta.0(exact-mirror@0.1.5(@sinclair/typebox@0.34.41))(file-type@21.0.0)(typescript@5.9.2):
     dependencies:
@@ -6644,6 +6467,8 @@ snapshots:
 
   function-bind@1.1.2: {}
 
+  generic-pool@3.9.0: {}
+
   gensync@1.0.0-beta.2: {}
 
   get-caller-file@2.0.5: {}
@@ -6768,6 +6593,10 @@ snapshots:
   hosted-git-info@2.8.9: {}
 
   html-escaper@2.0.2: {}
+
+  http-auth-utils@6.0.1:
+    dependencies:
+      yerror: 8.0.0
 
   http-proxy-agent@7.0.0:
     dependencies:
@@ -7507,8 +7336,6 @@ snapshots:
 
   jose@5.10.0: {}
 
-  jose@6.0.12: {}
-
   joycon@3.1.1: {}
 
   js-tokens@4.0.0: {}
@@ -7801,8 +7628,6 @@ snapshots:
       is-wsl: 2.2.0
 
   openapi-types@12.1.3: {}
-
-  opossum@8.5.0: {}
 
   optionator@0.9.4:
     dependencies:
@@ -8680,18 +8505,12 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
-  url-join@5.0.0: {}
-
   url-parse@1.5.10:
     dependencies:
       querystringify: 2.2.0
       requires-port: 1.0.0
 
-  url-template@3.1.1: {}
-
   util-deprecate@1.0.2: {}
-
-  uuid@10.0.0: {}
 
   uuid@12.0.0: {}
 
@@ -8713,6 +8532,8 @@ snapshots:
     dependencies:
       spdx-correct: 3.2.0
       spdx-expression-parse: 3.0.1
+
+  validator@13.15.15: {}
 
   walker@1.0.8:
     dependencies:
@@ -8767,6 +8588,8 @@ snapshots:
       string-width: 4.2.3
       y18n: 5.0.8
       yargs-parser: 21.1.1
+
+  yerror@8.0.0: {}
 
   yn@3.1.1: {}
 

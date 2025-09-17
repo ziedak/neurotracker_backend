@@ -25,7 +25,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@libs/auth": "workspace:*",
+    "@libs/keycloak-auth": "workspace:*",
     "@libs/config": "workspace:*",
     "@libs/database": "workspace:*",
     "@libs/elysia-server": "workspace:*",
