@@ -18,12 +18,15 @@ global.fetch = mockFetch;
 const testUtils = {
   createMockJWT: (payload: any) => {
     const header = { alg: "HS256", typ: "JWT" };
-    const encodedHeader = Buffer.from(JSON.stringify(header)).toString(
-      "base64"
-    );
-    const encodedPayload = Buffer.from(JSON.stringify(payload)).toString(
-      "base64"
-    );
+    function base64url(str: string): string {
+      return Buffer.from(str)
+        .toString("base64")
+        .replace(/=/g, "")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_");
+    }
+    const encodedHeader = base64url(JSON.stringify(header));
+    const encodedPayload = base64url(JSON.stringify(payload));
     const signature = "mock-signature";
     return `${encodedHeader}.${encodedPayload}.${signature}`;
   },
@@ -46,7 +49,7 @@ const testUtils = {
     },
     user: {
       inherits: [],
-      permissions: ["profile_read", "profile_write", "documents_read"],
+      permissions: ["profile:read", "profile:write", "documents:read"],
       description: "Regular user",
     },
   }),

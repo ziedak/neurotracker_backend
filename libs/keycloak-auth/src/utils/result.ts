@@ -239,20 +239,65 @@ export const AuthErrors = {
 
 /**
  * Convert legacy errors to AuthError format
+ * SECURITY FIX: Enhanced with message sanitization to prevent information disclosure
  */
 export function toAuthError(error: unknown): AuthError {
   if (error instanceof Error) {
+    // SECURITY FIX: Sanitize error messages to prevent leaking internal details
+    const sanitizedMessage = sanitizeErrorMessage(error.message);
+
     return {
       code: "UNKNOWN_ERROR",
-      message: error.message,
+      message: sanitizedMessage,
       statusCode: 500,
-      details: { stack: error.stack },
+      details: {
+        originalError: "Error details logged separately for security",
+      },
     };
   }
 
+  const errorString = String(error);
+  const sanitizedMessage = sanitizeErrorMessage(errorString);
+
   return {
     code: "UNKNOWN_ERROR",
-    message: String(error),
+    message: sanitizedMessage,
     statusCode: 500,
   };
+}
+
+/**
+ * SECURITY FIX: Sanitize error messages to prevent information disclosure
+ * Checks for sensitive patterns and returns generic messages when found
+ */
+function sanitizeErrorMessage(message: string): string {
+  // Patterns that indicate internal implementation details that should not be exposed
+  const sensitivePatterns = [
+    /redis/i,
+    /cache/i,
+    /database/i,
+    /connection/i,
+    /internal/i,
+    /localhost/i,
+    /127\.0\.0\.1/i,
+    /at .+?\(.+?:\d+:\d+\)/, // Stack trace patterns
+    /node_modules/,
+    /secret/i,
+    /key/i,
+    /token.*hash/i,
+    /salt/i,
+    /circuit.?breaker/i,
+  ];
+
+  // Check if message contains sensitive patterns
+  const containsSensitiveInfo = sensitivePatterns.some((pattern) =>
+    pattern.test(message)
+  );
+
+  if (containsSensitiveInfo) {
+    return "An internal error occurred";
+  }
+
+  // Safe to use original message (but still limit length)
+  return message.length > 200 ? message.substring(0, 200) + "..." : message;
 }

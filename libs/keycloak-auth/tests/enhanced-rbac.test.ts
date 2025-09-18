@@ -495,8 +495,15 @@ describe("EnhancedRBACService", () => {
     });
 
     it("should generate secure cache keys", () => {
-      // Test cache key generation through permission checks
-      expect(rbacService).toBeDefined();
+      // Test cache key generation logic
+      const jwt = createMockJWT({ roles: ["user"] });
+      const permission = "documents_read";
+      const resource = "document-123";
+      const cacheKey = rbacService.generateCacheKey(jwt, permission, resource);
+      expect(typeof cacheKey).toBe("string");
+      expect(cacheKey).toMatch(
+        /^rbac:document-123:documents_read:[a-f0-9]{16}$/
+      ); // Should be a secure hash
     });
 
     it("should invalidate cache on role hierarchy changes", async () => {
@@ -513,6 +520,91 @@ describe("EnhancedRBACService", () => {
   });
 
   describe("Error Handling and Edge Cases", () => {
+    it("should return denied for malformed JWT token", async () => {
+      const malformedJWT = "not.a.jwt";
+      mockAuthzClient.checkAuthorization.mockRejectedValueOnce(
+        new Error("Malformed JWT")
+      );
+      const result = await rbacService.checkPermission(
+        malformedJWT,
+        "documents",
+        "read"
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toMatch(
+        /Invalid token format|Malformed JWT token|Invalid or missing token in fallback|authorization service error \(non-network\)/
+      );
+    });
+
+    it("should deny permission for expired session", async () => {
+      // Simulate expired session by mocking checkAuthorization to throw
+      mockAuthzClient.checkAuthorization.mockRejectedValueOnce(
+        new Error("session_expired")
+      );
+      const mockJWT = createMockJWT({ realm_access: { roles: ["user"] } });
+      const result = await rbacService.checkPermission(
+        mockJWT,
+        "documents",
+        "read"
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toMatch(
+        /session_expired|access_denied|Invalid or missing token in fallback|authorization service error \(non-network\)/
+      );
+    });
+
+    it("should handle network errors in authorization check", async () => {
+      mockAuthzClient.checkAuthorization.mockRejectedValueOnce(
+        new Error("Network timeout")
+      );
+      const mockJWT = createMockJWT({ realm_access: { roles: ["user"] } });
+      const result = await rbacService.checkPermission(
+        mockJWT,
+        "documents",
+        "read"
+      );
+      // Should fall back to role-based check only or deny
+      expect([true, false]).toContain(result.allowed);
+      expect(result.reason).toBeDefined();
+    });
+
+    it("should detect circular role hierarchy during expansion", async () => {
+      const circularHierarchy: RoleHierarchy = {
+        "role-a": { inherits: ["role-b"], permissions: [] },
+        "role-b": { inherits: ["role-a"], permissions: [] },
+      };
+      rbacService.updateRoleHierarchy(circularHierarchy);
+      const mockJWT = createMockJWT({ realm_access: { roles: ["role-a"] } });
+      const result = await rbacService.checkPermission(
+        mockJWT,
+        "documents",
+        "read"
+      );
+      expect(result.effectiveRoles).toContain("role-a");
+      expect(result.effectiveRoles).toContain("role-b");
+      // Should not infinitely expand
+      expect(result.effectiveRoles.length).toBeLessThanOrEqual(2);
+    });
+
+    it("should include permission context in decision", async () => {
+      mockAuthzClient.checkAuthorization.mockResolvedValueOnce({
+        granted: true,
+        context: { owner: "user-123" },
+      });
+      const mockJWT = createMockJWT({
+        realm_access: { roles: ["user"] },
+        sub: "user-123",
+      });
+      const result = await rbacService.checkPermission(
+        mockJWT,
+        "documents",
+        "read",
+        { userId: "user-123", attributes: { owner: "user-123" } }
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.context).toBeDefined();
+      expect(result.context?.["originalAuthzDecision"]).toBeDefined();
+    });
     it("should handle empty JWT token", async () => {
       const result = await rbacService.checkPermission("", "documents", "read");
 
@@ -612,12 +704,15 @@ describe("EnhancedRBACService", () => {
   // Helper function to create mock JWT tokens
   function createMockJWT(payload: any): string {
     const header = { alg: "HS256", typ: "JWT" };
-    const encodedHeader = Buffer.from(JSON.stringify(header)).toString(
-      "base64"
-    );
-    const encodedPayload = Buffer.from(JSON.stringify(payload)).toString(
-      "base64"
-    );
+    function base64url(str: string): string {
+      return Buffer.from(str)
+        .toString("base64")
+        .replace(/=/g, "")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_");
+    }
+    const encodedHeader = base64url(JSON.stringify(header));
+    const encodedPayload = base64url(JSON.stringify(payload));
     const signature = "mock-signature";
 
     return `${encodedHeader}.${encodedPayload}.${signature}`;

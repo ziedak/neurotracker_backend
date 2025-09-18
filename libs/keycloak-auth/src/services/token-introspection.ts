@@ -97,12 +97,17 @@ class TokenHashSaltManager {
   }
 
   /**
-   * Cleanup on shutdown
+   * Cleanup on shutdown - SECURITY FIX for memory leak prevention
+   * Ensures proper timer cleanup during service restarts
    */
   public shutdown(): void {
     if (this.rotationTimer) {
       clearInterval(this.rotationTimer);
       this.rotationTimer = undefined;
+
+      logger.info("Salt rotation timer cleaned up successfully", {
+        lastRotation: new Date(this.lastRotation).toISOString(),
+      });
     }
   }
 
@@ -387,8 +392,13 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
   }
 
   /**
-   * SECURE: Proper JWK validation and conversion using battle-tested jose library
-   * Validates JWK structure, algorithm, and key parameters before conversion
+   * DEPRECATED: Use JWKS directly instead of converting to PEM
+   * This method is maintained for backward compatibility only.
+   *
+   * SECURITY FIX: Proper JWK validation using the jose library
+   * instead of manual PEM conversion which was previously broken.
+   *
+   * For production use, prefer validateJWT() which uses JWKS directly.
    */
   private async jwkToPem(jwk: any): Promise<string> {
     try {
@@ -440,28 +450,44 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
           throw new Error(`Invalid JWK: unsupported key type ${jwk.kty}`);
       }
 
-      // Use jose library for secure JWK validation and key import
-      const { importJWK } = await import("jose");
-      const key = await importJWK(jwk as any, jwk.alg);
+      // SECURITY FIX: Use jose library for proper validation and key import
+      // This ensures cryptographically correct key handling
+      const { importJWK, exportSPKI } = await import("jose");
 
-      // Validate key can be used for verification
-      if (!key || typeof key !== "object") {
-        throw new Error("Invalid JWK: key import failed");
+      try {
+        // Import and validate the JWK using JOSE
+        const key = await importJWK(jwk as any, jwk.alg);
+
+        // Ensure key is a proper KeyLike object before export
+        if (!key || typeof key !== "object" || !("type" in key)) {
+          throw new Error(
+            "Invalid JWK: key import resulted in invalid key object"
+          );
+        }
+
+        // Export as SPKI (Subject Public Key Info) format
+        // This is the correct way to get a PEM-compatible public key
+        const spki = await exportSPKI(key as any);
+
+        logger.debug(
+          "JWK successfully validated and converted to SPKI format",
+          {
+            keyType: jwk.kty,
+            algorithm: jwk.alg,
+            keyId: jwk.kid,
+          }
+        );
+
+        return spki;
+      } catch (importError) {
+        throw new Error(
+          `JWK import/validation failed: ${
+            importError instanceof Error
+              ? importError.message
+              : String(importError)
+          }`
+        );
       }
-
-      // For RSA keys, we can export as PEM-like format for legacy compatibility
-      // Note: This is for backward compatibility - prefer using JWKS directly
-      if (jwk.kty === "RSA") {
-        // Create a simple PEM-like structure for RSA keys
-        const modulus = Buffer.from(jwk.n, "base64url").toString("base64");
-
-        // Create a basic RSA public key structure (DER encoded, base64)
-        const pem = `-----BEGIN RSA PUBLIC KEY-----\n${modulus}\n-----END RSA PUBLIC KEY-----`;
-        return pem;
-      }
-
-      // For other key types, return a validated marker
-      return `validated-jwk-${jwk.kty}-${jwk.alg}`;
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -489,7 +515,7 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
   /**
    * SECURE: Create a cryptographic hash of the token for cache key
    * Uses SHA-256 with rotating salt for security and collision resistance
-   * Now returns 32 characters (128-bit security) instead of 16
+   * Returns full 256-bit hash for maximum security against collision attacks
    */
   private hashToken(token: string): string {
     const currentSalt = this.saltManager.getCurrentSalt();
@@ -497,8 +523,9 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
       .update(token + currentSalt)
       .digest("hex");
 
-    // Return first 32 characters for cache key (128-bit security)
-    return hash.substring(0, 32);
+    // Return full 64-character hash for cache key (256-bit security)
+    // This prevents collision attacks in high-volume token scenarios
+    return hash;
   }
 
   /**
@@ -517,7 +544,8 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
       const previousHash = createHash("sha256")
         .update(token + previousSalt)
         .digest("hex");
-      hashes.push(previousHash.substring(0, 32));
+      // Return full 64-character hash for maximum security
+      hashes.push(previousHash);
     }
 
     return hashes;
@@ -575,11 +603,12 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
 
   /**
    * Shutdown service and cleanup resources
+   * SECURITY FIX: Ensures proper salt manager cleanup to prevent memory leaks
    */
   public async shutdown(): Promise<void> {
     logger.info("Shutting down TokenIntrospectionService");
 
-    // Shutdown salt manager
+    // SECURITY FIX: Shutdown salt manager to prevent memory leaks
     this.saltManager.shutdown();
 
     // Clear memory caches

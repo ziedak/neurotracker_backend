@@ -118,6 +118,16 @@ export const DEFAULT_RBAC_CONFIG: RBACConfig = {
  * Enhanced RBAC Service
  */
 export class EnhancedRBACService {
+  /**
+   * Public method to generate cache key for permission checks (for testing)
+   */
+  public generateCacheKey(
+    accessToken: string,
+    permission: string,
+    resource: string
+  ): string {
+    return `rbac:${resource}:${permission}:${this.getTokenHash(accessToken)}`;
+  }
   private authzClient: KeycloakAuthorizationServicesClient;
   private cacheService: CacheService | undefined;
   private config: RBACConfig;
@@ -341,9 +351,44 @@ export class EnhancedRBACService {
         error: error instanceof Error ? error.message : String(error),
       });
 
-      // On authorization service failure, fall back to role-based check
+      // Only allow fallback for network errors, deny for all other cases
+      const errorMsg = String(error).toLowerCase();
+      const isNetworkError =
+        errorMsg.includes("timeout") ||
+        errorMsg.includes("network") ||
+        errorMsg.includes("connection refused") ||
+        errorMsg.includes("fetch failed") ||
+        errorMsg.includes("temporarily unavailable");
+
+      if (!isNetworkError) {
+        return {
+          allowed: false,
+          effectiveRoles: [],
+          effectivePermissions: [],
+          matchedPolicies: [],
+          reason: "authorization service error (non-network)",
+          context: {
+            error: String(error),
+            fallbackUsed: true,
+          },
+        };
+      }
       try {
         const userRoles = await this.extractUserRoles(accessToken);
+        if (!userRoles || userRoles.length === 0) {
+          return {
+            allowed: false,
+            effectiveRoles: [],
+            effectivePermissions: [],
+            matchedPolicies: [],
+            reason: "Invalid or missing token in fallback",
+            context: {
+              error: String(error),
+              fallbackUsed: true,
+              userRoles,
+            },
+          };
+        }
         const effectiveRoles = this.config.enableRoleHierarchy
           ? await this.expandRoles(userRoles)
           : userRoles;

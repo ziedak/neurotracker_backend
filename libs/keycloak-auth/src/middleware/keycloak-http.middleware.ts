@@ -473,7 +473,7 @@ export class KeycloakAuthHttpMiddleware {
   /**
    * SECURE BYPASS VALIDATION: Using battle-tested validator library
    * Provides input sanitization and path traversal protection
-   * Prevents malicious path manipulation and injection attacks
+   * SECURITY FIX: Enhanced protection against URL-encoded attacks
    */
   private shouldBypassAuth(request: Request): boolean {
     try {
@@ -491,12 +491,67 @@ export class KeycloakAuthHttpMiddleware {
         return false; // Reject paths with suspicious characters
       }
 
-      // Prevent path traversal attacks
-      if (sanitizedPath.includes("..") || sanitizedPath.includes("\\")) {
-        this.logger.warn("Path traversal attempt detected", {
+      // SECURITY FIX: Enhanced path traversal protection
+      // First decode URL encoding to catch encoded attacks
+      let decodedPath: string;
+      try {
+        decodedPath = decodeURIComponent(sanitizedPath);
+      } catch (error) {
+        this.logger.warn("Invalid URL encoding detected", {
           path: sanitizedPath,
+          error: error instanceof Error ? error.message : "unknown",
         });
-        return false;
+        return false; // Reject malformed URL encoding
+      }
+
+      // Prevent path traversal attacks (both regular and URL-encoded)
+      const pathTraversalPatterns = [
+        "..", // Standard path traversal
+        "\\", // Windows path separator
+        "%2e%2e", // URL-encoded ..
+        "%2E%2E", // URL-encoded .. (uppercase)
+        "%5c", // URL-encoded \
+        "%5C", // URL-encoded \ (uppercase)
+        "..%2f", // Mixed encoding
+        "..%2F", // Mixed encoding (uppercase)
+        "%2f..", // Mixed encoding
+        "%2F..", // Mixed encoding (uppercase)
+      ];
+
+      for (const pattern of pathTraversalPatterns) {
+        if (decodedPath.includes(pattern) || sanitizedPath.includes(pattern)) {
+          this.logger.warn("Path traversal attempt detected", {
+            path: sanitizedPath,
+            decodedPath,
+            detectedPattern: pattern,
+          });
+          return false;
+        }
+      }
+
+      // Additional security: double decoding check for sophisticated attacks
+      let doubleDecodedPath: string;
+      try {
+        doubleDecodedPath = decodeURIComponent(decodedPath);
+        if (doubleDecodedPath !== decodedPath) {
+          // Check if double decoding reveals traversal patterns
+          for (const pattern of pathTraversalPatterns) {
+            if (doubleDecodedPath.includes(pattern)) {
+              this.logger.warn(
+                "Double-encoded path traversal attempt detected",
+                {
+                  path: sanitizedPath,
+                  decodedPath,
+                  doubleDecodedPath,
+                  detectedPattern: pattern,
+                }
+              );
+              return false;
+            }
+          }
+        }
+      } catch (error) {
+        // Double decoding failed, which is fine - continue with single decoded path
       }
 
       // Validate path format (basic URL path validation)
@@ -531,7 +586,7 @@ export class KeycloakAuthHttpMiddleware {
   /**
    * SECURE TOKEN EXTRACTION: Using battle-tested auth-header library
    * Provides proper format validation, length limits, and security checks
-   * Prevents header injection attacks and malformed token handling
+   * SECURITY FIX: Added minimum token length validation
    */
   private extractTokenFromHeader(authHeader: string): string | null {
     try {
@@ -552,11 +607,22 @@ export class KeycloakAuthHttpMiddleware {
         return null;
       }
 
-      // Prevent extremely long tokens (DoS protection)
-      if (tokenString.length > 4096) {
+      // SECURITY FIX: Token length validation (prevent both empty and overly long tokens)
+      const MIN_TOKEN_LENGTH = 10; // Minimum reasonable token length
+      const MAX_TOKEN_LENGTH = 4096; // Maximum token length (DoS protection)
+
+      if (tokenString.length < MIN_TOKEN_LENGTH) {
+        this.logger.warn("Token too short, rejecting for security", {
+          tokenLength: tokenString.length,
+          minRequired: MIN_TOKEN_LENGTH,
+        });
+        return null;
+      }
+
+      if (tokenString.length > MAX_TOKEN_LENGTH) {
         this.logger.warn("Token too long, rejecting for security", {
           tokenLength: tokenString.length,
-          maxAllowed: 4096,
+          maxAllowed: MAX_TOKEN_LENGTH,
         });
         return null;
       }
@@ -571,9 +637,33 @@ export class KeycloakAuthHttpMiddleware {
         return null;
       }
 
-      // Validate each part is valid base64url
-      for (const part of parts) {
-        if (!/^[A-Za-z0-9_-]*$/.test(part)) {
+      // Validate each part is valid base64url and has reasonable length
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (!part || !/^[A-Za-z0-9_-]*$/.test(part)) {
+          return null;
+        }
+
+        // Additional length validation for JWT parts
+        if (i === 0 && part.length < 20) {
+          // Header should be reasonable size
+          this.logger.warn("JWT header too short", {
+            headerLength: part.length,
+          });
+          return null;
+        }
+        if (i === 1 && part.length < 50) {
+          // Payload should contain meaningful claims
+          this.logger.warn("JWT payload too short", {
+            payloadLength: part.length,
+          });
+          return null;
+        }
+        if (i === 2 && part.length < 20) {
+          // Signature should be reasonable size
+          this.logger.warn("JWT signature too short", {
+            signatureLength: part.length,
+          });
           return null;
         }
       }

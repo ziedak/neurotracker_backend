@@ -201,6 +201,7 @@ describe("WebSocket Token Refresh Integration", () => {
   });
 
   it("should not leak memory with many connections", async () => {
+    const initialMemory = process.memoryUsage().heapUsed;
     for (let i = 0; i < 1000; i++) {
       const conn: WebSocketConnectionData = {
         ...connection,
@@ -209,7 +210,9 @@ describe("WebSocket Token Refresh Integration", () => {
       refreshService.registerConnection(conn.auth.connectionId, conn);
       await refreshService.unregisterConnection(conn.auth.connectionId);
     }
-    // Optionally check process.memoryUsage() or use a heap profiler
-    expect(true).toBe(true); // Placeholder for actual memory check
+    // Check that heap usage did not increase significantly
+    const finalMemory = process.memoryUsage().heapUsed;
+    const memoryDiffMB = (finalMemory - initialMemory) / 1024 / 1024;
+    expect(memoryDiffMB).toBeLessThan(5); // Allow up to 5MB increase
   });
 });

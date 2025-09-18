@@ -51,6 +51,16 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
   // Circuit breaker for HTTP requests to prevent cascading failures
   private readonly httpCircuitBreaker: CircuitBreakerPolicy;
 
+  // SECURITY FIX: Circuit breaker metrics tracking for observability
+  private circuitBreakerMetrics = {
+    successes: 0,
+    failures: 0,
+    circuitOpen: 0,
+    totalRequests: 0,
+    lastFailure: null as Date | null,
+    lastSuccess: null as Date | null,
+  };
+
   constructor(envConfig: RawEnvironmentConfig) {
     // Validate environment configuration
     const validatedConfig = validateInput(
@@ -90,6 +100,7 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
   /**
    * Enhanced circuit breaker execution with monitoring and logging
    * Provides visibility into circuit breaker state changes and performance metrics
+   * SECURITY FIX: Added comprehensive circuit breaker state monitoring
    */
   private async executeWithCircuitBreaker<T>(
     operation: () => Promise<T>,
@@ -108,7 +119,11 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
       logger.debug(`${operationName} succeeded`, {
         duration: `${duration}ms`,
         circuitBreakerActive: true,
+        circuitBreakerState: "closed", // Successful execution means circuit is closed
       });
+
+      // SECURITY FIX: Record successful circuit breaker metrics
+      this.recordCircuitBreakerMetric("success", operationName, duration);
 
       return result;
     } catch (error) {
@@ -119,15 +134,26 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
         logger.warn(`${operationName} blocked by circuit breaker`, {
           duration: `${duration}ms`,
           error: error.message,
+          circuitBreakerState: "open",
           recommendation:
             "Check Keycloak server health - circuit breaker is protecting against failures",
         });
+
+        // SECURITY FIX: Record circuit breaker rejection metrics
+        this.recordCircuitBreakerMetric(
+          "circuit_open",
+          operationName,
+          duration
+        );
       } else {
         logger.error(`${operationName} failed through circuit breaker`, {
           duration: `${duration}ms`,
           error: error instanceof Error ? error.message : String(error),
           circuitBreakerState: "accumulating_failures",
         });
+
+        // SECURITY FIX: Record failure metrics
+        this.recordCircuitBreakerMetric("failure", operationName, duration);
       }
 
       throw error;
@@ -166,6 +192,161 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
 
       return response;
     }, operationName);
+  }
+
+  /**
+   * SECURITY FIX: Record circuit breaker metrics for observability
+   * Provides visibility into circuit breaker state and performance
+   */
+  private recordCircuitBreakerMetric(
+    type: "success" | "failure" | "circuit_open",
+    operationName: string,
+    duration: number
+  ): void {
+    this.circuitBreakerMetrics.totalRequests++;
+
+    switch (type) {
+      case "success":
+        this.circuitBreakerMetrics.successes++;
+        this.circuitBreakerMetrics.lastSuccess = new Date();
+        break;
+      case "failure":
+        this.circuitBreakerMetrics.failures++;
+        this.circuitBreakerMetrics.lastFailure = new Date();
+        break;
+      case "circuit_open":
+        this.circuitBreakerMetrics.circuitOpen++;
+        this.circuitBreakerMetrics.lastFailure = new Date();
+        break;
+    }
+
+    logger.debug("Circuit breaker metrics updated", {
+      type,
+      operationName,
+      duration: `${duration}ms`,
+      metrics: {
+        successRate:
+          (
+            (this.circuitBreakerMetrics.successes /
+              this.circuitBreakerMetrics.totalRequests) *
+            100
+          ).toFixed(2) + "%",
+        totalRequests: this.circuitBreakerMetrics.totalRequests,
+        failures: this.circuitBreakerMetrics.failures,
+        circuitOpenEvents: this.circuitBreakerMetrics.circuitOpen,
+      },
+    });
+  }
+
+  /**
+   * SECURITY FIX: Validate discovery document structure before use
+   * Prevents issues with stale/invalid cached data
+   */
+  private validateDiscoveryDocument(data: any, realm: string): void {
+    if (!data || typeof data !== "object") {
+      throw new AuthenticationError(
+        "Discovery document is not a valid object",
+        "INVALID_DISCOVERY_DOCUMENT",
+        502
+      );
+    }
+
+    // Validate required endpoints
+    const requiredFields = [
+      "issuer",
+      "authorization_endpoint",
+      "token_endpoint",
+      "jwks_uri",
+    ];
+
+    const optionalButRecommended = [
+      "userinfo_endpoint",
+      "introspection_endpoint",
+      "end_session_endpoint",
+    ];
+
+    for (const field of requiredFields) {
+      if (!data[field] || typeof data[field] !== "string") {
+        throw new AuthenticationError(
+          `Discovery document missing required field: ${field}`,
+          "INVALID_DISCOVERY_DOCUMENT",
+          502
+        );
+      }
+
+      // Validate URLs
+      try {
+        new URL(data[field]);
+      } catch (error) {
+        throw new AuthenticationError(
+          `Discovery document contains invalid URL for ${field}: ${data[field]}`,
+          "INVALID_DISCOVERY_DOCUMENT",
+          502
+        );
+      }
+    }
+
+    // Validate issuer matches expected realm
+    const expectedIssuerPattern = new RegExp(`/realms/${realm}$`);
+    if (!expectedIssuerPattern.test(data.issuer)) {
+      logger.warn(
+        "Discovery document issuer doesn't match expected realm pattern",
+        {
+          issuer: data.issuer,
+          expectedRealm: realm,
+        }
+      );
+    }
+
+    // Validate supported algorithms and capabilities
+    if (data.id_token_signing_alg_values_supported) {
+      if (!Array.isArray(data.id_token_signing_alg_values_supported)) {
+        throw new AuthenticationError(
+          "Discovery document id_token_signing_alg_values_supported must be an array",
+          "INVALID_DISCOVERY_DOCUMENT",
+          502
+        );
+      }
+
+      // Ensure secure algorithms are supported
+      const secureAlgorithms = [
+        "RS256",
+        "RS384",
+        "RS512",
+        "PS256",
+        "PS384",
+        "PS512",
+      ];
+      const supportedAlgorithms = data.id_token_signing_alg_values_supported;
+      const hasSecureAlgorithm = secureAlgorithms.some((alg) =>
+        supportedAlgorithms.includes(alg)
+      );
+
+      if (!hasSecureAlgorithm) {
+        logger.warn(
+          "Discovery document doesn't advertise secure signing algorithms",
+          {
+            supportedAlgorithms,
+            secureAlgorithms,
+          }
+        );
+      }
+    }
+
+    // Log missing optional endpoints
+    for (const field of optionalButRecommended) {
+      if (!data[field]) {
+        logger.debug(`Discovery document missing recommended field: ${field}`);
+      }
+    }
+
+    logger.debug("Discovery document validation passed", {
+      realm,
+      issuer: data.issuer,
+      endpointCount:
+        requiredFields.filter((field) => data[field]).length +
+        optionalButRecommended.filter((field) => data[field]).length,
+    });
   }
 
   /**
@@ -259,7 +440,23 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
       if (isWithinConfigTimeout && isWithinMaxAge) {
         // Update access count for LRU tracking
         cached.accessCount++;
-        return cached.data;
+
+        // SECURITY FIX: Validate cached discovery document before returning
+        try {
+          this.validateDiscoveryDocument(cached.data, realm);
+          return cached.data;
+        } catch (error) {
+          logger.warn(
+            "Cached discovery document validation failed, refetching",
+            {
+              realm,
+              error: error instanceof Error ? error.message : "unknown",
+            }
+          );
+          // Remove invalid cached entry
+          this.discoveryCache.delete(cacheKey);
+          // Fall through to fetch fresh document
+        }
       }
 
       // Remove expired entry
@@ -289,6 +486,9 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
       );
 
       const data = await response.json();
+
+      // SECURITY FIX: Validate discovery document structure before caching
+      this.validateDiscoveryDocument(data, realm);
 
       // Cache the discovery document with enhanced tracking
       this.discoveryCache.set(cacheKey, {
@@ -1062,6 +1262,7 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
 
   /**
    * Check if the factory is in a healthy state including circuit breaker status
+   * SECURITY FIX: Enhanced with detailed circuit breaker observability
    */
   public getHealthStatus(): {
     healthy: boolean;
@@ -1073,11 +1274,31 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
       configured: boolean;
       failureThreshold: number;
       recoveryTimeout: string;
+      metrics: {
+        successRate: string;
+        totalRequests: number;
+        successes: number;
+        failures: number;
+        circuitOpenEvents: number;
+        lastSuccess: string | null;
+        lastFailure: string | null;
+      };
     };
   } {
+    const successRate =
+      this.circuitBreakerMetrics.totalRequests > 0
+        ? (
+            (this.circuitBreakerMetrics.successes /
+              this.circuitBreakerMetrics.totalRequests) *
+            100
+          ).toFixed(2) + "%"
+        : "0%";
+
     return {
       healthy:
-        !this.isShuttingDown && this.discoveryCache.size <= this.maxCacheSize,
+        !this.isShuttingDown &&
+        this.discoveryCache.size <= this.maxCacheSize &&
+        this.circuitBreakerMetrics.circuitOpen === 0, // Include circuit breaker health
       cacheSize: this.discoveryCache.size,
       maxCacheSize: this.maxCacheSize,
       pkceChallenges: this.pkceManager.getActiveChallengesCount(),
@@ -1086,6 +1307,17 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
         configured: true,
         failureThreshold: 10, // ConsecutiveBreaker threshold we configured
         recoveryTimeout: "60s", // halfOpenAfter time we configured
+        metrics: {
+          successRate,
+          totalRequests: this.circuitBreakerMetrics.totalRequests,
+          successes: this.circuitBreakerMetrics.successes,
+          failures: this.circuitBreakerMetrics.failures,
+          circuitOpenEvents: this.circuitBreakerMetrics.circuitOpen,
+          lastSuccess:
+            this.circuitBreakerMetrics.lastSuccess?.toISOString() || null,
+          lastFailure:
+            this.circuitBreakerMetrics.lastFailure?.toISOString() || null,
+        },
       },
     };
   }
