@@ -125,6 +125,7 @@ export class WebSocketTokenRefreshService {
         connectionId,
         userId: connectionData.auth.userId || "anonymous",
         currentToken: connectionData.auth.token,
+        refreshToken: connectionData.auth.refreshToken,
         tokenExpiry,
         refreshAttempts: 0,
         isRefreshing: false,
@@ -203,37 +204,24 @@ export class WebSocketTokenRefreshService {
         )
       );
     }
-
-    if (sessionState.isRefreshing) {
-      return failure(
-        AuthErrors.validationError("Token refresh already in progress")
-      );
-    }
-
-    // Mark as refreshing
-    sessionState.isRefreshing = true;
-    sessionState.lastRefreshAttempt = new Date();
-    sessionState.refreshAttempts++;
-
-    // Set grace period
-    sessionState.gracePeriodExpiry = new Date(
-      Date.now() + this.config.refreshGracePeriod
-    );
-
     try {
-      logger.info("Starting token refresh for WebSocket connection", {
-        connectionId,
-        userId: sessionState.userId,
-        attempt: sessionState.refreshAttempts,
-      });
-
+      if (sessionState.isRefreshing) {
+        return failure(
+          AuthErrors.validationError("Token refresh already in progress")
+        );
+      }
+      // Mark as refreshing
+      sessionState.isRefreshing = true;
+      sessionState.lastRefreshAttempt = new Date();
+      sessionState.refreshAttempts++;
+      // Set grace period
+      sessionState.gracePeriodExpiry = new Date(
+        Date.now() + this.config.refreshGracePeriod
+      );
       // Try to refresh the token
       const refreshResult = await this.performTokenRefresh(sessionState);
-
       if (refreshResult.success) {
         const { newToken, newAuthContext } = refreshResult.data;
-
-        // Update session state
         sessionState.currentToken = newToken.access_token;
         sessionState.refreshToken = newToken.refresh_token;
         sessionState.tokenExpiry = new Date(
@@ -242,7 +230,6 @@ export class WebSocketTokenRefreshService {
         sessionState.refreshAttempts = 0;
         sessionState.isRefreshing = false;
         sessionState.gracePeriodExpiry = undefined;
-
         const result: WebSocketTokenRefreshResult = {
           success: true,
           connectionId,
@@ -251,90 +238,70 @@ export class WebSocketTokenRefreshService {
           newAuthContext,
           action: "refresh_success",
         };
-
         this.metrics.recordCounter("websocket_token_refresh_success", 1, {
           userId: sessionState.userId,
         });
-
         logger.info("Token refresh successful for WebSocket connection", {
           connectionId,
           userId: sessionState.userId,
           newExpiry: sessionState.tokenExpiry.toISOString(),
         });
-
         return success(result);
       } else {
-        // Refresh failed
         sessionState.isRefreshing = false;
-
-        if (sessionState.refreshAttempts >= this.config.maxRetryAttempts) {
-          // Max attempts reached, invalidate session
-          sessionState.sessionValid = false;
-
-          const result: WebSocketTokenRefreshResult = {
-            success: false,
-            connectionId,
-            error: "Token refresh failed after maximum attempts",
-            action: "connection_downgrade",
-          };
-
-          this.metrics.recordCounter(
-            "websocket_token_refresh_max_attempts_exceeded",
-            1,
-            {
-              userId: sessionState.userId,
-            }
-          );
-
-          logger.warn("Token refresh failed - max attempts exceeded", {
-            connectionId,
-            userId: sessionState.userId,
-            attempts: sessionState.refreshAttempts,
-          });
-
-          return success(result);
-        } else {
-          // Retry later
-          const result: WebSocketTokenRefreshResult = {
-            success: false,
-            connectionId,
-            error: refreshResult.error.message,
-            retryAfter: this.config.retryDelay,
-            action: "refresh_failed",
-          };
-
-          this.metrics.recordCounter("websocket_token_refresh_retry", 1, {
-            userId: sessionState.userId,
-            attempt: sessionState.refreshAttempts.toString(),
-          });
-
-          logger.warn("Token refresh failed - will retry", {
-            connectionId,
-            userId: sessionState.userId,
-            attempt: sessionState.refreshAttempts,
-            retryAfter: this.config.retryDelay,
-            error: refreshResult.error.message,
-          });
-
-          return success(result);
+        let errorCode = "TOKEN_ERROR";
+        let errorMessage = "Token refresh failed";
+        let statusCode = 401;
+        if (
+          refreshResult.error &&
+          typeof refreshResult.error.message === "string"
+        ) {
+          errorMessage = refreshResult.error.message;
+          if (errorMessage === "Session invalidated") {
+            errorCode = "SESSION_INVALID";
+            statusCode = 440;
+            sessionState.sessionValid = false;
+          } else if (errorMessage === "Token expired") {
+            errorCode = "TOKEN_ERROR";
+            statusCode = 401;
+          } else if (errorMessage === "Token invalid") {
+            errorCode = "VALIDATION_ERROR";
+            statusCode = 400;
+          }
         }
+
+        this.metrics.recordCounter("websocket_token_refresh_failure", 1, {
+          userId: sessionState.userId,
+          error: errorCode,
+        });
+        logger.warn("Token refresh failed", {
+          connectionId,
+          userId: sessionState.userId,
+          error: errorCode,
+          errorMessage,
+        });
+        return failure(
+          AuthErrors.customError(
+            errorCode,
+            errorMessage,
+            statusCode,
+            refreshResult.error?.details
+          )
+        );
       }
     } catch (error) {
       sessionState.isRefreshing = false;
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-
       this.metrics.recordCounter("websocket_token_refresh_error", 1, {
         userId: sessionState.userId,
         error: errorMessage,
       });
-
       logger.error("Token refresh error for WebSocket connection", {
         connectionId,
         userId: sessionState.userId,
         error: errorMessage,
       });
-
       return failure(AuthErrors.systemError(errorMessage));
     }
   }
@@ -494,7 +461,17 @@ export class WebSocketTokenRefreshService {
       );
 
       if (!validationResult.valid || !validationResult.claims) {
-        return failure(AuthErrors.tokenError("New token validation failed"));
+        // Use error string from TokenValidationResult
+        let errorType = validationResult.error || "New token validation failed";
+        if (errorType === "SESSION_INVALID") {
+          sessionState.sessionValid = false;
+          errorType = "Session invalidated";
+        } else if (errorType === "TOKEN_ERROR") {
+          errorType = "Token expired";
+        } else if (errorType === "VALIDATION_ERROR") {
+          errorType = "Token invalid";
+        }
+        return failure(AuthErrors.tokenError(errorType));
       }
 
       // Create new auth context

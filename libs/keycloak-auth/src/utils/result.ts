@@ -223,6 +223,18 @@ export const AuthErrors = {
     statusCode: 401,
     details,
   }),
+
+  customError: (
+    code: string,
+    message: string,
+    statusCode: number,
+    details?: unknown
+  ): AuthError => ({
+    code,
+    message,
+    statusCode,
+    details,
+  }),
 };
 
 /**

@@ -227,6 +227,7 @@ export type WebSocketAuthMethod =
 export interface WebSocketAuthContext {
   method: WebSocketAuthMethod;
   token?: string;
+  refreshToken?: string;
   claims?: TokenClaims;
   sessionId?: string;
   clientId: string;
