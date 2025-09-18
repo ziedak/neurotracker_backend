@@ -478,6 +478,19 @@ export class AuthenticationError extends Error {
     super(message);
     this.name = "AuthenticationError";
   }
+
+  /**
+   * Safe serialization for error propagation (no stack trace, no internal info)
+   */
+  toJSON() {
+    return {
+      name: this.name,
+      message: this.message,
+      code: this.code,
+      statusCode: this.statusCode,
+      details: this.details,
+    };
+  }
 }
 
 export class TokenValidationError extends AuthenticationError {

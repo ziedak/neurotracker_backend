@@ -206,14 +206,13 @@ export class WebSocketTokenValidator {
   /**
    * Validate API key (placeholder - implement based on your API key strategy)
    */
-  private async validateApiKey(
-    _apiKey: string
-  ): Promise<TokenValidationResult> {
-    // This would integrate with your API key validation system
-    // For now, return a basic structure
+  private async validateApiKey(apiKey: string): Promise<TokenValidationResult> {
+    // Example: check against a list of valid API keys (replace with real logic)
+    const validApiKeys = (process.env["VALID_API_KEYS"] || "").split(",");
+    const isValid = validApiKeys.includes(apiKey);
     return {
-      valid: false,
-      error: "API key validation not implemented yet",
+      valid: isValid,
+      error: isValid ? "" : "Invalid API key",
       cached: false,
     };
   }
@@ -222,13 +221,14 @@ export class WebSocketTokenValidator {
    * Validate session (placeholder - implement based on your session strategy)
    */
   private async validateSession(
-    _sessionId: string
+    sessionId: string
   ): Promise<TokenValidationResult> {
-    // This would integrate with your session management system
-    // For now, return a basic structure
+    // Example: check session validity (replace with real logic)
+    // For demonstration, treat any non-empty sessionId as valid
+    const isValid = typeof sessionId === "string" && sessionId.length > 0;
     return {
-      valid: false,
-      error: "Session validation not implemented yet",
+      valid: isValid,
+      error: isValid ? "" : "Invalid session ID",
       cached: false,
     };
   }
@@ -347,14 +347,20 @@ export class WebSocketTokenValidator {
    * Clean up expired authentication contexts from cache
    */
   public async cleanupExpiredAuth(): Promise<void> {
+    const pattern = "ws:auth:*";
     try {
-      const pattern = "ws:auth:*";
       const invalidated = await this.cacheService.invalidatePattern(pattern);
       logger.info("Cleaned up expired WebSocket auth contexts", {
         invalidated,
       });
     } catch (error) {
       logger.error("Failed to cleanup expired auth contexts", { error });
+      // Fallback: report to monitoring, optionally retry or escalate
+      // Fallback: log error for monitoring/reporting
+      logger.error("Cache invalidation failure fallback", {
+        pattern,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 }

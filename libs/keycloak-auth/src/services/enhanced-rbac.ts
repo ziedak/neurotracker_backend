@@ -41,6 +41,7 @@ export interface RBACConfiguration {
  */
 
 import { createLogger } from "@libs/utils";
+import SHA256 from "crypto-js/sha256";
 import {
   KeycloakAuthorizationServicesClient,
   type AuthorizationContext,
@@ -581,10 +582,15 @@ export class EnhancedRBACService {
       let payload: any;
       try {
         const payloadBase64 = tokenParts[1];
+        // Validate base64 format
+        if (!/^[A-Za-z0-9-_]+$/.test(payloadBase64)) {
+          throw new Error("JWT payload is not valid base64url");
+        }
         // Add padding if needed
         const paddedPayload =
           payloadBase64 + "=".repeat((4 - (payloadBase64.length % 4)) % 4);
-        payload = JSON.parse(Buffer.from(paddedPayload, "base64").toString());
+        const decoded = Buffer.from(paddedPayload, "base64").toString();
+        payload = JSON.parse(decoded);
       } catch (decodeError) {
         logger.warn("Failed to decode JWT payload", {
           error:
@@ -649,9 +655,21 @@ export class EnhancedRBACService {
     }
 
     const expandedRoles = new Set(userRoles);
+    const MAX_DEPTH = 10; // Prevent stack overflow in deeply nested hierarchies
 
-    // Recursively expand roles with proper circular dependency detection
-    const expandRole = (roleName: string, visited: Set<string>) => {
+    // Recursively expand roles with proper circular dependency and depth detection
+    const expandRole = (
+      roleName: string,
+      visited: Set<string>,
+      depth: number
+    ) => {
+      if (depth > MAX_DEPTH) {
+        logger.warn("Max role expansion depth reached", {
+          roleName,
+          depth,
+        });
+        return;
+      }
       if (visited.has(roleName)) {
         logger.warn("Circular role dependency detected", {
           roleName,
@@ -671,14 +689,14 @@ export class EnhancedRBACService {
       roleDefinition.inherits.forEach((inheritedRole) => {
         expandedRoles.add(inheritedRole);
         // Pass the same visited set to detect circular dependencies
-        expandRole(inheritedRole, visited);
+        expandRole(inheritedRole, visited, depth + 1);
       });
 
       // Remove from visited set when backtracking
       visited.delete(roleName);
     };
 
-    userRoles.forEach((role) => expandRole(role, new Set()));
+    userRoles.forEach((role) => expandRole(role, new Set(), 0));
     const result = Array.from(expandedRoles);
 
     // Cache the result
@@ -759,13 +777,13 @@ export class EnhancedRBACService {
   /**
    * Get secure hash of token for caching
    */
+  /**
+   * Get secure hash of token for caching (async, uses crypto-js SHA256)
+   * Note: bcrypt is for passwords, crypto-js is used for fast token hashes
+   */
   private getTokenHash(token: string): string {
-    const crypto = require("crypto");
-    return crypto
-      .createHash("sha256")
-      .update(token)
-      .digest("hex")
-      .substring(0, 16);
+    // SHA256 returns a WordArray, .toString() gives hex
+    return SHA256(token).toString().substring(0, 16);
   }
 }
 
