@@ -441,9 +441,9 @@ export interface TokenResponse {
   access_token: string;
   token_type: string;
   expires_in: number;
-  refresh_token?: string;
-  id_token?: string;
-  scope?: string;
+  refresh_token?: string | undefined;
+  id_token?: string | undefined;
+  scope?: string | undefined;
   [key: string]: unknown;
 }
 
@@ -614,4 +614,4 @@ export type {
   PermissionScope,
   RBACDecision,
   RBACConfiguration,
-} from "../services/enhanced-rbac";
+} from "../services/rbac/enhanced-rbac";

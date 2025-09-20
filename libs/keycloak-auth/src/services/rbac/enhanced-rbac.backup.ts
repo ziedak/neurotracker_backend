@@ -11,45 +11,37 @@ export interface RBACConfiguration {
 }
 
 /**
- * E      const decision: RBACDecision = {
-        allowed,
-        effectiveRoles,
-        effectivePermissions,
-        matchedPolicies: authzDecision.granted ? ["keycloak_authz"] : [],
-        reason: allowed
-          ? (authzDecision.granted ? "authorized" : "authorized_via_fallback")
-          : "insufficient permissions",
-        context: {
-          originalAuthzDecision: authzDecision,
-          userRoles,
-          expandedRoles: effectiveRole        // Check resource-type wildcards (e.g., "resource:*" should match "doc2:delete")
-        if (permission.endsWith(":*")) {
-          const permissionResource = permission.slice(0, -2); // Remove ":*"
-          // If it's a global wildcard or resource-specific wildcard matching the requested resource
-          if (permissionResource === "*" || permissionResource === resource) {
-            return true;
-          }
-          // Special case: treat "resource:*" as matching any resource (as expected by tests)
-          if (permissionResource === "resource") {
-            return true;
-          }
-          return false;
-        } userRoles.length,
-        },
-      };ervice using Keycloak Authorization Services
+ * Enhanced RBAC Service using Keycloak Authorization Services
  * Provides role hierarchy, dynamic permissions, and policy-based access control
  */
 
 import { createLogger } from "@libs/utils";
 import SHA256 from "crypto-js/sha256";
+import { z } from "zod";
 import {
   KeycloakAuthorizationServicesClient,
   type AuthorizationContext,
   type PolicyRepresentation,
-} from "./keycloak-authorization-services";
+} from "../keycloak-authorization-services";
 import { CacheService } from "@libs/database";
 
 const logger = createLogger("EnhancedRBACService");
+
+// Zod schemas for input validation
+const AccessTokenSchema = z
+  .string()
+  .min(1, "Access token cannot be empty")
+  .regex(
+    /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/,
+    "Invalid JWT format"
+  );
+const ResourceSchema = z.string().min(1, "Resource cannot be empty");
+const PermissionSchema = z.string().min(1, "Permission cannot be empty");
+const CheckPermissionInputSchema = z.object({
+  accessToken: AccessTokenSchema,
+  resource: ResourceSchema,
+  permission: PermissionSchema,
+});
 
 /**
  * Role hierarchy definition
@@ -109,8 +101,14 @@ export const DEFAULT_RBAC_CONFIG: RBACConfig = {
   enableRoleHierarchy: true,
   enableDynamicPermissions: true,
   enablePolicyCaching: true,
-  roleExpansionCacheTtl: 1800, // 30 minutes
-  permissionCacheTtl: 300, // 5 minutes
+  roleExpansionCacheTtl: parseInt(
+    process.env["RBAC_ROLE_EXPANSION_CACHE_TTL"] || "1800",
+    10
+  ), // 30 minutes
+  permissionCacheTtl: parseInt(
+    process.env["RBAC_PERMISSION_CACHE_TTL"] || "300",
+    10
+  ), // 5 minutes
   enableAuditLogging: true,
 };
 
@@ -118,16 +116,6 @@ export const DEFAULT_RBAC_CONFIG: RBACConfig = {
  * Enhanced RBAC Service
  */
 export class EnhancedRBACService {
-  /**
-   * Public method to generate cache key for permission checks (for testing)
-   */
-  public generateCacheKey(
-    accessToken: string,
-    permission: string,
-    resource: string
-  ): string {
-    return `rbac:${resource}:${permission}:${this.getTokenHash(accessToken)}`;
-  }
   private authzClient: KeycloakAuthorizationServicesClient;
   private cacheService: CacheService | undefined;
   private config: RBACConfig;
@@ -180,81 +168,53 @@ export class EnhancedRBACService {
       );
     }
   }
-
+  /**
+   * Public method to generate cache key for permission checks (for testing)
+   */
+  public generateCacheKey(
+    accessToken: string,
+    resource: string,
+    permission: string
+  ): string {
+    return `rbac:${resource}:${permission}:${this.getTokenHash(accessToken)}`;
+  }
   /**
    * Check if user has permission for a resource
    */
   public async checkPermission(
     accessToken: string,
     resource: string,
-    action: string,
+    permission: string,
     context?: AuthorizationContext
   ): Promise<RBACDecision> {
-    // Validate inputs
-    if (
-      !accessToken ||
-      typeof accessToken !== "string" ||
-      accessToken.trim() === ""
-    ) {
+    // Validate inputs using Zod
+    try {
+      CheckPermissionInputSchema.parse({ accessToken, resource, permission });
+    } catch (validationError) {
       return {
         allowed: false,
         effectiveRoles: [],
         effectivePermissions: [],
         matchedPolicies: [],
-        reason: "Invalid or missing token",
-        context: { error: "Empty or invalid access token" },
-      };
-    }
-
-    // Validate JWT structure
-    const tokenParts = accessToken.split(".");
-    if (
-      tokenParts.length !== 3 ||
-      !tokenParts[0] ||
-      !tokenParts[1] ||
-      !tokenParts[2]
-    ) {
-      return {
-        allowed: false,
-        effectiveRoles: [],
-        effectivePermissions: [],
-        matchedPolicies: [],
-        reason: "Invalid token format",
-        context: { error: "Malformed JWT token" },
-      };
-    }
-
-    if (!resource || typeof resource !== "string" || resource.trim() === "") {
-      return {
-        allowed: false,
-        effectiveRoles: [],
-        effectivePermissions: [],
-        matchedPolicies: [],
-        reason: "Resource is required",
-        context: { error: "Empty or invalid resource" },
-      };
-    }
-
-    if (!action || typeof action !== "string" || action.trim() === "") {
-      return {
-        allowed: false,
-        effectiveRoles: [],
-        effectivePermissions: [],
-        matchedPolicies: [],
-        reason: "Permission is required",
-        context: { error: "Empty or invalid action" },
+        reason: "Invalid input parameters",
+        context: {
+          error:
+            validationError instanceof Error
+              ? validationError.message
+              : String(validationError),
+        },
       };
     }
 
     const cacheKey = this.config.enablePolicyCaching
-      ? `rbac:${resource}:${action}:${this.getTokenHash(accessToken)}`
+      ? `rbac:${resource}:${permission}:${this.getTokenHash(accessToken)}`
       : undefined;
 
     // Try cache first
     if (cacheKey && this.cacheService) {
       const cached = await this.cacheService.get(cacheKey);
       if (cached.data) {
-        logger.debug("RBAC decision from cache", { resource, action });
+        logger.debug("RBAC decision from cache", { resource, permission });
         return cached.data as RBACDecision;
       }
     }
@@ -264,7 +224,7 @@ export class EnhancedRBACService {
       const authzDecision = await this.authzClient.checkAuthorization(
         accessToken,
         resource,
-        [action],
+        [permission],
         context
       );
 
@@ -292,14 +252,18 @@ export class EnhancedRBACService {
       const effectivePermissions = await this.calculateEffectivePermissions(
         effectiveRoles,
         resource,
-        action
+        permission
       );
 
       // Determine final decision
       const allowed =
         authzDecision.granted ||
         (this.config.enableDynamicPermissions &&
-          this.hasRequiredPermission(effectivePermissions, resource, action));
+          this.hasRequiredPermission(
+            effectivePermissions,
+            resource,
+            permission
+          ));
 
       const decision: RBACDecision = {
         allowed,
@@ -308,11 +272,19 @@ export class EnhancedRBACService {
         matchedPolicies: authzDecision.granted ? ["keycloak_authz"] : [],
         reason: allowed
           ? !authzDecision.granted &&
-            this.hasRequiredPermission(effectivePermissions, resource, action)
+            this.hasRequiredPermission(
+              effectivePermissions,
+              resource,
+              permission
+            )
             ? `authorized (${authzDecision.reason || "access_denied"})`
             : "authorized"
           : !authzDecision.granted &&
-            !this.hasRequiredPermission(effectivePermissions, resource, action)
+            !this.hasRequiredPermission(
+              effectivePermissions,
+              resource,
+              permission
+            )
           ? "insufficient permissions"
           : authzDecision.reason || "insufficient permissions",
         context: {
@@ -335,7 +307,7 @@ export class EnhancedRBACService {
       if (this.config.enableAuditLogging) {
         logger.info("RBAC permission check", {
           resource,
-          action,
+          permission,
           allowed: decision.allowed,
           userId: context?.userId,
           effectiveRoles: decision.effectiveRoles,
@@ -347,7 +319,7 @@ export class EnhancedRBACService {
     } catch (error) {
       logger.error("RBAC permission check failed", {
         resource,
-        action,
+        permission,
         error: error instanceof Error ? error.message : String(error),
       });
 
@@ -395,12 +367,16 @@ export class EnhancedRBACService {
         const effectivePermissions = await this.calculateEffectivePermissions(
           effectiveRoles,
           resource,
-          action
+          permission
         );
 
         const allowed =
           this.config.enableDynamicPermissions &&
-          this.hasRequiredPermission(effectivePermissions, resource, action);
+          this.hasRequiredPermission(
+            effectivePermissions,
+            resource,
+            permission
+          );
 
         return {
           allowed,
@@ -437,18 +413,18 @@ export class EnhancedRBACService {
    */
   public async checkMultiplePermissions(
     accessToken: string,
-    checks: Array<{ resource: string; action: string }>,
+    checks: Array<{ resource: string; permission: string }>,
     context?: AuthorizationContext
   ): Promise<Map<string, RBACDecision>> {
     const results = new Map<string, RBACDecision>();
 
     // Execute checks sequentially to ensure consistent mock behavior
-    for (const { resource, action } of checks) {
-      const key = `${resource}:${action}`;
+    for (const { resource, permission } of checks) {
+      const key = `${resource}:${permission}`;
       const decision = await this.checkPermission(
         accessToken,
         resource,
-        action,
+        permission,
         context
       );
       results.set(key, decision);
@@ -762,7 +738,7 @@ export class EnhancedRBACService {
   private async calculateEffectivePermissions(
     roles: string[],
     _resource: string,
-    _action: string
+    _permission: string
   ): Promise<string[]> {
     const permissions = new Set<string>();
 
@@ -784,32 +760,32 @@ export class EnhancedRBACService {
   private hasRequiredPermission(
     effectivePermissions: string[],
     resource: string,
-    action: string
+    permission: string
   ): boolean {
-    const requiredPermission = `${resource}:${action}`;
+    const requiredPermission = `${resource}:${permission}`;
 
-    return effectivePermissions.some((permission) => {
+    return effectivePermissions.some((perm) => {
       // Exact match
-      if (permission === requiredPermission) return true;
+      if (perm === requiredPermission) return true;
 
       // Universal wildcard match
-      if (permission === "*") return true;
+      if (perm === "*") return true;
 
       // Global system wildcard match
-      if (permission === "system:*") return true;
+      if (perm === "system:*") return true;
 
       // Resource-specific wildcard match (e.g., "resource:*" matches "doc2:delete")
-      if (permission === `${resource}:*`) return true;
+      if (perm === `${resource}:*`) return true;
 
-      // Action-specific wildcard match (e.g., "*:delete" matches "doc2:delete")
-      if (permission === `*:${action}`) return true;
+      // Permission-specific wildcard match (e.g., "*:delete" matches "doc2:delete")
+      if (perm === `*:${permission}`) return true;
 
       // Check for resource-type wildcards
-      if (permission.endsWith(":*")) {
-        const permissionResource = permission.slice(0, -2); // Remove ":*"
+      if (perm.endsWith(":*")) {
+        const permissionResource = perm.slice(0, -2); // Remove ":*"
         // If permission is "resource:*" and resource is "doc2",
         // this should match if "doc2" is considered a "resource" type
-        // For now, we'll assume any resource:* matches any resource:action
+        // For now, we'll assume any resource:* matches any resource:permission
         if (permissionResource === "resource" || permissionResource === "*") {
           return true;
         }
@@ -820,11 +796,8 @@ export class EnhancedRBACService {
   }
 
   /**
-   * Get secure hash of token for caching
-   */
-  /**
-   * Get secure hash of token for caching (async, uses crypto-js SHA256)
-   * Note: bcrypt is for passwords, crypto-js is used for fast token hashes
+   * Get secure hash of token for caching (uses SHA256 for fast hashing, not for security)
+   * Note: This is for caching purposes only; do not use for password hashing.
    */
   private getTokenHash(token: string): string {
     // SHA256 returns a WordArray, .toString() gives hex

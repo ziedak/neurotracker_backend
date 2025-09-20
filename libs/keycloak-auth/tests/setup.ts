@@ -3,6 +3,7 @@
  */
 
 // Mock @libs/utils
+const mockExecuteWithRetry = jest.fn();
 jest.mock("@libs/utils", () => ({
   createLogger: jest.fn(() => ({
     info: jest.fn(),
@@ -10,6 +11,8 @@ jest.mock("@libs/utils", () => ({
     warn: jest.fn(),
     error: jest.fn(),
   })),
+  executeWithRetry: mockExecuteWithRetry,
+  RetryOptions: {},
 }));
 
 // Mock @libs/database
@@ -49,6 +52,45 @@ global.fetch = jest.fn();
 // Test utilities
 // Add testUtils to global object
 (global as any).testUtils = {
+  // ... existing code ...
+
+  mockExecuteWithRetrySuccess: (_result: any) => {
+    mockExecuteWithRetry.mockImplementation(async (operation, _onError) => {
+      // Execute the actual operation to simulate real behavior
+      return await operation();
+    });
+  },
+
+  mockExecuteWithRetryFailure: (error: Error) => {
+    mockExecuteWithRetry.mockRejectedValue(error);
+  },
+
+  mockExecuteWithRetryWithRetry: (_result: any, attempts: number = 2) => {
+    let callCount = 0;
+    mockExecuteWithRetry.mockImplementation(async (operation, onError) => {
+      callCount++;
+      if (callCount < attempts) {
+        const error = new Error(`Attempt ${callCount} failed`);
+        onError?.(error, callCount);
+        throw error;
+      }
+      // On success, execute the actual operation
+      return await operation();
+    });
+  },
+
+  mockExecuteWithRetryCircuitBreaker: () => {
+    mockExecuteWithRetry.mockRejectedValue(
+      new Error("Circuit breaker is open")
+    );
+  },
+
+  resetExecuteWithRetryMock: () => {
+    mockExecuteWithRetry.mockReset();
+    mockExecuteWithRetry.mockResolvedValue(undefined);
+  },
+
+  // ... existing code ...
   createMockTokenClaims: (overrides = {}) => ({
     iss: "https://keycloak.example.com/realms/test",
     sub: "user-123",

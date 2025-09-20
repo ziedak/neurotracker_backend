@@ -6,12 +6,6 @@ import {
   IKeycloakClientFactory,
   AuthenticationError,
 } from "../types/index";
-import {
-  circuitBreaker,
-  handleAll,
-  ConsecutiveBreaker,
-  CircuitBreakerPolicy,
-} from "cockatiel";
 import { PKCEManager } from "../utils/pkce";
 import {
   validateInput,
@@ -26,6 +20,8 @@ import {
 } from "../validation/index";
 
 import { createLogger } from "@libs/utils";
+import { LRUCache } from "lru-cache";
+import { createHttpClient, HttpClient } from "@libs/messaging";
 
 const logger = createLogger("keycloak-client-factory");
 
@@ -35,32 +31,14 @@ const logger = createLogger("keycloak-client-factory");
  */
 export class KeycloakClientFactory implements IKeycloakClientFactory {
   private config: KeycloakMultiClientConfig;
-  private discoveryCache: Map<
-    string,
-    { data: any; timestamp: number; accessCount: number }
-  > = new Map();
+  private discoveryCache: LRUCache<string, { data: any; timestamp: number }>;
   private pkceManager: PKCEManager;
+  private httpClient: HttpClient;
 
   // Cache management with enhanced cleanup
   private readonly maxCacheSize = 50; // Reduced for better memory management
-  private readonly cacheCleanupInterval = 2 * 60 * 1000; // 2 minutes cleanup interval (more aggressive)
   private readonly maxCacheAge = 15 * 60 * 1000; // 15 minutes max age regardless of config
-  private cacheCleanupTimer?: ReturnType<typeof setInterval> | undefined;
   private isShuttingDown = false;
-
-  // Circuit breaker for HTTP requests to prevent cascading failures
-  private readonly httpCircuitBreaker: CircuitBreakerPolicy;
-
-  // SECURITY FIX: Circuit breaker metrics tracking for observability
-  private circuitBreakerMetrics = {
-    successes: 0,
-    failures: 0,
-    circuitOpen: 0,
-    totalRequests: 0,
-    lastFailure: null as Date | null,
-    lastSuccess: null as Date | null,
-  };
-
   constructor(envConfig: RawEnvironmentConfig) {
     // Validate environment configuration
     const validatedConfig = validateInput(
@@ -76,165 +54,34 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
       allowForConfidentialClients: true,
     });
 
-    // Initialize circuit breaker for HTTP requests using cockatiel
-    // Production-optimized settings for authentication services
-    this.httpCircuitBreaker = circuitBreaker(handleAll, {
-      halfOpenAfter: 60000, // Extended recovery time to 60s for Keycloak stability
-      breaker: new ConsecutiveBreaker(10), // Increased failure threshold to 10 consecutive failures
-    });
-
-    // Start cache cleanup timer
-    this.startCacheCleanupTimer();
-
     // Build multi-client configuration
     this.config = this.buildMultiClientConfig(
       validatedConfig as RawEnvironmentConfig
     );
+
+    // Initialize discovery cache with LRU eviction and TTL
+    const cacheTimeout = this.config.discovery.cacheTimeout * 1000;
+    const ttl = Math.min(cacheTimeout, this.maxCacheAge);
+    this.discoveryCache = new LRUCache({
+      max: this.maxCacheSize,
+      ttl: ttl,
+      allowStale: false,
+    });
+
+    // Initialize HTTP client without baseURL for full URL control
+    this.httpClient = createHttpClient({
+      timeout: 30000,
+      headers: {
+        "User-Agent": "Neurotracker-Keycloak-Client/1.0",
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    });
+
     logger.info("Keycloak client factory initialized", {
       realm: this.config.clients.frontend.realm,
       serverUrl: this.config.clients.frontend.serverUrl,
       clientCount: Object.keys(this.config.clients).length,
-    });
-  }
-
-  /**
-   * Enhanced circuit breaker execution with monitoring and logging
-   * Provides visibility into circuit breaker state changes and performance metrics
-   * SECURITY FIX: Added comprehensive circuit breaker state monitoring
-   */
-  private async executeWithCircuitBreaker<T>(
-    operation: () => Promise<T>,
-    operationName: string
-  ): Promise<T> {
-    const startTime = Date.now();
-
-    try {
-      logger.debug(
-        `Executing ${operationName} with circuit breaker protection`
-      );
-
-      const result = await this.httpCircuitBreaker.execute(operation);
-
-      const duration = Date.now() - startTime;
-      logger.debug(`${operationName} succeeded`, {
-        duration: `${duration}ms`,
-        circuitBreakerActive: true,
-        circuitBreakerState: "closed", // Successful execution means circuit is closed
-      });
-
-      // SECURITY FIX: Record successful circuit breaker metrics
-      this.recordCircuitBreakerMetric("success", operationName, duration);
-
-      return result;
-    } catch (error) {
-      const duration = Date.now() - startTime;
-
-      // Check if this is a circuit breaker rejection
-      if (error instanceof Error && error.message.includes("circuit")) {
-        logger.warn(`${operationName} blocked by circuit breaker`, {
-          duration: `${duration}ms`,
-          error: error.message,
-          circuitBreakerState: "open",
-          recommendation:
-            "Check Keycloak server health - circuit breaker is protecting against failures",
-        });
-
-        // SECURITY FIX: Record circuit breaker rejection metrics
-        this.recordCircuitBreakerMetric(
-          "circuit_open",
-          operationName,
-          duration
-        );
-      } else {
-        logger.error(`${operationName} failed through circuit breaker`, {
-          duration: `${duration}ms`,
-          error: error instanceof Error ? error.message : String(error),
-          circuitBreakerState: "accumulating_failures",
-        });
-
-        // SECURITY FIX: Record failure metrics
-        this.recordCircuitBreakerMetric("failure", operationName, duration);
-      }
-
-      throw error;
-    }
-  }
-
-  /**
-   * Unified HTTP client method with circuit breaker protection
-   * Eliminates code duplication and provides consistent error handling
-   */
-  private async executeHttpRequest(
-    url: string,
-    options: RequestInit,
-    operationName: string
-  ): Promise<Response> {
-    // Set default headers
-    const defaultHeaders = {
-      "User-Agent": "keycloak-auth-lib/1.0.0",
-      Accept: "application/json",
-    };
-
-    const requestOptions: RequestInit = {
-      ...options,
-      headers: {
-        ...defaultHeaders,
-        ...options.headers,
-      },
-    };
-
-    return this.executeWithCircuitBreaker(async () => {
-      const response = await fetch(url, requestOptions);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      return response;
-    }, operationName);
-  }
-
-  /**
-   * SECURITY FIX: Record circuit breaker metrics for observability
-   * Provides visibility into circuit breaker state and performance
-   */
-  private recordCircuitBreakerMetric(
-    type: "success" | "failure" | "circuit_open",
-    operationName: string,
-    duration: number
-  ): void {
-    this.circuitBreakerMetrics.totalRequests++;
-
-    switch (type) {
-      case "success":
-        this.circuitBreakerMetrics.successes++;
-        this.circuitBreakerMetrics.lastSuccess = new Date();
-        break;
-      case "failure":
-        this.circuitBreakerMetrics.failures++;
-        this.circuitBreakerMetrics.lastFailure = new Date();
-        break;
-      case "circuit_open":
-        this.circuitBreakerMetrics.circuitOpen++;
-        this.circuitBreakerMetrics.lastFailure = new Date();
-        break;
-    }
-
-    logger.debug("Circuit breaker metrics updated", {
-      type,
-      operationName,
-      duration: `${duration}ms`,
-      metrics: {
-        successRate:
-          (
-            (this.circuitBreakerMetrics.successes /
-              this.circuitBreakerMetrics.totalRequests) *
-            100
-          ).toFixed(2) + "%",
-        totalRequests: this.circuitBreakerMetrics.totalRequests,
-        failures: this.circuitBreakerMetrics.failures,
-        circuitOpenEvents: this.circuitBreakerMetrics.circuitOpen,
-      },
     });
   }
 
@@ -424,6 +271,31 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
   }
 
   /**
+   * Centralized error validation for Keycloak error responses
+   * Only used when response is expected to be an error object
+   */
+  private validateKeycloakError(data: any, operation: string): void {
+    if (
+      data &&
+      typeof data === "object" &&
+      (data.error || data.error_description)
+    ) {
+      logger.error(`${operation} failed`, {
+        error: data.error,
+        errorDescription: data.error_description,
+      });
+      throw new AuthenticationError(
+        `${operation} failed: ${
+          data.error_description || data.error || "Unknown error"
+        }`,
+        `${operation.toUpperCase()}_FAILED`,
+        400,
+        data
+      );
+    }
+  }
+
+  /**
    * Get OpenID Connect discovery document with enhanced caching and memory management
    */
   public async getDiscoveryDocument(realm: string): Promise<any> {
@@ -438,9 +310,6 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
       const isWithinMaxAge = now - cached.timestamp < this.maxCacheAge;
 
       if (isWithinConfigTimeout && isWithinMaxAge) {
-        // Update access count for LRU tracking
-        cached.accessCount++;
-
         // SECURITY FIX: Validate cached discovery document before returning
         try {
           this.validateDiscoveryDocument(cached.data, realm);
@@ -463,13 +332,7 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
       this.discoveryCache.delete(cacheKey);
     }
 
-    // Proactive cleanup before adding new entry
-    this.cleanupExpiredCacheEntries();
-
-    // Check cache size before adding new entry (LRU eviction)
-    if (this.discoveryCache.size >= this.maxCacheSize) {
-      this.evictLRUEntries(1);
-    }
+    // LRUCache handles size-based eviction automatically
 
     const serverUrl = this.config.clients.frontend.serverUrl;
     const discoveryUrl = `${serverUrl}/realms/${realm}/.well-known/openid_connect_configuration`;
@@ -478,23 +341,15 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
       logger.debug("Fetching discovery document", {
         url: discoveryUrl,
       });
-
-      const response = await this.executeHttpRequest(
-        discoveryUrl,
-        { method: "GET" },
-        `discovery-document-fetch:${realm}`
-      );
-
-      const data = await response.json();
-
-      // SECURITY FIX: Validate discovery document structure before caching
+      const response = await this.httpClient.get<any>(discoveryUrl);
+      const data = response.data;
+      this.validateKeycloakError(data, "discovery_fetch");
       this.validateDiscoveryDocument(data, realm);
 
       // Cache the discovery document with enhanced tracking
       this.discoveryCache.set(cacheKey, {
         data,
         timestamp: Date.now(),
-        accessCount: 1,
       });
 
       logger.info("Discovery document retrieved successfully", {
@@ -512,7 +367,6 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     } catch (error) {
       logger.error("Discovery document fetch failed", {
         error: error instanceof Error ? error.message : String(error),
-        circuitBreakerState: "circuit-breaker-active",
       });
 
       throw new AuthenticationError(
@@ -671,54 +525,29 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     }
 
     try {
-      const response = await this.executeHttpRequest(
+      const response = await this.httpClient.post<TokenResponse>(
         discovery.token_endpoint,
+        body.toString(),
         {
-          method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
           },
-          body: body.toString(),
-        },
-        "authorization-code-token-exchange"
+        }
       );
-
-      const responseData = await response.json();
-
-      if (!response.ok) {
-        logger.error("Token exchange failed", {
-          status: response.status,
-          error: responseData.error,
-          errorDescription: responseData.error_description,
-        });
-
-        throw new AuthenticationError(
-          `Token exchange failed: ${
-            responseData.error_description ||
-            responseData.error ||
-            "Unknown error"
-          }`,
-          "TOKEN_EXCHANGE_FAILED",
-          response.status,
-          responseData
-        );
-      }
-
-      // Validate token response
+      const responseData = response["data"] as TokenResponse;
+      this.validateKeycloakError(responseData, "token_exchange");
       const validatedTokenResponse = validateInput(
         TokenResponseSchema,
         responseData,
         "token response"
       );
-
       logger.info("Token exchange successful", {
         clientId: client.clientId,
         hasRefreshToken: !!validatedTokenResponse.refresh_token,
         expiresIn: validatedTokenResponse.expires_in,
         scope: validatedTokenResponse.scope,
       });
-
-      return validatedTokenResponse as TokenResponse;
+      return validatedTokenResponse;
     } catch (error) {
       if (error instanceof AuthenticationError) {
         throw error;
@@ -796,53 +625,28 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     }
 
     try {
-      const response = await this.executeHttpRequest(
+      const response = await this.httpClient.post<TokenResponse>(
         discovery.token_endpoint,
+        body.toString(),
         {
-          method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
           },
-          body: body.toString(),
-        },
-        "refresh-token"
+        }
       );
-
-      const responseData = await response.json();
-
-      if (!response.ok) {
-        logger.error("Token refresh failed", {
-          status: response.status,
-          error: responseData.error,
-          errorDescription: responseData.error_description,
-        });
-
-        throw new AuthenticationError(
-          `Token refresh failed: ${
-            responseData.error_description ||
-            responseData.error ||
-            "Unknown error"
-          }`,
-          "TOKEN_REFRESH_FAILED",
-          response.status,
-          responseData
-        );
-      }
-
-      // Validate token response
+      const responseData = response["data"] as TokenResponse;
+      this.validateKeycloakError(responseData, "token_refresh");
       const validatedTokenResponse = validateInput(
         TokenResponseSchema,
         responseData,
         "token response"
       );
-
       logger.info("Token refresh successful", {
         clientId: client.clientId,
         hasRefreshToken: !!validatedTokenResponse.refresh_token,
         expiresIn: validatedTokenResponse.expires_in,
       });
-
-      return validatedTokenResponse as TokenResponse;
+      return validatedTokenResponse;
     } catch (error) {
       if (error instanceof AuthenticationError) {
         throw error;
@@ -884,48 +688,24 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     });
 
     try {
-      const response = await this.executeHttpRequest(
+      const response = await this.httpClient.post<TokenResponse>(
         discovery.token_endpoint,
+        body.toString(),
         {
-          method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
           },
-          body: body.toString(),
-        },
-        `client-credentials:${clientType}`
+        }
       );
-
-      const responseData = await response.json();
-
-      if (!response.ok) {
-        logger.error("Client credentials token request failed", {
-          status: response.status,
-          clientType,
-          error: responseData.error,
-          errorDescription: responseData.error_description,
-        });
-
-        throw new AuthenticationError(
-          `Client credentials flow failed: ${
-            responseData.error_description ||
-            responseData.error ||
-            "Unknown error"
-          }`,
-          "CLIENT_CREDENTIALS_FAILED",
-          response.status,
-          responseData
-        );
-      }
-
+      const responseData = response["data"] as TokenResponse;
+      this.validateKeycloakError(responseData, "client_credentials");
       logger.info("Client credentials token obtained", {
         clientType,
         clientId: client.clientId,
         expiresIn: responseData.expires_in,
         scope: responseData.scope,
       });
-
-      return responseData as TokenResponse;
+      return responseData;
     } catch (error) {
       if (error instanceof AuthenticationError) {
         throw error;
@@ -983,47 +763,22 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     }
 
     try {
-      const response = await this.executeHttpRequest(
+      const response = await this.httpClient.post<TokenResponse>(
         discovery.token_endpoint,
+        body.toString(),
         {
-          method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
           },
-          body: body.toString(),
-        },
-        `direct-grant:${clientType}`
+        }
       );
-
-      const responseData = await response.json();
-
-      if (!response.ok) {
-        logger.error("Direct grant token request failed", {
-          status: response.status,
-          username,
-          clientType,
-          error: responseData.error,
-          errorDescription: responseData.error_description,
-        });
-
-        throw new AuthenticationError(
-          `Direct grant flow failed: ${
-            responseData.error_description ||
-            responseData.error ||
-            "Unknown error"
-          }`,
-          responseData.error?.toUpperCase() || "DIRECT_GRANT_FAILED",
-          response.status
-        );
-      }
-
-      // Validate token response
+      const responseData = response["data"] as TokenResponse;
+      this.validateKeycloakError(responseData, "direct_grant");
       const validatedTokenResponse = validateInput(
         TokenResponseSchema,
         responseData,
         "token response"
       );
-
       logger.info("Direct grant token obtained", {
         username,
         clientType,
@@ -1031,8 +786,7 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
         expiresIn: validatedTokenResponse.expires_in,
         scope: validatedTokenResponse.scope,
       });
-
-      return validatedTokenResponse as TokenResponse;
+      return validatedTokenResponse;
     } catch (error) {
       if (error instanceof AuthenticationError) {
         throw error;
@@ -1120,98 +874,11 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
   }
 
   /**
-   * Start automatic cache cleanup timer
-   */
-  private startCacheCleanupTimer(): void {
-    this.cacheCleanupTimer = setInterval(() => {
-      this.cleanupExpiredCacheEntries();
-    }, this.cacheCleanupInterval);
-
-    // Ensure timer doesn't prevent process exit
-    this.cacheCleanupTimer.unref();
-  }
-
-  /**
-   * Clean up expired cache entries with enhanced logic
-   */
-  private cleanupExpiredCacheEntries(): void {
-    if (this.isShuttingDown) {
-      return; // Skip cleanup during shutdown
-    }
-
-    const now = Date.now();
-    const configTimeout = this.config.discovery.cacheTimeout * 1000;
-    let removedCount = 0;
-
-    // Remove entries that are expired by either config timeout OR max age
-    for (const [key, entry] of this.discoveryCache.entries()) {
-      const isConfigExpired = now - entry.timestamp > configTimeout;
-      const isMaxAgeExpired = now - entry.timestamp > this.maxCacheAge;
-
-      if (isConfigExpired || isMaxAgeExpired) {
-        this.discoveryCache.delete(key);
-        removedCount++;
-      }
-    }
-
-    if (removedCount > 0) {
-      logger.debug("Cleaned up expired discovery cache entries", {
-        removedCount,
-        remainingCount: this.discoveryCache.size,
-        configTimeout: configTimeout / 1000,
-        maxAge: this.maxCacheAge / 1000,
-      });
-    }
-
-    // Enforce maximum cache size with LRU eviction if still over limit
-    if (this.discoveryCache.size > this.maxCacheSize) {
-      const entriesToRemove = this.discoveryCache.size - this.maxCacheSize;
-      this.evictLRUEntries(entriesToRemove);
-    }
-  }
-
-  /**
-   * Evict least recently used (LRU) cache entries
-   */
-  private evictLRUEntries(count: number): void {
-    if (count <= 0) return;
-
-    // Sort entries by access count (ascending) and timestamp (ascending for tie-breaking)
-    const entries = Array.from(this.discoveryCache.entries()).sort(
-      ([, a], [, b]) => {
-        if (a.accessCount !== b.accessCount) {
-          return a.accessCount - b.accessCount; // Least accessed first
-        }
-        return a.timestamp - b.timestamp; // Oldest first for tie-breaking
-      }
-    );
-
-    let removedCount = 0;
-    for (let i = 0; i < count && i < entries.length; i++) {
-      const entry = entries[i];
-      if (entry) {
-        const [key] = entry;
-        this.discoveryCache.delete(key);
-        removedCount++;
-      }
-    }
-
-    if (removedCount > 0) {
-      logger.debug("Evicted LRU cache entries", {
-        removedCount,
-        maxSize: this.maxCacheSize,
-        currentSize: this.discoveryCache.size,
-      });
-    }
-  }
-
-  /**
    * Get cache statistics for monitoring
    */
   public getCacheStats(): {
     size: number;
     maxSize: number;
-    cleanupInterval: number;
     entries: Array<{ key: string; age: number; expiresIn: number }>;
   } {
     const now = Date.now();
@@ -1220,7 +887,6 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     const stats = {
       size: this.discoveryCache.size,
       maxSize: this.maxCacheSize,
-      cleanupInterval: this.cacheCleanupInterval,
       entries: Array.from(this.discoveryCache.entries()).map(
         ([key, entry]) => ({
           key,
@@ -1244,12 +910,6 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
     });
 
     this.isShuttingDown = true;
-
-    // Clear cleanup timer
-    if (this.cacheCleanupTimer) {
-      clearInterval(this.cacheCleanupTimer);
-      this.cacheCleanupTimer = undefined;
-    }
 
     // Clear all caches
     this.discoveryCache.clear();
@@ -1285,38 +945,25 @@ export class KeycloakClientFactory implements IKeycloakClientFactory {
       };
     };
   } {
-    const successRate =
-      this.circuitBreakerMetrics.totalRequests > 0
-        ? (
-            (this.circuitBreakerMetrics.successes /
-              this.circuitBreakerMetrics.totalRequests) *
-            100
-          ).toFixed(2) + "%"
-        : "0%";
-
     return {
       healthy:
-        !this.isShuttingDown &&
-        this.discoveryCache.size <= this.maxCacheSize &&
-        this.circuitBreakerMetrics.circuitOpen === 0, // Include circuit breaker health
+        !this.isShuttingDown && this.discoveryCache.size <= this.maxCacheSize,
       cacheSize: this.discoveryCache.size,
       maxCacheSize: this.maxCacheSize,
       pkceChallenges: this.pkceManager.getActiveChallengesCount(),
       shutdownStatus: this.isShuttingDown,
       circuitBreaker: {
-        configured: true,
-        failureThreshold: 10, // ConsecutiveBreaker threshold we configured
-        recoveryTimeout: "60s", // halfOpenAfter time we configured
+        configured: true, // Circuit breaker is enabled via messaging library
+        failureThreshold: 5, // Consecutive failures before opening circuit
+        recoveryTimeout: "10s", // Time before attempting to close circuit
         metrics: {
-          successRate,
-          totalRequests: this.circuitBreakerMetrics.totalRequests,
-          successes: this.circuitBreakerMetrics.successes,
-          failures: this.circuitBreakerMetrics.failures,
-          circuitOpenEvents: this.circuitBreakerMetrics.circuitOpen,
-          lastSuccess:
-            this.circuitBreakerMetrics.lastSuccess?.toISOString() || null,
-          lastFailure:
-            this.circuitBreakerMetrics.lastFailure?.toISOString() || null,
+          successRate: "N/A", // Circuit breaker metrics per-operation, not global
+          totalRequests: 0, // Not tracked globally
+          successes: 0,
+          failures: 0,
+          circuitOpenEvents: 0,
+          lastSuccess: null,
+          lastFailure: null,
         },
       },
     };

@@ -10,6 +10,8 @@ export interface HttpClientConfig {
   baseURL?: string;
   retries?: number;
   retryDelay?: number;
+  enableRequestId?: boolean;
+  errorTransformer?: (error: HttpErrorResponse) => any;
 }
 
 /**
@@ -18,7 +20,7 @@ export interface HttpClientConfig {
 export interface HttpErrorResponse {
   status: number;
   statusText: string;
-  data?: any;
+  data?: unknown;
   message: string;
 }
 
@@ -35,17 +37,15 @@ export class HttpClient {
       headers: { "Content-Type": "application/json" },
       retries: 3,
       retryDelay: 500,
+      enableRequestId: true,
       ...config,
     };
 
-    const axiosConfig: any = {
-      timeout: this.config.timeout,
+    const axiosConfig: AxiosRequestConfig = {
+      timeout: this.config.timeout || 5000,
       headers: this.config.headers || { "Content-Type": "application/json" },
+      ...(this.config.baseURL && { baseURL: this.config.baseURL }),
     };
-
-    if (this.config.baseURL) {
-      axiosConfig.baseURL = this.config.baseURL;
-    }
 
     this.client = axios.create(axiosConfig);
 
@@ -53,19 +53,18 @@ export class HttpClient {
   }
 
   private setupInterceptors(): void {
-    // Request interceptor
-    this.client.interceptors.request.use(
-      (config) => {
-        // Add request ID for tracking
-        if (config.headers) {
-          (config.headers as any)["X-Request-ID"] = crypto.randomUUID();
-        } else {
-          config.headers = { "X-Request-ID": crypto.randomUUID() } as any;
-        }
-        return config;
-      },
-      (error) => Promise.reject(error)
-    );
+    // Request interceptor - only add if enabled
+    if (this.config.enableRequestId) {
+      this.client.interceptors.request.use(
+        (config) => {
+          // Add request ID for tracking
+          config.headers = config.headers || {};
+          config.headers["X-Request-ID"] = crypto.randomUUID();
+          return config;
+        },
+        (error) => Promise.reject(error)
+      );
+    }
 
     // Response interceptor
     this.client.interceptors.response.use(
@@ -77,7 +76,34 @@ export class HttpClient {
           data: error.response?.data,
           message: error.message,
         };
+        if (typeof this.config.errorTransformer === "function") {
+          return Promise.reject(this.config.errorTransformer(errorResponse));
+        }
         return Promise.reject(errorResponse);
+      }
+    );
+  }
+
+  /**
+   * Execute request with retry logic
+   */
+  private async executeWithRetry<T>(
+    operation: () => Promise<AxiosResponse<T>>
+  ): Promise<AxiosResponse<T>> {
+    return executeWithRetry(
+      operation,
+      (error: unknown) => {
+        if (error && typeof error === "object" && "status" in error) {
+          const httpError = error as HttpErrorResponse;
+          return `HTTP ${httpError.status}: ${httpError.message}`;
+        }
+        return `HTTP request failed: ${String(error)}`;
+      },
+      {
+        operationName: "HTTP Request",
+        maxRetries: this.config.retries || 3,
+        retryDelay: this.config.retryDelay || 500,
+        enableCircuitBreaker: true,
       }
     );
   }
@@ -85,7 +111,7 @@ export class HttpClient {
   async request<T = unknown>(
     config: AxiosRequestConfig
   ): Promise<AxiosResponse<T>> {
-    return this.client.request<T>(config);
+    return this.executeWithRetry(() => this.client.request<T>(config));
   }
 
   /**
@@ -95,129 +121,64 @@ export class HttpClient {
     const response = await this.request<T>(config);
     return response.data;
   }
-
   /**
    * GET request that returns JSON data
    */
-  async get<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T> {
-    const response = await this.request<T>({ ...config, method: "GET", url });
-    return response.data;
+  async get<T = unknown>(
+    url: string,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
+    return this.request<T>({ ...config, method: "GET", url });
   }
-
   /**
    * POST request that returns JSON data
    */
   async post<T = unknown>(
     url: string,
-    data?: any,
+    data?: unknown,
     config?: AxiosRequestConfig
-  ): Promise<T> {
-    const response = await this.request<T>({
+  ): Promise<AxiosResponse<T>> {
+    return this.request<T>({
       ...config,
       method: "POST",
       url,
       data,
     });
-    return response.data;
   }
-}
-
-// Legacy export for backward compatibility
-export const httpClient = new HttpClient();
-
-/**
- * Generic HTTP request with retry and error handling
- * @template T - Expected response data type
- * @param config - Axios request config
- * @param retryCount - Number of retries
- * @param retryDelay - Delay between retries (ms)
- * @returns AxiosResponse<T>
- */
-/**
- * Enhanced HTTP request with retry, circuit breaker, and better error handling
- */
-export async function sendHttpRequestWithRetryAndBreaker<T = unknown>(
-  config: AxiosRequestConfig,
-  retryCount = 3,
-  retryDelay = 500
-): Promise<AxiosResponse<T>> {
-  const httpClient = new HttpClient({
-    retries: retryCount,
-    retryDelay,
-  });
-
-  return executeWithRetry(
-    async () => {
-      const response = await httpClient.request<T>(config);
-      if (response.status >= 200 && response.status < 300) {
-        return response;
-      }
-      const error = new Error(
-        `HTTP request failed: ${response.statusText}`
-      ) as any;
-      error.status = response.status;
-      error.response = response;
-      throw error;
-    },
-    (error: any) => {
-      if (error.status) {
-        return `HTTP ${error.status}: ${error.message}`;
-      }
-      return `HTTP request failed: ${error.message || error}`;
-    },
-    {
-      operationName: "HTTP Request",
-      maxRetries: retryCount,
-      retryDelay,
-      enableCircuitBreaker: true,
-    }
-  );
-}
-
-/**
- * Simple retry logic without circuit breaker (deprecated - use sendHttpRequestWithRetryAndBreaker)
- * @deprecated Use sendHttpRequestWithRetryAndBreaker for better error handling
- */
-export async function requestWithRetry<T = unknown>(
-  config: AxiosRequestConfig,
-  retryCount = 3,
-  retryDelay = 500
-): Promise<AxiosResponse<T>> {
-  const httpClient = new HttpClient({ retries: retryCount, retryDelay });
-  let lastError: HttpErrorResponse | unknown;
-
-  for (let attempt = 0; attempt <= retryCount; attempt++) {
-    try {
-      const response = await httpClient.request<T>(config);
-      if (response.status >= 200 && response.status < 300) {
-        return response;
-      }
-      lastError = {
-        status: response.status,
-        statusText: response.statusText,
-        data: response.data,
-        message: `HTTP ${response.status}: ${response.statusText}`,
-      } as HttpErrorResponse;
-    } catch (error) {
-      lastError = error;
-    }
-
-    if (attempt < retryCount) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, retryDelay * Math.pow(2, attempt))
-      ); // Exponential backoff
-    }
+  /**
+   * PUT request that returns JSON data
+   */
+  async put<T = unknown>(
+    url: string,
+    data?: unknown,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
+    return this.request<T>({
+      ...config,
+      method: "PUT",
+      url,
+      data,
+    });
   }
-
-  throw lastError;
+  /**
+   * DELETE request that returns JSON data
+   */
+  async delete<T = unknown>(
+    url: string,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> {
+    return await this.request<T>({
+      ...config,
+      method: "DELETE",
+      url,
+    });
+  }
 }
 
 /**
  * Create a typed HTTP client for specific API endpoints
  */
-export function createTypedHttpClient(
-  config: HttpClientConfig = {}
-): HttpClient {
+export function createHttpClient(config: HttpClientConfig = {}): HttpClient {
   return new HttpClient(config);
 }
 
@@ -231,24 +192,3 @@ export const HttpStatus = {
   isRetryable: (status: number): boolean =>
     status >= 500 || status === 408 || status === 429,
 } as const;
-
-/**
- * Enhanced HTTP request that returns JSON data directly
- */
-export async function sendHttpRequestForJson<T = unknown>(
-  config: AxiosRequestConfig,
-  retryCount = 3,
-  retryDelay = 500
-): Promise<T> {
-  const response = await sendHttpRequestWithRetryAndBreaker<T>(
-    config,
-    retryCount,
-    retryDelay
-  );
-  return response.data;
-}
-
-/**
- * Export default instance for backward compatibility
- */
-export default new HttpClient();

@@ -12,6 +12,16 @@ import type { IKeycloakClientFactory } from "../types";
 const logger = createLogger("KeycloakAuthzServices");
 
 /**
+ * Authorization Services constants
+ */
+const AUTHZ_CONSTANTS = {
+  // Admin token buffer time (1 minute in milliseconds)
+  ADMIN_TOKEN_BUFFER_TIME: 60000,
+  // Cache key hash length (128 bits for security)
+  CACHE_KEY_HASH_LENGTH: 32,
+} as const;
+
+/**
  * Authorization decision
  */
 export interface AuthorizationDecision {
@@ -575,7 +585,10 @@ export class KeycloakAuthorizationServicesClient {
 
     this.adminToken = {
       token: tokenResponse.access_token,
-      expiresAt: Date.now() + tokenResponse.expires_in * 1000 - 60000, // 1-minute buffer
+      expiresAt:
+        Date.now() +
+        tokenResponse.expires_in * 1000 -
+        AUTHZ_CONSTANTS.ADMIN_TOKEN_BUFFER_TIME, // 1-minute buffer
     };
 
     logger.debug("New admin token obtained", {
@@ -608,7 +621,7 @@ export class KeycloakAuthorizationServicesClient {
       .createHash("sha256")
       .update(token)
       .digest("hex")
-      .substring(0, 16);
+      .substring(0, AUTHZ_CONSTANTS.CACHE_KEY_HASH_LENGTH); // Use 128-bit hash for better security
 
     // Sanitize resource name and scopes for cache key
     const sanitizedResource = resource.replace(/[^a-zA-Z0-9_-]/g, "_");
