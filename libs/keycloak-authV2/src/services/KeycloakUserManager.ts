@@ -653,7 +653,7 @@ export class KeycloakUserManager {
         );
       }
 
-      const allRoles: KeycloakRole[] = await rolesResponse.data;
+      const allRoles: KeycloakRole[] = rolesResponse.data || [];
       const rolesToAssign = allRoles.filter((role) =>
         roleNames.includes(role.name)
       );

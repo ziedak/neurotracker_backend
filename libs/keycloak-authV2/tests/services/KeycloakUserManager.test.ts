@@ -37,9 +37,7 @@ jest.mock("@libs/messaging", () => ({
 // Import after mocks
 import { KeycloakUserManager } from "../../src/services/KeycloakUserManager";
 import type { AuthV2Config } from "../../src/services/config";
-import type { IMetricsCollector } from "@libs/monitoring";
 import { KeycloakClient } from "../../src/client/KeycloakClient";
-import type { HttpClient } from "@libs/messaging";
 
 // Helper functions for consistent mock responses
 const createMockTokenResponse = (): any => ({
@@ -73,26 +71,32 @@ const createMockDiscoveryDocument = (): any => ({
   ],
 });
 
-const createMockAxiosResponse = (
-  data: any,
-  status = 200,
-  statusText = "OK",
-  headers = {}
-): any => ({
-  data,
-  status,
-  statusText,
-  headers,
-  config: {
-    headers: {},
-  },
-});
+const mockMetrics = {
+  recordCounter: jest.fn(),
+  recordTimer: jest.fn(),
+  recordGauge: jest.fn(),
+  recordHistogram: jest.fn(),
+  recordSummary: jest.fn(),
+  getMetrics: jest.fn(),
+  recordApiRequest: jest.fn(),
+  recordDatabaseOperation: jest.fn(),
+  recordAuthOperation: jest.fn(),
+  recordWebSocketActivity: jest.fn(),
+  recordNodeMetrics: jest.fn(),
+  measureEventLoopLag: jest.fn(),
+};
+
+const mockHttpClient = {
+  get: jest.fn(),
+  post: jest.fn(),
+  put: jest.fn(),
+  delete: jest.fn(),
+} as any;
 
 describe("KeycloakUserManager", () => {
   let mockAdminClient: jest.Mocked<KeycloakClient>;
   let mockConfig: AuthV2Config;
-  let mockMetrics: jest.Mocked<IMetricsCollector>;
-  let mockHttpClient: jest.Mocked<HttpClient>;
+
   let userManager: KeycloakUserManager;
 
   beforeEach(() => {
@@ -125,28 +129,6 @@ describe("KeycloakUserManager", () => {
       encryption: { key: "test-key" },
     } as AuthV2Config;
 
-    mockMetrics = {
-      recordCounter: jest.fn(),
-      recordTimer: jest.fn(),
-      recordGauge: jest.fn(),
-      recordHistogram: jest.fn(),
-      recordSummary: jest.fn(),
-      getMetrics: jest.fn(),
-      recordApiRequest: jest.fn(),
-      recordDatabaseOperation: jest.fn(),
-      recordAuthOperation: jest.fn(),
-      recordWebSocketActivity: jest.fn(),
-      recordNodeMetrics: jest.fn(),
-      measureEventLoopLag: jest.fn(),
-    };
-
-    mockHttpClient = {
-      get: jest.fn(),
-      post: jest.fn(),
-      put: jest.fn(),
-      delete: jest.fn(),
-    } as any;
-
     // Mock createHttpClient to return our mock
     const { createHttpClient } = require("@libs/messaging");
     (createHttpClient as jest.Mock).mockReturnValue(mockHttpClient);
@@ -173,6 +155,10 @@ describe("KeycloakUserManager", () => {
           ttl: { jwt: 300, apiKey: 600, session: 3600, userInfo: 1800 },
         },
       };
+
+      // Reset mocks to avoid interference from previous test
+      jest.clearAllMocks();
+
       new KeycloakUserManager(mockAdminClient, configWithoutCache, mockMetrics);
 
       const { CacheService } = require("@libs/database");
@@ -272,9 +258,9 @@ describe("KeycloakUserManager", () => {
         createMockTokenResponse()
       ); // {
 
-      mockAdminClient.getDiscoveryDocument.mockReturnValue({
-        issuer: "https://keycloak.example.com/realms/test-realm",
-      });
+      mockAdminClient.getDiscoveryDocument.mockReturnValue(
+        createMockDiscoveryDocument()
+      );
     });
 
     it("should return user from cache if available", async () => {
@@ -384,9 +370,9 @@ describe("KeycloakUserManager", () => {
       mockAdminClient.authenticateClientCredentials.mockResolvedValue(
         createMockTokenResponse()
       );
-      mockAdminClient.getDiscoveryDocument.mockReturnValue({
-        issuer: "https://keycloak.example.com/realms/test-realm",
-      });
+      mockAdminClient.getDiscoveryDocument.mockReturnValue(
+        createMockDiscoveryDocument()
+      );
     });
 
     it("should create user successfully", async () => {
@@ -460,9 +446,9 @@ describe("KeycloakUserManager", () => {
       mockAdminClient.authenticateClientCredentials.mockResolvedValue(
         createMockTokenResponse()
       );
-      mockAdminClient.getDiscoveryDocument.mockReturnValue({
-        issuer: "https://keycloak.example.com/realms/test-realm",
-      });
+      mockAdminClient.getDiscoveryDocument.mockReturnValue(
+        createMockDiscoveryDocument()
+      );
 
       mockHttpClient.put.mockResolvedValue({
         status: 204,
@@ -507,9 +493,9 @@ describe("KeycloakUserManager", () => {
         createMockTokenResponse()
       );
 
-      mockAdminClient.getDiscoveryDocument.mockReturnValue({
-        issuer: "https://keycloak.example.com/realms/test-realm",
-      });
+      mockAdminClient.getDiscoveryDocument.mockReturnValue(
+        createMockDiscoveryDocument()
+      );
     });
 
     it("should delete user successfully", async () => {
@@ -561,11 +547,37 @@ describe("KeycloakUserManager", () => {
         createMockTokenResponse()
       );
 
+      // Mock discovery document for getAdminApiUrl
+      mockAdminClient.getDiscoveryDocument.mockReturnValue({
+        issuer: "https://keycloak.example.com/realms/test-realm",
+        authorization_endpoint:
+          "https://keycloak.example.com/realms/test-realm/protocol/openid-connect/auth",
+        token_endpoint:
+          "https://keycloak.example.com/realms/test-realm/protocol/openid-connect/token",
+        userinfo_endpoint:
+          "https://keycloak.example.com/realms/test-realm/protocol/openid-connect/userinfo",
+        jwks_uri:
+          "https://keycloak.example.com/realms/test-realm/protocol/openid-connect/certs",
+        introspection_endpoint:
+          "https://keycloak.example.com/realms/test-realm/protocol/openid-connect/token/introspect",
+        end_session_endpoint:
+          "https://keycloak.example.com/realms/test-realm/protocol/openid-connect/logout",
+        id_token_signing_alg_values_supported: ["RS256"],
+        response_types_supported: ["code", "id_token", "token"],
+        scopes_supported: ["openid", "profile", "email"],
+        grant_types_supported: [
+          "authorization_code",
+          "client_credentials",
+          "refresh_token",
+        ],
+      });
+
       mockHttpClient.put.mockResolvedValue({
         status: 204,
         statusText: "No Content",
         data: null,
         headers: {},
+        config: { headers: {} },
       });
     });
 
@@ -604,9 +616,9 @@ describe("KeycloakUserManager", () => {
         createMockTokenResponse()
       );
 
-      mockAdminClient.getDiscoveryDocument.mockReturnValue({
-        issuer: "https://keycloak.example.com/realms/test-realm",
-      });
+      mockAdminClient.getDiscoveryDocument.mockReturnValue(
+        createMockDiscoveryDocument()
+      );
 
       mockHttpClient.get.mockResolvedValue({
         config: {},
@@ -649,9 +661,9 @@ describe("KeycloakUserManager", () => {
         createMockTokenResponse()
       );
 
-      mockAdminClient.getDiscoveryDocument.mockReturnValue({
-        issuer: "https://keycloak.example.com/realms/test-realm",
-      });
+      mockAdminClient.getDiscoveryDocument.mockReturnValue(
+        createMockDiscoveryDocument()
+      );
     });
 
     it("should assign realm roles successfully", async () => {
@@ -693,11 +705,12 @@ describe("KeycloakUserManager", () => {
     });
 
     it("should handle no matching roles gracefully", async () => {
+      // Mock the get request to return empty roles array
       mockHttpClient.get.mockResolvedValue({
-        config: {},
+        config: { headers: {} },
         status: 200,
         statusText: "OK",
-        data: availableRoles,
+        data: [], // Empty array instead of availableRoles
         headers: {},
       });
 
@@ -717,9 +730,9 @@ describe("KeycloakUserManager", () => {
       mockAdminClient.authenticateClientCredentials.mockResolvedValue(
         createMockTokenResponse()
       );
-      mockAdminClient.getDiscoveryDocument.mockReturnValue({
-        issuer: "https://keycloak.example.com/realms/test-realm",
-      });
+      mockAdminClient.getDiscoveryDocument.mockReturnValue(
+        createMockDiscoveryDocument()
+      );
     });
 
     it("should remove realm roles successfully", async () => {
@@ -765,9 +778,9 @@ describe("KeycloakUserManager", () => {
       mockAdminClient.authenticateClientCredentials.mockResolvedValue(
         createMockTokenResponse()
       );
-      mockAdminClient.getDiscoveryDocument.mockReturnValue({
-        issuer: "https://keycloak.example.com/realms/test-realm",
-      });
+      mockAdminClient.getDiscoveryDocument.mockReturnValue(
+        createMockDiscoveryDocument()
+      );
     });
 
     it("should assign client roles successfully", async () => {

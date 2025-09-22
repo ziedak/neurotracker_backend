@@ -263,7 +263,7 @@ describe("Factory Functions", () => {
     it("should return singleton instance", () => {
       const {
         getDefaultEncryptionManager,
-      } = require("../src/services/EncryptionManager");
+      } = require("../../src/services/EncryptionManager");
 
       const manager1 = getDefaultEncryptionManager();
       const manager2 = getDefaultEncryptionManager();
@@ -277,7 +277,7 @@ describe("Factory Functions", () => {
       const {
         getDefaultEncryptionManager,
         resetDefaultEncryptionManager,
-      } = require("../src/services/EncryptionManager");
+      } = require("../../src/services/EncryptionManager");
 
       const manager1 = getDefaultEncryptionManager();
       resetDefaultEncryptionManager();

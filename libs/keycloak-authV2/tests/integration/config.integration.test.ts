@@ -6,11 +6,11 @@ import { loadConfigFromEnv, DEFAULT_CONFIG } from "../../src/services/config";
 
 describe("AuthV2Config Integration", () => {
   afterEach(() => {
-    delete process.env.KEYCLOAK_ENCRYPTION_KEY;
+    delete process.env["KEYCLOAK_ENCRYPTION_KEY"];
   });
 
   it("should load encryption key from environment", () => {
-    process.env.KEYCLOAK_ENCRYPTION_KEY = "integration-env-key";
+    process.env["KEYCLOAK_ENCRYPTION_KEY"] = "integration-env-key";
     const config = loadConfigFromEnv();
     expect(config.encryption.key).toBe("integration-env-key");
   });

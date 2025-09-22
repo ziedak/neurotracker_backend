@@ -3,7 +3,6 @@
  * Covers config creation, defaults, and env loading
  */
 import {
-  AuthV2Config,
   DEFAULT_CONFIG,
   createAuthV2Config,
   loadConfigFromEnv,
@@ -21,14 +20,14 @@ describe("AuthV2Config", () => {
   });
 
   it("should load config from env", () => {
-    process.env.KEYCLOAK_ENCRYPTION_KEY = "env-key";
+    process.env["KEYCLOAK_ENCRYPTION_KEY"] = "env-key";
     const config = loadConfigFromEnv();
     expect(config.encryption.key).toBe("env-key");
-    delete process.env.KEYCLOAK_ENCRYPTION_KEY;
+    delete process.env["KEYCLOAK_ENCRYPTION_KEY"];
   });
 
   it("should fallback to default if env missing", () => {
-    delete process.env.KEYCLOAK_ENCRYPTION_KEY;
+    delete process.env["KEYCLOAK_ENCRYPTION_KEY"];
     const config = loadConfigFromEnv();
     expect(config.encryption.key).toBe(DEFAULT_CONFIG.encryption.key);
   });

@@ -17,11 +17,15 @@ jest.mock("bcrypt", () => ({
   ),
 }));
 
-import * as crypto from "crypto";
-jest
-  .spyOn(crypto, "randomUUID")
-  .mockReturnValue("uuid-1234-5678-9abc-def0-123456789abc" as any);
-jest.spyOn(crypto, "randomBytes").mockReturnValue(Buffer.from("a".repeat(32)));
+// Mock crypto functions using jest.mock at the module level
+jest.mock("crypto", () => {
+  const originalCrypto = jest.requireActual("crypto");
+  return {
+    ...originalCrypto,
+    randomUUID: jest.fn(() => "uuid-1234-5678-9abc-def0-123456789abc"),
+    randomBytes: jest.fn(() => Buffer.from("a".repeat(32))),
+  };
+});
 
 const mockDbClient = {
   executeRaw: jest.fn(async () => true),
@@ -30,7 +34,18 @@ const mockDbClient = {
 const mockMetrics = {
   recordCounter: jest.fn(),
   recordTimer: jest.fn(),
+  recordGauge: jest.fn(),
+  recordHistogram: jest.fn(),
+  recordSummary: jest.fn(),
+  getMetrics: jest.fn(),
+  recordApiRequest: jest.fn(),
+  recordDatabaseOperation: jest.fn(),
+  recordAuthOperation: jest.fn(),
+  recordWebSocketActivity: jest.fn(),
+  recordNodeMetrics: jest.fn(),
+  measureEventLoopLag: jest.fn(),
 };
+
 const mockConfig: AuthV2Config = {
   jwt: {},
   cache: {
@@ -122,7 +137,7 @@ describe("APIKeyManager", () => {
     const keys = await manager.getUserAPIKeys("user1");
     expect(Array.isArray(keys)).toBe(true);
     expect(keys.length).toBe(1);
-    expect(keys[0].id).toBe("uuid-123");
+    expect(keys[0]?.id).toBe("uuid-123");
   });
 
   it("should return stats", () => {

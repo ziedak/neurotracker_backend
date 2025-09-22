@@ -56,6 +56,7 @@ import { KeycloakUserManager } from "./KeycloakUserManager";
 import {
   KeycloakSessionManager,
   type KeycloakSessionData,
+  type SessionStats,
 } from "./KeycloakSessionManager";
 import type { UserInfo } from "../types";
 
@@ -599,7 +600,7 @@ export class KeycloakIntegrationService {
    * Get service statistics
    */
   getStats(): {
-    session: any;
+    session: SessionStats;
     client: any;
   } {
     return {
