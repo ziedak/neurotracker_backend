@@ -33,7 +33,9 @@ export interface RedisCacheConfig extends CacheConfig {
 
 export const DEFAULT_REDIS_CACHE_CONFIG: RedisCacheConfig = {
   enable: true,
-  defaultTTL: 3600, // 1 hour
+  defaultTtl: 3600, // 1 hour
+  maxTtl: 86400, // 24 hours
+  minTtl: 60, // 1 minute
   compressionThreshold: 1024, // 1KB
   batchInvalidationSize: 100,
   compressionConfig: DEFAULT_COMPRESSION_CONFIG,

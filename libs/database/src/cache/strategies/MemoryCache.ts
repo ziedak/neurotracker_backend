@@ -37,7 +37,6 @@ export interface MemoryCacheConfig extends CacheConfig {
 
 export const DEFAULT_MEMORY_CACHE_CONFIG: MemoryCacheConfig = {
   enable: true,
-  defaultTTL: 3600, // 1 hour
   maxMemoryCacheSize: 10000, // 10k entries
   memoryConfig: {
     maxMemoryMB: 50, // 50MB default
@@ -47,6 +46,9 @@ export const DEFAULT_MEMORY_CACHE_CONFIG: MemoryCacheConfig = {
     sizeCalculationInterval: 50,
   },
   compressionConfig: DEFAULT_COMPRESSION_CONFIG,
+  defaultTtl: 3600, // 1 hour
+  minTtl: 60, // 1 minute
+  maxTtl: 86400, // 24 hours
 };
 
 /**
@@ -66,7 +68,7 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
     // Use LRUCache properly - it handles all LRU logic internally
     this.memoryCache = new LRUCache<string, CacheEntry<unknown>>({
       max: fullConfig.maxMemoryCacheSize,
-      ttl: fullConfig.defaultTTL * 1000, // Convert to milliseconds
+      ttl: fullConfig.defaultTtl * 1000, // Convert to milliseconds
     });
 
     this.logger.info("MemoryCache initialized", {
@@ -82,7 +84,7 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
   override async set<T>(
     key: string,
     data: T,
-    ttl: number = this.config.defaultTTL
+    ttl: number = this.config.defaultTtl
   ): Promise<void> {
     await super.set(key, data, ttl);
   }
@@ -159,7 +161,7 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
       this.memoryTracker.calculateObjectSize(data) +
       this.memoryTracker.calculateObjectSize({
         timestamp: Date.now(),
-        ttl: this.config.defaultTTL,
+        ttl: this.config.defaultTtl,
         hits: 0,
         compressed: false,
       });

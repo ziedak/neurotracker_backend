@@ -14,7 +14,6 @@ import { executeWithRetry } from "@libs/utils/src/executeWithRetry";
 import { TokenServiceCollection } from "./decomposed/index";
 
 // Import the actual enum, not the type
-import { MetricsOperation } from "./decomposed/token-metrics.service";
 
 // Import constants
 import {
@@ -110,10 +109,10 @@ export class WebSocketTokenValidator {
 
     try {
       // Record WebSocket connection attempt
-      this.services.metrics.recordOperation(
+      this.services.metric?.recordOperation(
         MetricsOperation.WEBSOCKET_CONNECTION
       );
-      this.services.metrics.recordOperation(
+      this.services.metric?.recordOperation(
         MetricsOperation.WEBSOCKET_AUTH_VALIDATION
       );
 

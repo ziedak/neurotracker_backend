@@ -29,7 +29,9 @@ import type { IMetricsCollector } from "@libs/monitoring";
 
 const DEFAULT_CACHE_CONFIG: CacheConfig = {
   enable: true,
-  defaultTTL: 3600,
+  defaultTtl: 300, // 5 minutes
+  minTtl: 60, // 1 minute
+  maxTtl: 3600, // 1 hour
   warmupOnStart: false,
   warmingConfig: {
     enableBackgroundWarming: false,
@@ -59,7 +61,7 @@ export class CacheService implements ICache {
     invalidations: 0,
     compressions: 0,
   };
-  private readonly logger = createLogger("CacheService");
+  protected readonly logger = createLogger("CacheService");
   constructor(
     metrics?: IMetricsCollector,
     caches?: ICache[],
@@ -95,6 +97,21 @@ export class CacheService implements ICache {
   ): CacheService {
     return new CacheService(metrics, caches, config);
   }
+
+  protected isValidKey(key: string): boolean {
+    if (!key || typeof key !== "string") {
+      this.logger.warn("Invalid cache key provided to invalidate", { key });
+      return false;
+    }
+
+    if (key.length > 512) {
+      this.logger.warn("Cache key too long for invalidation", {
+        keyLength: key.length,
+      });
+      return false;
+    }
+    return true;
+  }
   /**
    * Get data from cache with multi-level fallback and input validation
    */
@@ -103,19 +120,8 @@ export class CacheService implements ICache {
     this.stats.totalRequests++;
 
     // Input validation
-    if (!key || typeof key !== "string") {
+    if (!this.isValidKey(key)) {
       this.logger.warn("Invalid cache key provided to get", { key });
-      return {
-        data: null,
-        source: "miss",
-        latency: performance.now() - startTime,
-        compressed: false,
-      };
-    }
-
-    // Basic key validation - prevent extremely long keys
-    if (key.length > 512) {
-      this.logger.warn("Cache key too long", { keyLength: key.length });
       return {
         data: null,
         source: "miss",
@@ -140,7 +146,7 @@ export class CacheService implements ICache {
           if (this.config.warmingConfig?.enablePatternLearning) {
             this.warmingManager.recordAccess(key, result.latency);
           }
-
+          // TODO add logic to promote frequently accessed keys to higher cache levels
           return {
             data: result.data,
             source: `l${idx + 1}`,
@@ -168,30 +174,39 @@ export class CacheService implements ICache {
   }
 
   /**
+   * Check if key exists in cache
+   */
+  public async exists(key: string): Promise<boolean> {
+    try {
+      if (!this.isValidKey(key)) {
+        this.logger.warn("Invalid cache key provided to exists", { key });
+        return false;
+      }
+      const result = await this.get(key);
+      return result.data !== null;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
    * Set data in cache with intelligent TTL and compression
    */
   async set<T>(
     key: string,
     data: T,
-    ttl: number = this.config.defaultTTL
+    ttl: number = this.config.defaultTtl
   ): Promise<void> {
     // Input validation
-    if (!key || typeof key !== "string") {
-      this.logger.warn("Invalid cache key provided to set", { key });
+    if (!this.isValidKey(key)) {
       return;
     }
 
-    if (key.length > 512) {
-      this.logger.warn("Cache key too long", { keyLength: key.length });
-      return;
-    }
-
-    // Validate TTL
-    if (ttl < 0 || ttl > 365 * 24 * 60 * 60) {
-      // Max 1 year
-      this.logger.warn("Invalid TTL provided to set", { ttl });
-      ttl = this.config.defaultTTL;
-    }
+    // Enforce TTL boundaries
+    const effectiveTtl = Math.max(
+      this.config.minTtl,
+      Math.min(ttl || this.config.defaultTtl, this.config.maxTtl)
+    );
 
     // Basic data validation - prevent storing undefined/null as data
     if (data === undefined) {
@@ -207,7 +222,7 @@ export class CacheService implements ICache {
       if (!isEnabled) continue;
 
       try {
-        await cache.set<T>(key, data, ttl);
+        await cache.set<T>(key, data, effectiveTtl);
       } catch (error) {
         this.logger.error(`Cache set failed for level ${idx + 1}`, {
           key,
@@ -223,15 +238,7 @@ export class CacheService implements ICache {
    */
   async invalidate(key: string): Promise<void> {
     // Input validation
-    if (!key || typeof key !== "string") {
-      this.logger.warn("Invalid cache key provided to invalidate", { key });
-      return;
-    }
-
-    if (key.length > 512) {
-      this.logger.warn("Cache key too long for invalidation", {
-        keyLength: key.length,
-      });
+    if (!this.isValidKey(key)) {
       return;
     }
 
@@ -263,10 +270,7 @@ export class CacheService implements ICache {
    */
   async invalidatePattern(pattern: string): Promise<number> {
     // Input validation
-    if (!pattern || typeof pattern !== "string") {
-      this.logger.warn("Invalid pattern provided to invalidatePattern", {
-        pattern,
-      });
+    if (!this.isValidKey(pattern)) {
       return 0;
     }
 
@@ -276,14 +280,6 @@ export class CacheService implements ICache {
         "Dangerous pattern provided to invalidatePattern, blocking",
         { pattern }
       );
-      return 0;
-    }
-
-    // Limit pattern length
-    if (pattern.length > 256) {
-      this.logger.warn("Pattern too long for invalidatePattern", {
-        patternLength: pattern.length,
-      });
       return 0;
     }
 
@@ -497,6 +493,16 @@ export class CacheService implements ICache {
     return this.warmingManager.getRecommendedKeys();
   }
 
+  private resetStats(): void {
+    this.stats.Hits = 0;
+    this.stats.Misses = 0;
+    this.stats.totalRequests = 0;
+    this.stats.hitRate = 0;
+    this.stats.memoryUsage = 0;
+    this.stats.entryCount = 0;
+    this.stats.invalidations = 0;
+    this.stats.compressions = 0;
+  }
   /**
    * Dispose of cache resources and cleanup
    */
@@ -515,7 +521,7 @@ export class CacheService implements ICache {
           }
         }
       }
-
+      this.resetStats();
       this.logger.info("CacheService disposed successfully");
     } catch (error) {
       this.logger.error("Error during CacheService disposal", error as Error);

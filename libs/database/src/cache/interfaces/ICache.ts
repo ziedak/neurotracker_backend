@@ -1,8 +1,17 @@
 export interface CacheConfig {
-  readonly defaultTTL: number; // seconds
+  readonly defaultTtl: number; // seconds
+  readonly maxTtl: number; // seconds
+  readonly minTtl: number; // seconds
+  readonly compression?:
+    | {
+        readonly enable: boolean;
+        readonly threshold: number; // bytes
+        readonly algorithm: "gzip" | "brotli" | "deflate";
+      }
+    | undefined;
   readonly enable: boolean;
-  readonly warmupOnStart?: boolean;
-  readonly warmingConfig?: CacheWarmingConfig;
+  readonly warmupOnStart?: boolean | undefined;
+  readonly warmingConfig?: CacheWarmingConfig | undefined;
 }
 
 export interface CacheWarmingConfig {

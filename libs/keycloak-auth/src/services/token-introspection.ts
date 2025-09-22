@@ -12,7 +12,7 @@ import { createHash, randomBytes } from "crypto";
 
 // Import decomposed services
 import {
-  ITokenMetricsService,
+  ITokenMetric,
   ITokenIntrospectionClient,
   ITokenCacheService,
   IPublicKeyService,
@@ -20,6 +20,7 @@ import {
   createDecomposedTokenServices,
 } from "./decomposed";
 import { MetricsOperation } from "./decomposed/token-metrics.service";
+import type { IMetricsCollector } from "@libs/monitoring";
 
 // Create logger with explicit type
 const logger: ILogger = createLogger("token-introspection-service");
@@ -248,7 +249,7 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
   private enableCacheWarming: boolean;
 
   // Decomposed services
-  private metricsService: ITokenMetricsService;
+  private metric: IMetricsCollector;
   private introspectionClient: ITokenIntrospectionClient;
   private cacheServiceInternal: ITokenCacheService;
   private publicKeyService: IPublicKeyService;
@@ -270,7 +271,7 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
       this.keycloakClientFactory,
       this.cacheService
     );
-    this.metricsService = services.metrics;
+    this.metric = services.metrics;
     this.introspectionClient = services.client;
     this.cacheServiceInternal = services.cache;
     this.publicKeyService = services.publicKey;
@@ -319,7 +320,7 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
     token: string,
     clientConfig?: KeycloakClientConfig
   ): Promise<TokenValidationResult> {
-    this.metricsService.recordOperation(MetricsOperation.JWT_VALIDATION);
+    this.metric.recordOperation(MetricsOperation.JWT_VALIDATION);
 
     try {
       const config = this.getClientConfig(clientConfig);
@@ -331,20 +332,14 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
       );
 
       if (result.valid) {
-        this.metricsService.recordOperation(
-          MetricsOperation.JWT_VALIDATION_SUCCESS
-        );
+        this.metric.recordOperation(MetricsOperation.JWT_VALIDATION_SUCCESS);
       } else {
-        this.metricsService.recordOperation(
-          MetricsOperation.JWT_VALIDATION_FAILURE
-        );
+        this.metric.recordOperation(MetricsOperation.JWT_VALIDATION_FAILURE);
       }
 
       return result;
     } catch (error) {
-      this.metricsService.recordOperation(
-        MetricsOperation.JWT_VALIDATION_FAILURE
-      );
+      this.metric.recordOperation(MetricsOperation.JWT_VALIDATION_FAILURE);
       return this.handleValidationError(error);
     }
   }
@@ -410,7 +405,7 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
     token: string,
     clientConfig: KeycloakClientConfig
   ): Promise<TokenIntrospectionResponse> {
-    this.metricsService.recordOperation(MetricsOperation.INTROSPECTION_CALL);
+    this.metric.recordOperation(MetricsOperation.INTROSPECTION_CALL);
 
     try {
       // Check cache first
@@ -421,12 +416,12 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
         );
 
       if (cachedResult.hit && cachedResult.data) {
-        this.metricsService.recordOperation(MetricsOperation.CACHE_HIT);
+        this.metric.recordOperation(MetricsOperation.CACHE_HIT);
         logger.debug("Using cached introspection result");
         return cachedResult.data;
       }
 
-      this.metricsService.recordOperation(MetricsOperation.CACHE_MISS);
+      this.metric.recordOperation(MetricsOperation.CACHE_MISS);
 
       // Create introspection request
       const request = {
@@ -450,15 +445,11 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
         await this.cacheServiceInternal.set(cacheKey, result.response, ttl);
       }
 
-      this.metricsService.recordOperation(
-        MetricsOperation.INTROSPECTION_SUCCESS
-      );
+      this.metric.recordOperation(MetricsOperation.INTROSPECTION_SUCCESS);
 
       return result.response;
     } catch (error) {
-      this.metricsService.recordOperation(
-        MetricsOperation.INTROSPECTION_FAILURE
-      );
+      this.metric.recordOperation(MetricsOperation.INTROSPECTION_FAILURE);
       logger.error("Token introspection failed", {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -494,20 +485,16 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
    * @note For new implementations, use validateJWT() with JWKS validation
    */
   public async getPublicKey(keyId: string, realm: string): Promise<string> {
-    this.metricsService.recordOperation(MetricsOperation.PUBLIC_KEY_FETCH);
+    this.metric.recordOperation(MetricsOperation.PUBLIC_KEY_FETCH);
 
     try {
       const result = await this.publicKeyService.getPublicKey(keyId, realm);
 
-      this.metricsService.recordOperation(
-        MetricsOperation.PUBLIC_KEY_FETCH_SUCCESS
-      );
+      this.metric.recordOperation(MetricsOperation.PUBLIC_KEY_FETCH_SUCCESS);
 
       return result.key;
     } catch (error) {
-      this.metricsService.recordOperation(
-        MetricsOperation.PUBLIC_KEY_FETCH_FAILURE
-      );
+      this.metric.recordOperation(MetricsOperation.PUBLIC_KEY_FETCH_FAILURE);
       throw error;
     }
   }
@@ -720,7 +707,7 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
     publicKeyFetchSuccessRate: number;
     uptimeSeconds: number;
   }> {
-    const stats = this.metricsService.getStats();
+    const stats = this.metric.getStats();
 
     return {
       cacheHits: stats.cacheHits,
@@ -763,7 +750,7 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
    * @note Use with caution in production as it clears historical data
    */
   public resetMetrics(): void {
-    this.metricsService.resetMetrics();
+    this.metric.resetMetrics();
   }
   /**
    * Shutdown service and cleanup resources
@@ -796,7 +783,7 @@ export class TokenIntrospectionService implements ITokenIntrospectionService {
 
     // Shutdown decomposed services
     await Promise.all([
-      this.metricsService.resetMetrics(), // Reset metrics on shutdown
+      this.metric.resetMetrics(), // Reset metrics on shutdown
       this.publicKeyService.shutdown(),
       this.validationOrchestrator.shutdown(),
       this.cacheServiceInternal.clear(),

@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../../dist/libs/keycloak-authV2"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["tests/**/*"],
+  "references": [
+    {
+      "path": "../database"
+    },
+    {
+      "path": "../monitoring"
+    }
+  ]
+}

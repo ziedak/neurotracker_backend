@@ -17,7 +17,7 @@ export abstract class BaseCache<TConfig extends CacheConfig = CacheConfig>
   protected logger = createLogger(this.constructor.name);
 
   constructor(config: Partial<TConfig> = {}) {
-    this.config = { enable: true, defaultTTL: 3600, ...config } as TConfig;
+    this.config = { enable: true, defaultTtl: 3600, ...config } as TConfig;
   }
 
   // Common implementations
@@ -60,7 +60,7 @@ export abstract class BaseCache<TConfig extends CacheConfig = CacheConfig>
   async set<T>(key: string, data: T, ttl?: number): Promise<void> {
     if (!this.isEnabled()) return;
     try {
-      await this.doSet(key, data, ttl ?? this.config.defaultTTL);
+      await this.doSet(key, data, ttl ?? this.config.defaultTtl);
     } catch (error) {
       this.logger.error(`Set error for key: ${key}`, error as Error);
     }

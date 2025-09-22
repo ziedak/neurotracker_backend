@@ -58,9 +58,9 @@ export interface IPublicKeyService extends IBaseService {
    * Get cache statistics
    */
   getCacheStats(): {
-    memoryCacheSize: number;
-    redisCacheSize: number;
-    totalKeys: number;
+   cacheSize: number;
+    totalHits: number;
+    totalMisses: number;
     hitRate: number;
   };
 
@@ -86,14 +86,11 @@ export interface IPublicKeyService extends IBaseService {
  */
 export class PublicKeyService implements IPublicKeyService {
   private logger: ILogger;
-  private memoryCache = new Map<string, PublicKeyEntry>();
   private config: PublicKeyServiceConfig;
   private serviceConfig: ServiceConfig;
 
   // Statistics
   private stats = {
-    memoryHits: 0,
-    memoryMisses: 0,
     redisHits: 0,
     redisMisses: 0,
     fetches: 0,
@@ -148,35 +145,13 @@ export class PublicKeyService implements IPublicKeyService {
     this.stats.fetches++;
 
     try {
-      // Check memory cache first
-      if (this.config.enableMemoryCache) {
-        const memoryEntry = this.memoryCache.get(cacheKey);
-        if (memoryEntry && this.isValidEntry(memoryEntry)) {
-          this.stats.memoryHits++;
-          return {
-            key: memoryEntry.key,
-            keyId,
-            realm,
-            cached: true,
-            fetchDuration: Date.now() - startTime,
-          };
-        }
-        this.stats.memoryMisses++;
-      }
-
       // Check Redis cache
-      const redisResult = await this.cacheService.get(cacheKey);
-      if (redisResult.data) {
+      const cacheResult = await this.cacheService.get<PublicKeyEntry>(cacheKey);
+      if (cacheResult.data) {
         this.stats.redisHits++;
 
-        const entry = redisResult.data as PublicKeyEntry;
-        if (this.config.enableMemoryCache) {
-          this.memoryCache.set(cacheKey, entry);
-          this.enforceMemoryCacheLimit();
-        }
-
         return {
-          key: entry.key,
+          key: cacheResult.data.key,
           keyId,
           realm,
           cached: true,
@@ -200,11 +175,6 @@ export class PublicKeyService implements IPublicKeyService {
       };
 
       await this.cacheService.set(cacheKey, entry, this.config.cacheTtl);
-
-      if (this.config.enableMemoryCache) {
-        this.memoryCache.set(cacheKey, entry);
-        this.enforceMemoryCacheLimit();
-      }
 
       this.stats.fetchSuccesses++;
 
@@ -243,15 +213,6 @@ export class PublicKeyService implements IPublicKeyService {
       const pattern = `publickey:${realm}:*`;
       const invalidated = await this.cacheService.invalidatePattern(pattern);
 
-      // Clear memory cache for this realm
-      if (this.config.enableMemoryCache) {
-        for (const [key, entry] of this.memoryCache.entries()) {
-          if (entry.realm === realm) {
-            this.memoryCache.delete(key);
-          }
-        }
-      }
-
       this.logger.info("Public keys refreshed for realm", {
         realm,
         invalidated,
@@ -277,14 +238,6 @@ export class PublicKeyService implements IPublicKeyService {
   public async hasKey(keyId: string, realm: string): Promise<boolean> {
     const cacheKey = this.getCacheKey(keyId, realm);
 
-    // Check memory cache
-    if (this.config.enableMemoryCache) {
-      const memoryEntry = this.memoryCache.get(cacheKey);
-      if (memoryEntry && this.isValidEntry(memoryEntry)) {
-        return true;
-      }
-    }
-
     // Check Redis cache
     const redisResult = await this.cacheService.get(cacheKey);
     return !!(
@@ -298,27 +251,23 @@ export class PublicKeyService implements IPublicKeyService {
    * @returns Cache statistics
    */
   public getCacheStats(): {
-    memoryCacheSize: number;
-    redisCacheSize: number;
-    totalKeys: number;
+    cacheSize: number;
+    totalHits: number;
+    totalMisses: number;
     hitRate: number;
   } {
-    const memoryHits = this.stats.memoryHits;
-    const memoryMisses = this.stats.memoryMisses;
-    const redisHits = this.stats.redisHits;
-    const redisMisses = this.stats.redisMisses;
+    const totalHits = this.stats.redisHits;
+    const totalMisses = this.stats.redisMisses;
 
-    const totalHits = memoryHits + redisHits;
-    const totalMisses = memoryMisses + redisMisses;
     const hitRate =
       totalHits + totalMisses > 0
         ? Math.round((totalHits / (totalHits + totalMisses)) * 100 * 100) / 100
         : 0;
 
     return {
-      memoryCacheSize: this.memoryCache.size,
-      redisCacheSize: 0, // Would need to query Redis for actual count
-      totalKeys: this.memoryCache.size,
+      cacheSize: 0, // Would need to query Redis for actual count
+      totalHits,
+      totalMisses,
       hitRate,
     };
   }
@@ -330,9 +279,6 @@ export class PublicKeyService implements IPublicKeyService {
     this.stats.cacheClears++;
 
     try {
-      // Clear memory cache
-      this.memoryCache.clear();
-
       // Clear Redis cache with pattern
       await this.cacheService.invalidatePattern("publickey:*");
 
@@ -351,17 +297,15 @@ export class PublicKeyService implements IPublicKeyService {
   public getHealthStatus(): ServiceHealth {
     const uptime =
       Date.now() -
-      (this.memoryCache.size > 0
-        ? Array.from(this.memoryCache.values())[0]?.cachedAt || Date.now()
-        : Date.now());
-
+      (process.uptime() ? Date.now() - process.uptime() * 1000 : 0);
+    let details = this.cacheService.getStats();
     return {
       healthy: true,
       status: "healthy",
       uptimeSeconds: Math.floor(uptime / 1000),
       lastCheck: Date.now(),
       details: {
-        memoryCacheSize: this.memoryCache.size,
+        ...details,
         stats: this.stats,
       },
     };
@@ -379,11 +323,6 @@ export class PublicKeyService implements IPublicKeyService {
    */
   public async shutdown(): Promise<void> {
     this.logger.info("Shutting down PublicKeyService");
-
-    // Clear caches
-    this.memoryCache.clear();
-
-    this.logger.info("PublicKeyService shutdown completed");
   }
 
   /**
@@ -472,34 +411,6 @@ export class PublicKeyService implements IPublicKeyService {
   private isValidEntry(entry: PublicKeyEntry): boolean {
     if (!entry.expiresAt) return true;
     return Date.now() < entry.expiresAt;
-  }
-
-  /**
-   * Enforce memory cache size limit
-   */
-  private enforceMemoryCacheLimit(): void {
-    if (this.memoryCache.size <= this.config.maxMemoryCacheSize) {
-      return;
-    }
-
-    // Remove oldest entries (simple LRU approximation)
-    const entries = Array.from(this.memoryCache.entries());
-    entries.sort(([, a], [, b]) => a.cachedAt - b.cachedAt);
-
-    const toRemove = entries.slice(
-      0,
-      this.memoryCache.size - this.config.maxMemoryCacheSize
-    );
-    for (const [key] of toRemove) {
-      this.memoryCache.delete(key);
-    }
-
-    if (this.config.enableDetailedLogging) {
-      this.logger.debug("Memory cache limit enforced", {
-        removed: toRemove.length,
-        remaining: this.memoryCache.size,
-      });
-    }
   }
 }
 

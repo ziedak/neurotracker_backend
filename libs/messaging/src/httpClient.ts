@@ -165,12 +165,14 @@ export class HttpClient {
    */
   async delete<T = unknown>(
     url: string,
+    data?: unknown,
     config?: AxiosRequestConfig
   ): Promise<AxiosResponse<T>> {
     return await this.request<T>({
       ...config,
       method: "DELETE",
       url,
+      data,
     });
   }
 }

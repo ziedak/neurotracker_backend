@@ -5,18 +5,6 @@
  * Each service has a specific responsibility and can be used independently or together.
  */
 
-// Core services
-export {
-  TokenMetricsService,
-  createTokenMetricsService,
-} from "./token-metrics.service";
-export type {
-  ITokenMetricsService,
-  TokenMetricsData,
-  TokenMetricsStats,
-  MetricsOperation,
-} from "./token-metrics.service";
-
 export {
   TokenIntrospectionClient,
   createTokenIntrospectionClient,
@@ -29,16 +17,9 @@ export type {
 } from "./token-introspection-client";
 
 export {
-  TokenCacheService,
-  createTokenCacheService,
-} from "./token-cache.service";
-export type {
-  ITokenCacheService,
-  CacheEntry,
-  CacheResult,
-  CacheStats,
-  TokenCacheConfig,
-} from "./token-cache.service";
+  SecureCacheService,
+  createSecureCacheService,
+} from "./secure-cache.service";
 
 export { PublicKeyService, createPublicKeyService } from "./public-key.service";
 export type {
@@ -70,20 +51,23 @@ export type {
 } from "./websocket-token-extractor.service";
 
 // Import types for internal use
-import type { ITokenMetricsService } from "./token-metrics.service";
 import type { ITokenIntrospectionClient } from "./token-introspection-client";
-import type { ITokenCacheService } from "./token-cache.service";
 import type { IPublicKeyService } from "./public-key.service";
 import type { ITokenValidationOrchestrator } from "./token-validation-orchestrator";
 import type { IWebSocketTokenExtractor } from "./websocket-token-extractor.service";
 
 // Import factory functions
-import { createTokenMetricsService } from "./token-metrics.service";
 import { createTokenIntrospectionClient } from "./token-introspection-client";
-import { createTokenCacheService } from "./token-cache.service";
 import { createPublicKeyService } from "./public-key.service";
 import { createTokenValidationOrchestrator } from "./token-validation-orchestrator";
 import { createWebSocketTokenExtractor } from "./websocket-token-extractor.service";
+import {
+  createSecureCacheService,
+  type SecureCacheConfig,
+  type SecureCacheService,
+} from "./secure-cache.service";
+import type { IMetricsCollector } from "libs/monitoring/src/MetricsCollector";
+import type { KeycloakClientFactory } from "../../client/keycloak-client-factory";
 
 // Shared interfaces and types
 export type {
@@ -122,12 +106,12 @@ export type {
  */
 export class TokenServiceCollection {
   constructor(
-    public readonly metrics: ITokenMetricsService,
     public readonly client: ITokenIntrospectionClient,
-    public readonly cache: ITokenCacheService,
+    public readonly cache: SecureCacheService,
     public readonly publicKey: IPublicKeyService,
     public readonly orchestrator: ITokenValidationOrchestrator,
-    public readonly tokenExtractor: IWebSocketTokenExtractor
+    public readonly tokenExtractor: IWebSocketTokenExtractor,
+    public readonly metric?: IMetricsCollector
   ) {}
 
   /**
@@ -148,7 +132,7 @@ export class TokenServiceCollection {
     await Promise.all([
       this.publicKey.shutdown(),
       this.orchestrator.shutdown(),
-      this.cache.clear(),
+      this.cache.dispose(),
     ]);
   }
 
@@ -157,7 +141,6 @@ export class TokenServiceCollection {
    */
   public getCombinedStats() {
     return {
-      metrics: this.metrics.getStats(),
       cache: this.cache.getStats(),
       publicKey: this.publicKey.getCacheStats(),
       validation: this.orchestrator.getValidationStats(),
@@ -169,14 +152,13 @@ export class TokenServiceCollection {
  * Factory function to create all decomposed services
  */
 export const createDecomposedTokenServices = (
-  keycloakClientFactory: any,
-  cacheService: any
+  keycloakClientFactory: KeycloakClientFactory,
+  secureCacheConfig: SecureCacheConfig
 ) => {
   // Create individual services
-  const metrics = createTokenMetricsService();
   const client = createTokenIntrospectionClient(keycloakClientFactory);
-  const cache = createTokenCacheService(cacheService);
-  const publicKey = createPublicKeyService(keycloakClientFactory, cacheService);
+  const cache = createSecureCacheService(secureCacheConfig);
+  const publicKey = createPublicKeyService(keycloakClientFactory, cache);
   const orchestrator = createTokenValidationOrchestrator(
     keycloakClientFactory,
     cache
@@ -185,7 +167,6 @@ export const createDecomposedTokenServices = (
 
   // Return collection
   return new TokenServiceCollection(
-    metrics,
     client,
     cache,
     publicKey,

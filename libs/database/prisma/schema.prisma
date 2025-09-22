@@ -305,17 +305,25 @@ enum UserStatus {
 }
 
 model UserSession {
-  id        String    @id @default(cuid())
-  userId    String
-  sessionId String    @unique @db.VarChar(128)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  expiresAt DateTime?
-  ipAddress String?
-  userAgent String?
-  metadata  Json?
-  isActive  Boolean   @default(true)
-  endedAt   DateTime?
+  id                String    @id @default(cuid())
+  userId            String
+  sessionId         String    @unique @db.VarChar(128)
+  keycloakSessionId String?   @db.VarChar(255) // Keycloak session ID
+  accessToken       String?   @db.Text // Encrypted access token
+  refreshToken      String?   @db.Text // Encrypted refresh token
+  idToken           String?   @db.Text // Encrypted ID token
+  tokenExpiresAt    DateTime? // When access token expires
+  refreshExpiresAt  DateTime? // When refresh token expires
+  fingerprint       String?   @db.VarChar(64) // Session security fingerprint
+  lastAccessedAt    DateTime  @default(now()) // Last access timestamp
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  expiresAt         DateTime?
+  ipAddress         String?
+  userAgent         String?
+  metadata          Json?
+  isActive          Boolean   @default(true)
+  endedAt           DateTime?
 
   // Relations
   user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -326,6 +334,8 @@ model UserSession {
   SessionActivity SessionActivity[]
 
   @@index([sessionId])
+  @@index([userId])
+  @@index([keycloakSessionId])
   @@map("user_sessions")
 }
 
