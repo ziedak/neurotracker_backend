@@ -104,22 +104,6 @@ export {
 } from "./security/SecurityAuditIntegration";
 
 // =============================================================================
-// Middleware
-// =============================================================================
-export {
-  AuthRateLimitMiddleware,
-  createAuthRateLimitMiddleware,
-  type AuthRateLimitConfig,
-  DEFAULT_AUTH_RATE_LIMIT_CONFIG,
-} from "./middleware/authRateLimitMiddleware";
-
-export {
-  createSecureAuthServer,
-  createAuthServerForEnvironment,
-  RATE_LIMIT_CONFIGS,
-} from "./middleware/authRateLimitExample";
-
-// =============================================================================
 // Version and Library Information
 // =============================================================================
 export const VERSION = "2.0.0";

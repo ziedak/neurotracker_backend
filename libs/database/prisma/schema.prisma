@@ -634,14 +634,15 @@ model RepairOperation {
 
 // API Key model for authentication
 model ApiKey {
-  id         String  @id @default(cuid())
-  name       String  @db.VarChar(255)
-  keyHash    String  @unique @db.VarChar(255) // Hashed API key
-  keyPreview String  @db.VarChar(16) // First few chars for display
-  userId     String
-  user       User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  storeId    String?
-  store      Store?  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  id            String  @id @default(cuid())
+  name          String  @db.VarChar(255)
+  keyHash       String  @unique @db.VarChar(255) // Hashed API key
+  keyIdentifier String  @db.VarChar(64) // Deterministic hash for O(1) lookups
+  keyPreview    String  @db.VarChar(16) // First few chars for display
+  userId        String
+  user          User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeId       String?
+  store         Store?  @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
   // Permissions and scope
   permissions Json? // Array of permissions
@@ -663,6 +664,7 @@ model ApiKey {
   metadata Json?
 
   @@index([keyHash])
+  @@index([keyIdentifier])
   @@index([userId])
   @@index([storeId])
   @@index([isActive])

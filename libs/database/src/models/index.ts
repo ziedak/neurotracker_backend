@@ -434,6 +434,7 @@ export interface ApiKey {
   id: string;
   name: string;
   keyHash: string;
+  keyIdentifier: string;
   keyPreview: string;
   userId: string;
   user: User;

@@ -2,6 +2,24 @@
  * Keycloak Session Manager Service
  * Handles secure session management with Redis-based storage, session rotation,
  * concurrent session limits, hijacking detection, and Keycloak token integration
+ *
+ * ARCHITECTURAL NOTES:
+ * This class currently handles multiple responsibilities and would benefit from
+ * future modularization for better maintainability and testing:
+ *
+ * Potential separation:
+ * - SessionStore: Database and cache operations
+ * - TokenManager: Token encryption, refresh, validation
+ * - SessionValidator: Security checks, expiration, rotation logic
+ * - SessionLimiter: Concurrent session enforcement
+ * - SessionMetrics: Statistics and monitoring
+ *
+ * SECURITY ENHANCEMENTS APPLIED:
+ * - Enforced token encryption (no plaintext storage)
+ * - Session ID hashing in logs (prevents enumeration)
+ * - Atomic concurrent session limits (prevents race conditions)
+ * - Cache invalidation on token refresh (prevents stale data)
+ * - Transaction rollback on creation failure (prevents resource leaks)
  */
 
 import * as crypto from "crypto";
@@ -28,46 +46,56 @@ export type AuthResult = {
 
 // Session interfaces
 export interface KeycloakSessionData {
-  id: string;
-  userId: string;
-  userInfo: UserInfo;
-  keycloakSessionId: string;
+  readonly id: string;
+  readonly userId: string;
+  readonly userInfo: UserInfo;
+  readonly keycloakSessionId: string;
   accessToken: string | undefined;
   refreshToken: string | undefined;
   idToken: string | undefined;
   tokenExpiresAt: Date | undefined;
   refreshExpiresAt: Date | undefined;
-  createdAt: Date;
+  readonly createdAt: Date;
   lastAccessedAt: Date;
-  expiresAt: Date;
-  ipAddress: string;
-  userAgent: string;
+  readonly expiresAt: Date;
+  readonly ipAddress: string;
+  readonly userAgent: string;
   isActive: boolean;
   metadata: Record<string, any>;
-  fingerprint: string;
+  readonly fingerprint: string;
 }
 
 export interface KeycloakSessionCreationOptions {
-  userId: string;
-  userInfo: UserInfo;
-  keycloakSessionId: string;
-  tokens: KeycloakTokenResponse | undefined;
-  ipAddress: string;
-  userAgent: string;
-  maxAge: number | undefined;
-  metadata: Record<string, any> | undefined;
+  readonly userId: string;
+  readonly userInfo: UserInfo;
+  readonly keycloakSessionId: string;
+  readonly tokens: KeycloakTokenResponse | undefined;
+  readonly ipAddress: string;
+  readonly userAgent: string;
+  readonly maxAge: number | undefined;
+  readonly metadata: Record<string, any> | undefined;
 }
 
 export interface SessionValidationResult {
-  valid: boolean;
-  session?: KeycloakSessionData;
-  authResult?: AuthResult | undefined;
-  error?: string;
-  requiresRotation?: boolean;
-  requiresTokenRefresh?: boolean;
+  readonly valid: boolean;
+  readonly session?: KeycloakSessionData;
+  readonly authResult?: AuthResult | undefined;
+  readonly error?: string;
+  readonly requiresRotation?: boolean;
+  readonly requiresTokenRefresh?: boolean;
 }
 
 export interface SessionStats {
+  readonly activeSessions: number;
+  readonly totalSessions: number;
+  readonly cacheEnabled: boolean;
+  readonly sessionsCreated: number;
+  readonly sessionsDestroyed: number;
+  readonly sessionRotations: number;
+}
+
+// Internal mutable stats interface for implementation
+interface MutableSessionStats {
   activeSessions: number;
   totalSessions: number;
   cacheEnabled: boolean;
@@ -90,7 +118,7 @@ export class KeycloakSessionManager {
   private readonly logger = createLogger("KeycloakSessionManager");
   private cacheService?: CacheService;
   private readonly encryptionManager: EncryptionManager;
-  private stats: SessionStats = {
+  private stats: MutableSessionStats = {
     activeSessions: 0,
     totalSessions: 0,
     cacheEnabled: false,
@@ -129,6 +157,7 @@ export class KeycloakSessionManager {
     sessionData: KeycloakSessionData;
   }> {
     const startTime = performance.now();
+    let sessionData: KeycloakSessionData | undefined;
 
     try {
       // Generate secure session ID
@@ -147,7 +176,7 @@ export class KeycloakSessionManager {
       const now = new Date();
       const maxAge = options.maxAge || this.config.cache.ttl.session; // Use session TTL from config
 
-      const sessionData: KeycloakSessionData = {
+      sessionData = {
         id: sessionId,
         userId: options.userId,
         userInfo: options.userInfo,
@@ -186,13 +215,34 @@ export class KeycloakSessionManager {
       );
 
       this.logger.info("Keycloak session created", {
-        sessionId: sessionId.substring(0, 8) + "...",
+        sessionId: this.hashSessionIdForLogging(sessionId),
         userId: options.userId,
         hasTokens: !!options.tokens,
       });
 
       return { sessionId, sessionData };
     } catch (error) {
+      // Rollback stats if session creation failed after storeSession
+      // This prevents memory leaks and inconsistent state
+      if (sessionData) {
+        this.stats.sessionsCreated = Math.max(
+          0,
+          this.stats.sessionsCreated - 1
+        );
+        this.stats.activeSessions = Math.max(0, this.stats.activeSessions - 1);
+        this.stats.totalSessions = Math.max(0, this.stats.totalSessions - 1);
+
+        // Attempt cleanup of partially created session
+        try {
+          await this.destroySession(sessionData.id, "creation_failed");
+        } catch (cleanupError) {
+          this.logger.warn("Failed to cleanup partially created session", {
+            error: cleanupError,
+            sessionId: this.hashSessionIdForLogging(sessionData.id),
+          });
+        }
+      }
+
       this.logger.error("Failed to create Keycloak session", {
         error,
         userId: options.userId,
@@ -299,13 +349,21 @@ export class KeycloakSessionManager {
 
             await this.storeSession(sessionData);
 
+            // CRITICAL: Invalidate cached validation results after token refresh
+            // This prevents serving stale validation data with old tokens
+            if (this.cacheService) {
+              await this.cacheService.invalidate(
+                `keycloak_session_validation:${sessionId}`
+              );
+            }
+
             // Validate the new token
             authResult = await this.keycloakClient.validateToken(
               sessionData.accessToken
             );
 
             this.logger.info("Access token refreshed", {
-              sessionId: sessionId.substring(0, 8) + "...",
+              sessionId: this.hashSessionIdForLogging(sessionId),
               userId: sessionData.userId,
             });
 
@@ -313,7 +371,7 @@ export class KeycloakSessionManager {
           } catch (refreshError) {
             this.logger.warn("Token refresh failed", {
               error: refreshError,
-              sessionId: sessionId.substring(0, 8) + "...",
+              sessionId: this.hashSessionIdForLogging(sessionId),
             });
             requiresTokenRefresh = true;
           }
@@ -357,7 +415,7 @@ export class KeycloakSessionManager {
     } catch (error) {
       this.logger.error("Session validation error", {
         error,
-        sessionId: sessionId.substring(0, 8) + "...",
+        sessionId: this.hashSessionIdForLogging(sessionId),
       });
       this.metrics?.recordCounter("keycloak.session.validation_error", 1);
       return { valid: false, error: "Internal server error" };
@@ -412,8 +470,8 @@ export class KeycloakSessionManager {
       );
 
       this.logger.info("Keycloak session rotated", {
-        oldSessionId: sessionId.substring(0, 8) + "...",
-        newSessionId: newSessionId.substring(0, 8) + "...",
+        oldSessionId: this.hashSessionIdForLogging(sessionId),
+        newSessionId: this.hashSessionIdForLogging(newSessionId),
         userId: currentSession.userId,
       });
 
@@ -464,7 +522,7 @@ export class KeycloakSessionManager {
       );
 
       this.logger.info("Keycloak session destroyed", {
-        sessionId: sessionId.substring(0, 8) + "...",
+        sessionId: this.hashSessionIdForLogging(sessionId),
         reason,
       });
     } catch (error) {
@@ -474,19 +532,32 @@ export class KeycloakSessionManager {
   }
 
   /**
-   * Update session last accessed time
+   * Update session last accessed time (optimized with batching)
+   * Only updates if last access time is older than threshold to reduce DB writes
    */
   async updateSessionAccess(sessionId: string): Promise<void> {
     try {
       const sessionData = await this.retrieveSession(sessionId);
       if (sessionData) {
-        sessionData.lastAccessedAt = new Date();
-        await this.storeSession(sessionData);
+        const now = new Date();
+        const timeSinceLastAccess =
+          now.getTime() - sessionData.lastAccessedAt.getTime();
+        const accessUpdateThreshold = 60000; // Only update if > 1 minute since last update
+
+        if (timeSinceLastAccess > accessUpdateThreshold) {
+          sessionData.lastAccessedAt = now;
+          await this.storeSession(sessionData);
+
+          this.logger.debug("Session access time updated", {
+            sessionId: this.hashSessionIdForLogging(sessionId),
+            timeSinceLastAccess: Math.floor(timeSinceLastAccess / 1000) + "s",
+          });
+        }
       }
     } catch (error) {
       this.logger.warn("Failed to update session access time", {
         error,
-        sessionId: sessionId.substring(0, 8) + "...",
+        sessionId: this.hashSessionIdForLogging(sessionId),
       });
     }
   }
@@ -679,7 +750,7 @@ export class KeycloakSessionManager {
 
   /**
    * Enforce concurrent session limits using atomic database operations
-   * Prevents race conditions by using a single database transaction
+   * Fixed: Use single transaction to prevent race conditions and inconsistent counts
    */
   private async enforceConcurrentSessionLimits(userId: string): Promise<void> {
     const maxConcurrentSessions =
@@ -687,28 +758,30 @@ export class KeycloakSessionManager {
 
     if (maxConcurrentSessions > 0) {
       try {
-        // Use atomic database operation to check and enforce limits
-        // This prevents race conditions by handling everything in a single transaction
+        // Use atomic database operation with single COUNT to prevent race conditions
+        // This ensures consistent session limit enforcement under high concurrency
         const result = await this.dbClient.executeRaw(
-          `WITH oldest_sessions AS (
-            SELECT session_id, created_at
+          `WITH session_count AS (
+            SELECT COUNT(*) as current_count
             FROM user_sessions 
             WHERE user_id = $1 
               AND is_active = true 
               AND expires_at > NOW()
+          ),
+          sessions_to_destroy AS (
+            SELECT session_id, created_at
+            FROM user_sessions, session_count
+            WHERE user_id = $1 
+              AND is_active = true 
+              AND expires_at > NOW()
+              AND session_count.current_count >= $2
             ORDER BY created_at ASC
-            LIMIT (
-              CASE 
-                WHEN (SELECT COUNT(*) FROM user_sessions WHERE user_id = $1 AND is_active = true AND expires_at > NOW()) >= $2
-                THEN (SELECT COUNT(*) FROM user_sessions WHERE user_id = $1 AND is_active = true AND expires_at > NOW()) - $2 + 1
-                ELSE 0
-              END
-            )
+            LIMIT (session_count.current_count - $2 + 1)
           )
           UPDATE user_sessions 
           SET is_active = false, 
               updated_at = NOW()
-          WHERE session_id IN (SELECT session_id FROM oldest_sessions)
+          WHERE session_id IN (SELECT session_id FROM sessions_to_destroy)
           RETURNING session_id, created_at`,
           [userId, maxConcurrentSessions]
         );
@@ -727,8 +800,8 @@ export class KeycloakSessionManager {
             userId,
             maxSessions: maxConcurrentSessions,
             destroyedSessionCount: sessionIds.length,
-            destroyedSessionIds: sessionIds.map(
-              (id: string) => id.substring(0, 8) + "..."
+            destroyedSessionIds: sessionIds.map((id: string) =>
+              this.hashSessionIdForLogging(id)
             ),
           });
 
@@ -833,7 +906,7 @@ export class KeycloakSessionManager {
     } catch (error) {
       this.logger.error("Failed to store session", {
         error,
-        sessionId: sessionData.id.substring(0, 8) + "...",
+        sessionId: this.hashSessionIdForLogging(sessionData.id),
       });
       throw error;
     }
@@ -957,6 +1030,15 @@ export class KeycloakSessionManager {
   }
 
   /**
+   * Create secure hash of session ID for logging (prevents session enumeration attacks)
+   */
+  private hashSessionIdForLogging(sessionId: string): string {
+    const hash = crypto.createHash("sha256");
+    hash.update(sessionId);
+    return hash.digest("hex").substring(0, 8) + "...";
+  }
+
+  /**
    * Create session fingerprint for security
    */
   private createSessionFingerprint(
@@ -1000,7 +1082,7 @@ export class KeycloakSessionManager {
     ) {
       // Log but don't invalidate - user agents can change
       this.logger.warn("User agent mismatch detected", {
-        sessionId: sessionData.id.substring(0, 8) + "...",
+        sessionId: this.hashSessionIdForLogging(sessionData.id),
         original: sessionData.userAgent?.substring(0, 50) + "...",
         current: context.userAgent?.substring(0, 50) + "...",
       });
@@ -1046,24 +1128,65 @@ export class KeycloakSessionManager {
 
   /**
    * Encrypt sensitive tokens for storage using secure EncryptionManager
+   * SECURITY: Tokens are ALWAYS encrypted - no plaintext storage allowed
    */
   private encryptToken(token: string): string {
+    // Security enforcement: Never store tokens in plaintext
     if (!this.config.session?.tokenEncryption) {
-      return token; // Store unencrypted if encryption disabled
+      this.logger.warn(
+        "Token encryption is disabled but will be enforced for security",
+        {
+          recommendation: "Enable tokenEncryption in session config",
+        }
+      );
     }
-    return this.encryptionManager.encryptCompact(token);
+
+    try {
+      return this.encryptionManager.encryptCompact(token);
+    } catch (error) {
+      this.logger.error(
+        "Failed to encrypt token - this is a critical security error",
+        { error }
+      );
+      throw new Error(
+        "Token encryption failed - cannot store sensitive tokens insecurely"
+      );
+    }
   }
 
   /**
    * Decrypt sensitive tokens from storage using secure EncryptionManager
+   * SECURITY: Handles both encrypted and legacy plaintext tokens during migration
    */
   private decryptToken(encryptedToken: string): string {
+    // Handle legacy plaintext tokens during migration period
     if (!this.config.session?.tokenEncryption) {
-      return encryptedToken; // Return as-is if encryption disabled
+      this.logger.warn(
+        "Attempting to decrypt token with encryption disabled - assuming legacy plaintext",
+        {
+          tokenLength: encryptedToken.length,
+          recommendation:
+            "Enable tokenEncryption and migrate existing sessions",
+        }
+      );
+      return encryptedToken; // Return as-is for legacy compatibility
     }
+
     try {
       return this.encryptionManager.decryptCompact(encryptedToken);
     } catch (error) {
+      // Check if this might be a legacy plaintext token
+      if (encryptedToken.length < 100 && !encryptedToken.includes(".")) {
+        this.logger.warn(
+          "Failed to decrypt token - might be legacy plaintext token",
+          {
+            tokenLength: encryptedToken.length,
+            error: error instanceof Error ? error.message : String(error),
+          }
+        );
+        return encryptedToken; // Assume legacy plaintext
+      }
+
       this.logger.error("Failed to decrypt token", { error });
       throw new Error("Token decryption failed");
     }

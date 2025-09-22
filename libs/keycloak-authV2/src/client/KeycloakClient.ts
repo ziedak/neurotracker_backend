@@ -4,12 +4,12 @@
  */
 
 import * as jose from "jose";
-import * as crypto from "crypto";
 import { createLogger } from "@libs/utils";
 import { CacheService } from "@libs/database";
 import { createHttpClient, HttpStatus, type HttpClient } from "@libs/messaging";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { AuthResult, UserInfo } from "../types";
+import * as crypto from "crypto";
 
 /**
  * Keycloak Realm Configuration
@@ -96,6 +96,8 @@ export interface KeycloakIntrospectionResponse {
   sub?: string;
   aud?: string[];
   iss?: string;
+  email?: string; // Add email field to interface
+  name?: string; // Add name field to interface
   realm_access?: {
     roles: string[];
   };
@@ -104,6 +106,60 @@ export interface KeycloakIntrospectionResponse {
       roles: string[];
     };
   };
+}
+
+/**
+ * HTTP Response interface for Keycloak requests
+ */
+interface KeycloakHttpResponse<T = unknown> {
+  status: number;
+  statusText?: string;
+  data: T;
+}
+
+/**
+ * JWT Payload interface for extracted claims
+ */
+interface KeycloakJWTPayload {
+  sub: string;
+  preferred_username?: string;
+  email?: string;
+  name?: string;
+  realm_access?: {
+    roles: string[];
+  };
+  resource_access?: {
+    [key: string]: {
+      roles: string[];
+    };
+  };
+  scope?: string;
+  exp?: number;
+  iat?: number;
+  iss?: string;
+  aud?: string | string[];
+  authorization?: {
+    permissions: string[];
+  };
+}
+
+/**
+ * Code Exchange Result interface
+ */
+export interface CodeExchangeResult {
+  success: boolean;
+  tokens?: KeycloakTokenResponse;
+  error?: string;
+}
+
+/**
+ * Direct Grant Authentication Result
+ */
+export interface DirectGrantAuthResult {
+  success: boolean;
+  tokens?: KeycloakTokenResponse;
+  sessionId?: string;
+  error?: string;
 }
 
 /**
@@ -139,9 +195,16 @@ export interface KeycloakClientOptions {
 export class KeycloakClient {
   private readonly logger = createLogger("KeycloakClient");
   private readonly httpClient: HttpClient;
-  private cacheService?: CacheService;
-  private discoveryDocument?: KeycloakDiscoveryDocument;
-  private jwksKeySet?: ReturnType<typeof jose.createRemoteJWKSet>;
+  private cacheService?: CacheService | undefined;
+  private discoveryDocument?: KeycloakDiscoveryDocument | undefined;
+  private jwksKeySet?: ReturnType<typeof jose.createRemoteJWKSet> | undefined;
+  private requestStats = {
+    totalRequests: 0,
+    successfulRequests: 0,
+    failedRequests: 0,
+    lastRequestTime: 0,
+  };
+  private initializationState: "pending" | "initialized" | "failed" = "pending";
 
   // Default configuration
   private readonly defaults = {
@@ -165,6 +228,9 @@ export class KeycloakClient {
     private readonly options: KeycloakClientOptions,
     private readonly metrics?: IMetricsCollector
   ) {
+    // Validate configuration
+    this.validateConfiguration(options);
+
     // Initialize HTTP client
     this.httpClient = createHttpClient({
       timeout: options.http?.timeout || this.defaults.http.timeout,
@@ -181,6 +247,18 @@ export class KeycloakClient {
    * Initialize the client by discovering Keycloak endpoints
    */
   async initialize(): Promise<void> {
+    // Protect against multiple initialization calls
+    if (this.initializationState === "initialized") {
+      this.logger.debug("KeycloakClient already initialized, skipping");
+      return;
+    }
+
+    if (this.initializationState === "failed") {
+      throw new Error(
+        "KeycloakClient initialization previously failed. Create a new instance."
+      );
+    }
+
     const startTime = performance.now();
 
     try {
@@ -204,6 +282,9 @@ export class KeycloakClient {
         );
       }
 
+      this.initializationState = "initialized";
+      this.trackSuccessfulRequest();
+
       this.metrics?.recordTimer(
         "keycloak.client.initialization_duration",
         performance.now() - startTime
@@ -211,6 +292,9 @@ export class KeycloakClient {
 
       this.logger.info("Keycloak client initialized successfully");
     } catch (error) {
+      this.initializationState = "failed";
+      this.trackFailedRequest();
+
       this.logger.error("Failed to initialize Keycloak client", { error });
       this.metrics?.recordCounter("keycloak.client.initialization_error", 1);
       throw new Error(`Failed to initialize Keycloak client: ${error}`);
@@ -219,6 +303,13 @@ export class KeycloakClient {
 
   /**
    * Authenticate using client credentials flow
+   * @param scopes - Optional scopes to request (defaults to configured realm scopes)
+   * @returns Promise resolving to Keycloak token response
+   * @example
+   * ```typescript
+   * const tokens = await client.authenticateClientCredentials(['read', 'write']);
+   * console.log('Access token:', tokens.access_token);
+   * ```
    */
   async authenticateClientCredentials(
     scopes?: string[]
@@ -260,13 +351,10 @@ export class KeycloakClient {
         );
       }
 
-      this.metrics?.recordCounter(
-        "keycloak.auth.client_credentials_success",
-        1
-      );
-      this.metrics?.recordTimer(
-        "keycloak.auth.client_credentials_duration",
-        performance.now() - startTime
+      this.recordSuccessMetrics(
+        "keycloak.auth.client_credentials",
+        startTime,
+        "Client credentials authentication"
       );
 
       this.logger.debug("Client credentials authentication successful", {
@@ -282,6 +370,14 @@ export class KeycloakClient {
 
   /**
    * Exchange authorization code for tokens
+   * @param code - Authorization code received from OAuth flow
+   * @param codeVerifier - Optional PKCE code verifier for enhanced security
+   * @returns Promise resolving to Keycloak token response
+   * @example
+   * ```typescript
+   * const tokens = await client.exchangeAuthorizationCode(code, codeVerifier);
+   * console.log('Access token:', tokens.access_token);
+   * ```
    */
   async exchangeAuthorizationCode(
     code: string,
@@ -332,23 +428,36 @@ export class KeycloakClient {
         );
       }
 
-      this.metrics?.recordCounter("keycloak.auth.code_exchange_success", 1);
-      this.metrics?.recordTimer(
-        "keycloak.auth.code_exchange_duration",
-        performance.now() - startTime
+      this.recordSuccessMetrics(
+        "keycloak.auth.code_exchange",
+        startTime,
+        "Authorization code exchange"
       );
-
-      this.logger.debug("Authorization code exchange successful");
 
       return response.data;
     } catch (error) {
-      this.metrics?.recordCounter("keycloak.auth.code_exchange_error", 1);
-      throw new Error(this.sanitizeError(error, "Authentication failed"));
+      const errorResult = this.handleAuthError(
+        error,
+        "Authorization code exchange",
+        startTime,
+        "keycloak.auth.code_exchange"
+      ) as AuthResult;
+
+      throw new Error(errorResult.error || "Authentication failed");
     }
   }
 
   /**
-   * Validate JWT token using JWKS
+   * Validate JWT token using JWKS verification
+   * @param token - JWT token to validate
+   * @returns Promise resolving to authentication result with user information
+   * @example
+   * ```typescript
+   * const result = await client.validateToken(jwtToken);
+   * if (result.success) {
+   *   console.log('User:', result.user.username);
+   * }
+   * ```
    */
   async validateToken(token: string): Promise<AuthResult> {
     const startTime = performance.now();
@@ -372,7 +481,7 @@ export class KeycloakClient {
       }
 
       // Verify JWT signature and claims
-      const verifyOptions: any = {
+      const verifyOptions: jose.JWTVerifyOptions = {
         audience: this.options.realm.clientId,
         clockTolerance:
           this.options.security?.clockSkew || this.defaults.security.clockSkew,
@@ -398,8 +507,8 @@ export class KeycloakClient {
         username: (payload["preferred_username"] as string) || payload.sub!,
         email: payload["email"] as string,
         name: payload["name"] as string,
-        roles: this.extractRoles(payload),
-        permissions: this.extractPermissions(payload),
+        roles: this.extractRoles(payload as KeycloakJWTPayload),
+        permissions: this.extractPermissions(payload as KeycloakJWTPayload),
         metadata: {
           iss: payload.iss,
           aud: payload.aud,
@@ -524,8 +633,8 @@ export class KeycloakClient {
       const userInfo: UserInfo = {
         id: introspection.sub!,
         username: introspection.username || introspection.sub!,
-        email: (introspection as any).email as string | undefined,
-        name: (introspection as any).name as string | undefined,
+        email: introspection.email, // Now properly typed
+        name: introspection.name, // Now properly typed
         roles: this.extractRolesFromIntrospection(introspection),
         permissions: [], // Would need additional endpoint for permissions
         metadata: {
@@ -582,7 +691,15 @@ export class KeycloakClient {
   }
 
   /**
-   * Get user info from Keycloak userinfo endpoint
+   * Get user information from Keycloak userinfo endpoint
+   * @param accessToken - Valid access token for user
+   * @returns Promise resolving to complete user information
+   * @example
+   * ```typescript
+   * const userInfo = await client.getUserInfo(accessToken);
+   * console.log('User email:', userInfo.email);
+   * console.log('User roles:', userInfo.roles);
+   * ```
    */
   async getUserInfo(accessToken: string): Promise<KeycloakUserInfo> {
     const startTime = performance.now();
@@ -651,23 +768,34 @@ export class KeycloakClient {
         await this.cacheService.set(cacheKey, userInfo, ttl);
       }
 
-      this.metrics?.recordCounter("keycloak.userinfo.success", 1);
-      this.metrics?.recordTimer(
-        "keycloak.userinfo.duration",
-        performance.now() - startTime
+      this.recordSuccessMetrics(
+        "keycloak.userinfo",
+        startTime,
+        "User information retrieval"
       );
 
       return userInfo;
     } catch (error) {
-      this.metrics?.recordCounter("keycloak.userinfo.error", 1);
-      throw new Error(
-        this.sanitizeError(error, "User information retrieval failed")
-      );
+      const errorResult = this.handleAuthError(
+        error,
+        "User information retrieval",
+        startTime,
+        "keycloak.userinfo"
+      ) as AuthResult;
+
+      throw new Error(errorResult.error || "User information retrieval failed");
     }
   }
 
   /**
    * Refresh access token using refresh token
+   * @param refreshToken - Valid refresh token
+   * @returns Promise resolving to new token response
+   * @example
+   * ```typescript
+   * const newTokens = await client.refreshToken(existingRefreshToken);
+   * console.log('New access token:', newTokens.access_token);
+   * ```
    */
   async refreshToken(refreshToken: string): Promise<KeycloakTokenResponse> {
     const startTime = performance.now();
@@ -707,23 +835,42 @@ export class KeycloakClient {
 
       const tokenResponse: KeycloakTokenResponse = response.data;
 
-      this.metrics?.recordCounter("keycloak.auth.token_refresh_success", 1);
-      this.metrics?.recordTimer(
-        "keycloak.auth.token_refresh_duration",
-        performance.now() - startTime
+      this.recordSuccessMetrics(
+        "keycloak.auth.token_refresh",
+        startTime,
+        "Token refresh"
       );
-
-      this.logger.debug("Token refresh successful");
 
       return tokenResponse;
     } catch (error) {
-      this.metrics?.recordCounter("keycloak.auth.token_refresh_error", 1);
-      throw new Error(this.sanitizeError(error, "Token refresh failed"));
+      const errorResult = this.handleAuthError(
+        error,
+        "Token refresh",
+        startTime,
+        "keycloak.auth.token_refresh"
+      ) as AuthResult;
+
+      throw new Error(errorResult.error || "Token refresh failed");
     }
   }
 
   /**
-   * Get the authorization URL for OAuth flow
+   * Get the authorization URL for OAuth flow initiation
+   * @param state - Unique state parameter for CSRF protection
+   * @param nonce - Unique nonce for ID token validation
+   * @param codeChallenge - Optional PKCE code challenge for enhanced security
+   * @param additionalScopes - Optional additional scopes to request
+   * @returns Complete authorization URL for redirecting users
+   * @example
+   * ```typescript
+   * const authUrl = client.getAuthorizationUrl(
+   *   'random-state-string',
+   *   'random-nonce',
+   *   'code-challenge',
+   *   ['profile']
+   * );
+   * // Redirect user to authUrl
+   * ```
    */
   getAuthorizationUrl(
     state: string,
@@ -789,108 +936,143 @@ export class KeycloakClient {
 
   /**
    * Authenticate with username/password (Direct Grant)
+   * @param username - User's login username
+   * @param password - User's password
+   * @param clientId - Optional client ID override
+   * @returns Authentication result with tokens and session information
+   * @example
+   * ```typescript
+   * const result = await client.authenticateWithPassword("user", "pass");
+   * if (result.success) {
+   *   console.log("User authenticated:", result.tokens);
+   * }
+   * ```
    */
   async authenticateWithPassword(
     username: string,
     password: string,
     clientId?: string
-  ): Promise<{
-    success: boolean;
-    tokens?: KeycloakTokenResponse;
-    sessionId?: string;
-    error?: string;
-  }> {
+  ): Promise<DirectGrantAuthResult> {
+    const startTime = performance.now();
+
     try {
-      if (!this.discoveryDocument?.token_endpoint) {
-        throw new Error("Token endpoint not available");
-      }
+      this.validatePasswordGrantPrerequisites();
 
-      const params = new URLSearchParams();
-      params.append("grant_type", "password");
-      params.append("username", username);
-      params.append("password", password);
-      params.append("client_id", clientId || this.options.realm.clientId);
+      const requestParams = this.buildPasswordGrantParams(
+        username,
+        password,
+        clientId
+      );
+      const response = await this.executePasswordGrant(requestParams);
 
-      if (this.options.realm.clientSecret) {
-        params.append("client_secret", this.options.realm.clientSecret);
-      }
+      const result = this.processPasswordGrantResponse(response);
 
-      if (this.options.realm.scopes.length > 0) {
-        params.append("scope", this.options.realm.scopes.join(" "));
-      }
-
-      const response = await this.httpClient.post(
-        this.discoveryDocument.token_endpoint,
-        {
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          data: params.toString(),
-        }
+      this.metrics?.recordCounter("keycloak.auth.password_grant_success", 1);
+      this.metrics?.recordTimer(
+        "keycloak.auth.password_grant_duration",
+        performance.now() - startTime
       );
 
-      if (response.status === 200) {
-        return {
-          success: true,
-          tokens: response.data as KeycloakTokenResponse,
-          sessionId: crypto.randomUUID(), // Generate session ID
-        };
-      } else {
-        return {
-          success: false,
-          error: `Authentication failed: ${response.status}`,
-        };
-      }
+      return result;
     } catch (error) {
+      this.metrics?.recordCounter("keycloak.auth.password_grant_error", 1);
       this.logger.error("Password authentication failed", { error, username });
+
       return {
         success: false,
-        error: "Authentication failed",
+        error: this.sanitizeError(error, "Authentication failed"),
       };
     }
   }
 
   /**
    * Exchange code for tokens (alias for exchangeAuthorizationCode)
+   * @param code - Authorization code from OAuth flow
+   * @param redirectUri - Redirect URI used in authorization request
+   * @param codeVerifier - Optional PKCE code verifier
+   * @returns Code exchange result with tokens
    */
   async exchangeCodeForTokens(
     code: string,
     redirectUri: string,
     codeVerifier?: string
-  ): Promise<{
-    success: boolean;
-    tokens?: KeycloakTokenResponse;
-    error?: string;
-  }> {
+  ): Promise<CodeExchangeResult> {
+    const startTime = performance.now();
+
     try {
-      // Temporarily override the redirectUri for this specific call
-      const originalRedirectUri = this.options.realm.redirectUri;
-      this.options.realm.redirectUri = redirectUri;
-
-      const tokens = await this.exchangeAuthorizationCode(code, codeVerifier);
-
-      // Restore original redirectUri (handle undefined case)
-      if (originalRedirectUri) {
-        this.options.realm.redirectUri = originalRedirectUri;
+      if (!this.discoveryDocument?.token_endpoint) {
+        throw new Error("Token endpoint not available");
       }
+
+      const params = new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: this.options.realm.clientId,
+        code,
+        redirect_uri: redirectUri, // Use parameter directly instead of mutating instance state
+      });
+
+      // Add client secret if available (confidential client)
+      if (this.options.realm.clientSecret) {
+        params.append("client_secret", this.options.realm.clientSecret);
+      }
+
+      // Add PKCE code verifier if provided
+      if (codeVerifier) {
+        params.append("code_verifier", codeVerifier);
+      }
+
+      const response = await this.httpClient.post<KeycloakTokenResponse>(
+        this.discoveryDocument.token_endpoint,
+        params.toString(),
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+          },
+        }
+      );
+
+      if (!HttpStatus.isSuccess(response.status)) {
+        throw new Error(
+          `Code exchange failed: ${response.status} ${response.statusText}`
+        );
+      }
+
+      this.recordSuccessMetrics(
+        "keycloak.auth.code_exchange",
+        startTime,
+        "Code exchange"
+      );
 
       return {
         success: true,
-        tokens,
+        tokens: response.data,
       };
     } catch (error) {
-      this.logger.error("Code exchange failed", { error });
-      return {
-        success: false,
-        error: "Code exchange failed",
-      };
+      const errorResult = this.handleAuthError(
+        error,
+        "Code exchange",
+        startTime,
+        "keycloak.auth.code_exchange"
+      ) as CodeExchangeResult;
+
+      return errorResult;
     }
   }
 
   /**
    * Logout user by revoking refresh token
+   * @param refreshToken - Valid refresh token to revoke
+   * @returns Promise that resolves when logout is complete
+   * @example
+   * ```typescript
+   * await client.logout(refreshToken);
+   * console.log('User logged out successfully');
+   * ```
    */
   async logout(refreshToken: string): Promise<void> {
+    const startTime = performance.now();
+
     try {
       if (!this.discoveryDocument?.token_endpoint) {
         this.logger.warn("Token endpoint not available for logout");
@@ -918,9 +1100,20 @@ export class KeycloakClient {
         data: params.toString(),
       });
 
-      this.logger.info("User logged out successfully");
+      this.recordSuccessMetrics(
+        "keycloak.auth.logout",
+        startTime,
+        "User logout"
+      );
     } catch (error) {
-      throw new Error(this.sanitizeError(error, "Logout failed"));
+      const errorResult = this.handleAuthError(
+        error,
+        "User logout",
+        startTime,
+        "keycloak.auth.logout"
+      ) as AuthResult;
+
+      throw new Error(errorResult.error || "Logout failed");
     }
   }
 
@@ -932,6 +1125,180 @@ export class KeycloakClient {
   }
 
   // Private helper methods
+
+  /**
+   * Validate configuration options at startup
+   */
+  private validateConfiguration(options: KeycloakClientOptions): void {
+    if (!options.realm) {
+      throw new Error("KeycloakClient: realm configuration is required");
+    }
+
+    const { realm } = options;
+
+    // Required fields
+    if (!realm.serverUrl) {
+      throw new Error("KeycloakClient: realm.serverUrl is required");
+    }
+    if (!realm.realm) {
+      throw new Error("KeycloakClient: realm.realm is required");
+    }
+    if (!realm.clientId) {
+      throw new Error("KeycloakClient: realm.clientId is required");
+    }
+
+    // URL validation
+    try {
+      new URL(realm.serverUrl);
+    } catch (error) {
+      throw new Error("KeycloakClient: realm.serverUrl must be a valid URL");
+    }
+
+    // Scopes validation
+    if (!Array.isArray(realm.scopes)) {
+      throw new Error("KeycloakClient: realm.scopes must be an array");
+    }
+
+    // Optional validation for redirectUri if provided
+    if (realm.redirectUri) {
+      try {
+        new URL(realm.redirectUri);
+      } catch (error) {
+        throw new Error(
+          "KeycloakClient: realm.redirectUri must be a valid URL when provided"
+        );
+      }
+    }
+
+    // Configuration limits validation
+    if (
+      options.http?.timeout &&
+      (options.http.timeout < 1000 || options.http.timeout > 300000)
+    ) {
+      throw new Error(
+        "KeycloakClient: http.timeout must be between 1000ms and 300000ms"
+      );
+    }
+
+    if (
+      options.http?.retries &&
+      (options.http.retries < 0 || options.http.retries > 10)
+    ) {
+      throw new Error("KeycloakClient: http.retries must be between 0 and 10");
+    }
+
+    if (
+      options.security?.clockSkew &&
+      (options.security.clockSkew < 0 || options.security.clockSkew > 300)
+    ) {
+      throw new Error(
+        "KeycloakClient: security.clockSkew must be between 0 and 300 seconds"
+      );
+    }
+
+    // Cache TTL validations
+    if (
+      options.cache?.discoveryTtl &&
+      (options.cache.discoveryTtl < 60 || options.cache.discoveryTtl > 86400)
+    ) {
+      throw new Error(
+        "KeycloakClient: cache.discoveryTtl must be between 60 and 86400 seconds"
+      );
+    }
+
+    if (
+      options.cache?.jwksTtl &&
+      (options.cache.jwksTtl < 60 || options.cache.jwksTtl > 86400)
+    ) {
+      throw new Error(
+        "KeycloakClient: cache.jwksTtl must be between 60 and 86400 seconds"
+      );
+    }
+
+    if (
+      options.cache?.userInfoTtl &&
+      (options.cache.userInfoTtl < 30 || options.cache.userInfoTtl > 3600)
+    ) {
+      throw new Error(
+        "KeycloakClient: cache.userInfoTtl must be between 30 and 3600 seconds"
+      );
+    }
+  }
+
+  /**
+   * Validate prerequisites for password grant flow
+   */
+  private validatePasswordGrantPrerequisites(): void {
+    if (!this.discoveryDocument?.token_endpoint) {
+      throw new Error("Token endpoint not available");
+    }
+  }
+
+  /**
+   * Build URL parameters for password grant request
+   */
+  private buildPasswordGrantParams(
+    username: string,
+    password: string,
+    clientId?: string
+  ): URLSearchParams {
+    const params = new URLSearchParams();
+    params.append("grant_type", "password");
+    params.append("username", username);
+    params.append("password", password);
+    params.append("client_id", clientId || this.options.realm.clientId);
+
+    if (this.options.realm.clientSecret) {
+      params.append("client_secret", this.options.realm.clientSecret);
+    }
+
+    if (this.options.realm.scopes.length > 0) {
+      params.append("scope", this.options.realm.scopes.join(" "));
+    }
+
+    return params;
+  }
+
+  /**
+   * Execute password grant HTTP request
+   */
+  private async executePasswordGrant(
+    params: URLSearchParams
+  ): Promise<KeycloakHttpResponse<KeycloakTokenResponse>> {
+    if (!this.discoveryDocument?.token_endpoint) {
+      throw new Error("Token endpoint not available");
+    }
+
+    return this.httpClient.post<KeycloakTokenResponse>(
+      this.discoveryDocument.token_endpoint,
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        data: params.toString(),
+      }
+    );
+  }
+
+  /**
+   * Process password grant response and return structured result
+   */
+  private processPasswordGrantResponse(
+    response: KeycloakHttpResponse<KeycloakTokenResponse>
+  ): DirectGrantAuthResult {
+    if (response.status === 200) {
+      return {
+        success: true,
+        tokens: response.data as KeycloakTokenResponse,
+        sessionId: crypto.randomUUID(),
+      };
+    } else {
+      return {
+        success: false,
+        error: `Authentication failed: ${response.status}`,
+      };
+    }
+  }
 
   private async discoverEndpoints(): Promise<void> {
     const discoveryUrl = `${this.options.realm.serverUrl}/realms/${this.options.realm.realm}/.well-known/openid_configuration`;
@@ -1007,16 +1374,13 @@ export class KeycloakClient {
   }
 
   private hashToken(token: string): string {
-    // Create a hash of the token for cache keys (for security and length)
-    const crypto = require("crypto");
-    return crypto
-      .createHash("sha256")
-      .update(token)
-      .digest("hex")
-      .substring(0, 16);
+    // Create a full SHA-256 hash of the token for cache keys (for security and uniqueness)
+    return crypto.createHash("sha256").update(token).digest("hex"); // Use full hash instead of substring to reduce collision risk
   }
 
-  private extractRoles(payload: any): string[] {
+  private extractRoles(
+    payload: KeycloakJWTPayload | KeycloakUserInfo
+  ): string[] {
     const roles: string[] = [];
 
     // Realm roles
@@ -1028,11 +1392,9 @@ export class KeycloakClient {
 
     // Resource/client roles
     if (payload.resource_access) {
-      for (const [client, access] of Object.entries(
-        payload.resource_access as any
-      )) {
+      for (const [client, access] of Object.entries(payload.resource_access)) {
         if (access && typeof access === "object" && "roles" in access) {
-          const accessObj = access as any;
+          const accessObj = access as { roles: string[] };
           if (accessObj.roles) {
             roles.push(
               ...accessObj.roles.map((role: string) => `${client}:${role}`)
@@ -1045,13 +1407,92 @@ export class KeycloakClient {
     return roles;
   }
 
-  private extractPermissions(payload: any): string[] {
-    // Keycloak permissions would typically come from Authorization Services
-    // This is a simplified implementation
+  private extractPermissions(
+    payload: KeycloakJWTPayload | KeycloakUserInfo
+  ): string[] {
+    // Enhanced permission extraction system
     const permissions: string[] = [];
 
-    if (payload.authorization?.permissions) {
+    // Extract permissions from Authorization Services (UMA-based)
+    if ("authorization" in payload && payload.authorization?.permissions) {
       permissions.push(...payload.authorization.permissions);
+    }
+
+    // Extract role-based permissions (convert roles to permissions)
+    const rolePermissions = this.convertRolesToPermissions(payload);
+    permissions.push(...rolePermissions);
+
+    // Extract resource-based permissions from resource_access
+    const resourcePermissions = this.extractResourcePermissions(payload);
+    permissions.push(...resourcePermissions);
+
+    // Remove duplicates and return
+    return [...new Set(permissions)];
+  }
+
+  /**
+   * Convert roles to permission-like strings for RBAC compatibility
+   */
+  private convertRolesToPermissions(
+    payload: KeycloakJWTPayload | KeycloakUserInfo
+  ): string[] {
+    const permissions: string[] = [];
+
+    // Realm roles to permissions
+    if (payload.realm_access?.roles) {
+      payload.realm_access.roles.forEach((role) => {
+        permissions.push(`realm:${role}:access`);
+        // Add common CRUD permissions for admin roles
+        if (role.includes("admin")) {
+          permissions.push(
+            `realm:${role}:read`,
+            `realm:${role}:write`,
+            `realm:${role}:delete`
+          );
+        }
+      });
+    }
+
+    // Resource/client roles to permissions
+    if (payload.resource_access) {
+      Object.entries(payload.resource_access).forEach(([client, access]) => {
+        if (access && typeof access === "object" && "roles" in access) {
+          const accessObj = access as { roles: string[] };
+          accessObj.roles?.forEach((role) => {
+            permissions.push(`${client}:${role}:access`);
+            // Add CRUD permissions for admin roles
+            if (role.includes("admin")) {
+              permissions.push(
+                `${client}:${role}:read`,
+                `${client}:${role}:write`,
+                `${client}:${role}:delete`
+              );
+            }
+          });
+        }
+      });
+    }
+
+    return permissions;
+  }
+
+  /**
+   * Extract resource-specific permissions
+   */
+  private extractResourcePermissions(
+    payload: KeycloakJWTPayload | KeycloakUserInfo
+  ): string[] {
+    const permissions: string[] = [];
+
+    // Check for scope-based permissions
+    if ("scope" in payload && payload.scope) {
+      const scopes = payload.scope.split(" ");
+      scopes.forEach((scope) => {
+        if (scope.includes(":")) {
+          // Format: resource:action (e.g., "users:read", "reports:write")
+          permissions.push(scope);
+        }
+      });
     }
 
     return permissions;
@@ -1091,15 +1532,96 @@ export class KeycloakClient {
     jwksLoaded: boolean;
     cacheEnabled: boolean;
     requestCount: number;
+    successfulRequests: number;
+    failedRequests: number;
+    successRate: number;
+    lastRequestTime: Date | null;
+    initializationState: "pending" | "initialized" | "failed";
   } {
+    const successRate =
+      this.requestStats.totalRequests > 0
+        ? (this.requestStats.successfulRequests /
+            this.requestStats.totalRequests) *
+          100
+        : 0;
+
     return {
       discoveryLoaded: !!this.discoveryDocument,
       jwksLoaded: !!this.jwksKeySet,
       cacheEnabled: !!this.cacheService,
-      requestCount: 0, // Could be tracked if needed
+      requestCount: this.requestStats.totalRequests,
+      successfulRequests: this.requestStats.successfulRequests,
+      failedRequests: this.requestStats.failedRequests,
+      successRate: Math.round(successRate * 100) / 100, // Round to 2 decimal places
+      lastRequestTime:
+        this.requestStats.lastRequestTime > 0
+          ? new Date(this.requestStats.lastRequestTime)
+          : null,
+      initializationState: this.initializationState,
     };
   }
 
+  /**
+   * Track successful request
+   */
+  private trackSuccessfulRequest(): void {
+    this.requestStats.totalRequests++;
+    this.requestStats.successfulRequests++;
+    this.requestStats.lastRequestTime = Date.now();
+  }
+
+  /**
+   * Track failed request
+   */
+  private trackFailedRequest(): void {
+    this.requestStats.totalRequests++;
+    this.requestStats.failedRequests++;
+    this.requestStats.lastRequestTime = Date.now();
+  }
+
+  /**
+   * Standardized error handling for authentication methods
+   */
+  private handleAuthError(
+    error: unknown,
+    operation: string,
+    startTime: number,
+    metricPrefix: string
+  ): AuthResult | DirectGrantAuthResult | CodeExchangeResult {
+    this.trackFailedRequest();
+    this.metrics?.recordCounter(`${metricPrefix}_error`, 1);
+    this.metrics?.recordTimer(
+      `${metricPrefix}_duration`,
+      performance.now() - startTime
+    );
+
+    this.logger.error(`${operation} failed`, { error });
+
+    const sanitizedError = this.sanitizeError(error, `${operation} failed`);
+
+    return {
+      success: false,
+      error: sanitizedError,
+    };
+  }
+
+  /**
+   * Standardized success metrics recording
+   */
+  private recordSuccessMetrics(
+    metricPrefix: string,
+    startTime: number,
+    operation: string
+  ): void {
+    this.trackSuccessfulRequest();
+    this.metrics?.recordCounter(`${metricPrefix}_success`, 1);
+    this.metrics?.recordTimer(
+      `${metricPrefix}_duration`,
+      performance.now() - startTime
+    );
+
+    this.logger.debug(`${operation} successful`);
+  }
   /**
    * Sanitize error messages to prevent information disclosure
    */
@@ -1155,5 +1677,50 @@ export class KeycloakClient {
       this.logger.error("Health check failed", { error });
       return false;
     }
+  }
+
+  /**
+   * Clean up resources and dispose of the client
+   * Call this when the application is shutting down or the client is no longer needed
+   */
+  async dispose(): Promise<void> {
+    try {
+      this.logger.info("Disposing KeycloakClient resources");
+
+      // Clear cache if available
+      if (this.cacheService) {
+        // Note: CacheService doesn't have a dispose method, so we just remove the reference
+        this.cacheService = undefined;
+      }
+
+      // Clear discovery document and JWKS
+      this.discoveryDocument = undefined;
+      this.jwksKeySet = undefined;
+
+      // Reset initialization state
+      this.initializationState = "pending";
+
+      // Reset stats
+      this.requestStats = {
+        totalRequests: 0,
+        successfulRequests: 0,
+        failedRequests: 0,
+        lastRequestTime: 0,
+      };
+
+      this.logger.info("KeycloakClient disposed successfully");
+    } catch (error) {
+      this.logger.error("Error during KeycloakClient disposal", { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Check if the client is properly initialized and ready to use
+   */
+  isReady(): boolean {
+    return (
+      this.initializationState === "initialized" && !!this.discoveryDocument
+    );
   }
 }

@@ -314,9 +314,9 @@ export class PostgreSQLClient {
         operationName: "PostgreSQL ping",
         enableCircuitBreaker: true,
       }
-    ).catch((error: unknown) => {
+    ).catch(async (error: unknown) => {
       this.logger.error("PostgreSQL ping failed after retries", error);
-      this.metricsCollector?.recordCounter("postgresql.ping.failure");
+      await this.metricsCollector?.recordCounter("postgresql.ping.failure");
       throw new PostgreSQLError("Database ping failed", error);
     });
   }
@@ -451,12 +451,14 @@ export class PostgreSQLClient {
         operationName: "PostgreSQL raw query",
         enableCircuitBreaker: true,
       }
-    ).catch((error: unknown) => {
+    ).catch(async (error: unknown) => {
       this.logger.error("PostgreSQL raw query failed after retries", error, {
         query: `${query.substring(0, 100)}...`,
         paramCount: params.length,
       });
-      this.metricsCollector?.recordCounter("postgresql.raw_query.failure");
+      await this.metricsCollector?.recordCounter(
+        "postgresql.raw_query.failure"
+      );
       throw new PostgreSQLError("Raw query execution failed", error);
     });
   }
