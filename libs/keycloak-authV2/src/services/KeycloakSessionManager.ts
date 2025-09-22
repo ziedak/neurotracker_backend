@@ -419,12 +419,8 @@ export class KeycloakSessionManager {
 
       return { sessionId: newSessionId, sessionData: updatedSessionData };
     } catch (error) {
-      this.logger.error("Failed to rotate Keycloak session", {
-        error,
-        sessionId: sessionId.substring(0, 8) + "...",
-      });
       this.metrics?.recordCounter("keycloak.session.rotation_error", 1);
-      throw new Error("Failed to rotate session");
+      throw new Error(this.sanitizeError(error, "Session rotation failed"));
     }
   }
 
@@ -472,13 +468,8 @@ export class KeycloakSessionManager {
         reason,
       });
     } catch (error) {
-      this.logger.error("Failed to destroy Keycloak session", {
-        error,
-        sessionId: sessionId.substring(0, 8) + "...",
-        reason,
-      });
       this.metrics?.recordCounter("keycloak.session.destroy_error", 1);
-      throw error;
+      throw new Error(this.sanitizeError(error, "Session termination failed"));
     }
   }
 
@@ -687,30 +678,96 @@ export class KeycloakSessionManager {
   }
 
   /**
-   * Enforce concurrent session limits using configuration
+   * Enforce concurrent session limits using atomic database operations
+   * Prevents race conditions by using a single database transaction
    */
   private async enforceConcurrentSessionLimits(userId: string): Promise<void> {
     const maxConcurrentSessions =
       this.config.session?.maxConcurrentSessions || 0;
 
     if (maxConcurrentSessions > 0) {
-      const userSessions = await this.getUserSessions(userId);
+      try {
+        // Use atomic database operation to check and enforce limits
+        // This prevents race conditions by handling everything in a single transaction
+        const result = await this.dbClient.executeRaw(
+          `WITH oldest_sessions AS (
+            SELECT session_id, created_at
+            FROM user_sessions 
+            WHERE user_id = $1 
+              AND is_active = true 
+              AND expires_at > NOW()
+            ORDER BY created_at ASC
+            LIMIT (
+              CASE 
+                WHEN (SELECT COUNT(*) FROM user_sessions WHERE user_id = $1 AND is_active = true AND expires_at > NOW()) >= $2
+                THEN (SELECT COUNT(*) FROM user_sessions WHERE user_id = $1 AND is_active = true AND expires_at > NOW()) - $2 + 1
+                ELSE 0
+              END
+            )
+          )
+          UPDATE user_sessions 
+          SET is_active = false, 
+              updated_at = NOW()
+          WHERE session_id IN (SELECT session_id FROM oldest_sessions)
+          RETURNING session_id, created_at`,
+          [userId, maxConcurrentSessions]
+        );
 
-      if (userSessions.length >= maxConcurrentSessions) {
-        // Destroy the oldest session
-        const oldestSession = userSessions.sort(
-          (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
-        )[0];
+        // Type the result as an array of session records
+        const destroyedSessions = result as Array<{
+          session_id: string;
+          created_at: Date;
+        }>;
 
-        if (oldestSession) {
-          await this.destroySession(oldestSession.id, "concurrent_limit");
+        if (destroyedSessions && destroyedSessions.length > 0) {
+          // Log the enforcement action
+          const sessionIds = destroyedSessions.map((row) => row.session_id);
 
-          this.logger.info("Enforced concurrent session limit", {
+          this.logger.info("Enforced concurrent session limit (atomic)", {
             userId,
             maxSessions: maxConcurrentSessions,
-            destroyedSessionId: oldestSession.id.substring(0, 8) + "...",
+            destroyedSessionCount: sessionIds.length,
+            destroyedSessionIds: sessionIds.map(
+              (id: string) => id.substring(0, 8) + "..."
+            ),
           });
+
+          // Clear cache for destroyed sessions
+          if (this.cacheService && sessionIds.length > 0) {
+            await Promise.all(
+              sessionIds.map((sessionId: string) =>
+                Promise.all([
+                  this.cacheService!.invalidate(
+                    `keycloak_session:${sessionId}`
+                  ),
+                  this.cacheService!.invalidate(
+                    `keycloak_session_validation:${sessionId}`
+                  ),
+                ])
+              )
+            );
+          }
+
+          // Update metrics
+          this.metrics?.recordCounter(
+            "keycloak.session.concurrent_limit_enforced",
+            destroyedSessions.length
+          );
         }
+      } catch (error) {
+        this.logger.error("Failed to enforce concurrent session limits", {
+          error,
+          userId,
+          maxSessions: maxConcurrentSessions,
+        });
+
+        this.metrics?.recordCounter(
+          "keycloak.session.concurrent_limit_error",
+          1
+        );
+
+        // Don't throw - allow session creation to continue
+        // This ensures availability over strict enforcement
       }
     }
   }
@@ -1010,5 +1067,51 @@ export class KeycloakSessionManager {
       this.logger.error("Failed to decrypt token", { error });
       throw new Error("Token decryption failed");
     }
+  }
+
+  /**
+   * Sanitize error messages to prevent information disclosure
+   * Logs full error details for debugging while returning safe messages to clients
+   */
+  private sanitizeError(
+    error: unknown,
+    fallbackMessage: string,
+    context?: Record<string, any>
+  ): string {
+    // Log full error details for debugging
+    this.logger.error("Session manager error", {
+      error,
+      context,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+
+    // Return sanitized message to prevent information disclosure
+    if (error instanceof Error) {
+      // Only expose safe, expected error messages
+      const safeMessages = [
+        "Session not found",
+        "Session expired",
+        "Token validation failed",
+        "Invalid session data",
+        "Session security violation",
+        "Concurrent session limit exceeded",
+        "Token refresh failed",
+        "Session rotation failed",
+        "IP address mismatch",
+        "User agent mismatch",
+      ];
+
+      const errorMessage = error.message.toLowerCase();
+      const isSafeMessage = safeMessages.some((safe) =>
+        errorMessage.includes(safe.toLowerCase())
+      );
+
+      if (isSafeMessage) {
+        return error.message;
+      }
+    }
+
+    // Return generic fallback message for unexpected errors
+    return fallbackMessage;
   }
 }

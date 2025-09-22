@@ -275,9 +275,8 @@ export class KeycloakClient {
 
       return tokenResponse.data;
     } catch (error) {
-      this.logger.error("Client credentials authentication failed", { error });
       this.metrics?.recordCounter("keycloak.auth.client_credentials_error", 1);
-      throw error;
+      throw new Error(this.sanitizeError(error, "Authentication failed"));
     }
   }
 
@@ -343,9 +342,8 @@ export class KeycloakClient {
 
       return response.data;
     } catch (error) {
-      this.logger.error("Authorization code exchange failed", { error });
       this.metrics?.recordCounter("keycloak.auth.code_exchange_error", 1);
-      throw error;
+      throw new Error(this.sanitizeError(error, "Authentication failed"));
     }
   }
 
@@ -661,9 +659,10 @@ export class KeycloakClient {
 
       return userInfo;
     } catch (error) {
-      this.logger.error("Failed to get user info", { error });
       this.metrics?.recordCounter("keycloak.userinfo.error", 1);
-      throw error;
+      throw new Error(
+        this.sanitizeError(error, "User information retrieval failed")
+      );
     }
   }
 
@@ -718,9 +717,8 @@ export class KeycloakClient {
 
       return tokenResponse;
     } catch (error) {
-      this.logger.error("Token refresh failed", { error });
       this.metrics?.recordCounter("keycloak.auth.token_refresh_error", 1);
-      throw error;
+      throw new Error(this.sanitizeError(error, "Token refresh failed"));
     }
   }
 
@@ -922,8 +920,7 @@ export class KeycloakClient {
 
       this.logger.info("User logged out successfully");
     } catch (error) {
-      this.logger.error("Logout failed", { error });
-      throw error;
+      throw new Error(this.sanitizeError(error, "Logout failed"));
     }
   }
 
@@ -1101,6 +1098,48 @@ export class KeycloakClient {
       cacheEnabled: !!this.cacheService,
       requestCount: 0, // Could be tracked if needed
     };
+  }
+
+  /**
+   * Sanitize error messages to prevent information disclosure
+   */
+  private sanitizeError(error: unknown, fallbackMessage: string): string {
+    // Log full error details for debugging
+    this.logger.error("Keycloak client error", {
+      error,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+
+    // Return sanitized message to prevent information disclosure
+    if (error instanceof Error) {
+      // Only expose safe, expected error messages
+      const safeMessages = [
+        "Token validation failed",
+        "Token expired",
+        "Invalid token",
+        "Authentication failed",
+        "Authorization failed",
+        "User not found",
+        "Invalid credentials",
+        "Token refresh failed",
+        "Discovery document fetch failed",
+        "Invalid authorization code",
+        "PKCE verification failed",
+        "Client authentication failed",
+      ];
+
+      const errorMessage = error.message.toLowerCase();
+      const isSafeMessage = safeMessages.some((safe) =>
+        errorMessage.includes(safe.toLowerCase())
+      );
+
+      if (isSafeMessage) {
+        return error.message;
+      }
+    }
+
+    // Return generic fallback message for unexpected errors
+    return fallbackMessage;
   }
 
   /**

@@ -43,7 +43,7 @@ const mockKeycloakClient = {
     user: {
       id: "user1",
       username: "testuser",
-      email: "user@example.com", 
+      email: "user@example.com",
       name: "Test User",
       roles: ["user"],
       permissions: ["read"],
@@ -58,8 +58,8 @@ const mockKeycloakClient = {
     preferred_username: "testuser",
     roles: ["user"],
     realm_access: {
-      roles: ["user"]
-    }
+      roles: ["user"],
+    },
   })),
   logout: jest.fn(async () => ({ success: true })),
   healthCheck: jest.fn(async () => true),
@@ -74,19 +74,20 @@ const mockKeycloakClient = {
       expires_in: 3600,
     },
   })),
-};  const mockUserManager = {
-    setCache: jest.fn(),
-    clearCache: jest.fn(),
-    getCompleteUserInfo: jest.fn().mockResolvedValue({
-      id: "user123",
-      username: "testuser",
-      email: "test@example.com",
-      firstName: "Test",
-      lastName: "User",
-      roles: ["user"],
-    }),
-    createUser: jest.fn().mockResolvedValue("user-id"),
-  };
+};
+const mockUserManager = {
+  setCache: jest.fn(),
+  clearCache: jest.fn(),
+  getCompleteUserInfo: jest.fn().mockResolvedValue({
+    id: "user123",
+    username: "testuser",
+    email: "test@example.com",
+    firstName: "Test",
+    lastName: "User",
+    roles: ["user"],
+  }),
+  createUser: jest.fn().mockResolvedValue("user-id"),
+};
 
 const mockSessionManager = {
   createSession: jest.fn(async (sessionData) => ({

@@ -54,10 +54,70 @@ export {
 } from "./services/KeycloakSessionManager";
 
 export {
+  AuthorizationService,
+  type AuthorizationServiceConfig,
+} from "./services/AuthorizationService";
+
+export {
+  AbilityFactory,
+  type AbilityFactoryConfig,
+} from "./services/AbilityFactory";
+
+export {
   type AuthV2Config,
   createAuthV2Config,
   loadConfigFromEnv,
 } from "./services/config";
+
+// =============================================================================
+// Authorization Types and Configuration
+// =============================================================================
+export * from "./types/authorization.types";
+
+export {
+  ROLE_DEFINITIONS,
+  getRolesInHierarchicalOrder,
+  getEffectivePermissions,
+  roleInheritsFrom,
+} from "./config/roles.config";
+
+// =============================================================================
+// Security Audit Logging
+// =============================================================================
+export {
+  SecurityAuditLogger,
+  createSecurityAuditLogger,
+  SecurityEventType,
+  SecurityEventSeverity,
+  type SecurityEvent,
+  type AuthenticationEvent,
+  type AuthorizationEvent,
+  type SessionEvent,
+  type SecurityViolationEvent,
+  type SecurityAuditConfig,
+  DEFAULT_SECURITY_AUDIT_CONFIG,
+} from "./security/SecurityAuditLogger";
+
+export {
+  SecurityAuditIntegration,
+  createSecurityAuditIntegration,
+} from "./security/SecurityAuditIntegration";
+
+// =============================================================================
+// Middleware
+// =============================================================================
+export {
+  AuthRateLimitMiddleware,
+  createAuthRateLimitMiddleware,
+  type AuthRateLimitConfig,
+  DEFAULT_AUTH_RATE_LIMIT_CONFIG,
+} from "./middleware/authRateLimitMiddleware";
+
+export {
+  createSecureAuthServer,
+  createAuthServerForEnvironment,
+  RATE_LIMIT_CONFIGS,
+} from "./middleware/authRateLimitExample";
 
 // =============================================================================
 // Version and Library Information

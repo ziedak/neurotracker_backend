@@ -601,11 +601,21 @@ export class KeycloakIntegrationService {
    */
   getStats(): {
     session: SessionStats;
-    client: any;
+    client: {
+      discoveryLoaded: boolean;
+      jwksLoaded: boolean;
+      cacheEnabled: boolean;
+      requestCount: number;
+    };
   } {
     return {
       session: this.sessionManager.getStats(),
-      client: this.keycloakClient.getStats?.() || {},
+      client: this.keycloakClient.getStats?.() || {
+        discoveryLoaded: false,
+        jwksLoaded: false,
+        cacheEnabled: false,
+        requestCount: 0,
+      },
     };
   }
 
