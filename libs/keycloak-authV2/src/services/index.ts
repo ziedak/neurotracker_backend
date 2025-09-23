@@ -13,12 +13,30 @@ export {
   type SessionStats,
 } from "./KeycloakSessionManager";
 
-// Token Management
+// Token Management (Refactored)
 export {
   TokenManager,
   createTokenManagerWithRefresh,
   createBasicTokenManager,
-} from "./KeycloakTokenManager";
+} from "./TokenManagerRefactored";
+
+// Legacy Token Management (for backward compatibility)
+export { TokenManager as LegacyTokenManager } from "./KeycloakTokenManager";
+
+// Focused Token Services (can be used independently)
+export { JWTValidator } from "./JWTValidator";
+export { TokenCacheManager, type CacheResult } from "./TokenCacheManager";
+export { TokenIntrospector } from "./TokenIntrospector";
+export {
+  RefreshTokenManager,
+  type StoredTokenInfo,
+  type RefreshResult,
+  type TokenRefreshEvent,
+  type TokenExpiryEvent,
+  type RefreshTokenConfig,
+  type RefreshTokenEventHandlers,
+} from "./RefreshTokenManager";
+export { RolePermissionExtractor } from "./RolePermissionExtractor";
 
 // WebSocket Authentication
 export {

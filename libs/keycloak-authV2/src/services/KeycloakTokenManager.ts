@@ -76,7 +76,6 @@ export interface RefreshResult {
   sessionId: string;
   timestamp: Date;
   error?: string;
-  retryAfter?: number; // seconds to wait before next attempt
 }
 
 /**
@@ -113,12 +112,6 @@ export interface TokenExpiryEvent {
 export interface RefreshTokenConfig {
   /** Buffer time before token expiration to trigger refresh (seconds) */
   refreshBuffer: number;
-  /** Maximum number of refresh attempts before giving up */
-  maxRetries: number;
-  /** Base delay for exponential backoff (milliseconds) */
-  retryBaseDelay: number;
-  /** Maximum delay between retries (milliseconds) */
-  maxRetryDelay: number;
   /** Whether to enable secure token encryption in storage */
   enableEncryption: boolean;
   /** Encryption key for token storage (32 bytes) */
@@ -153,7 +146,7 @@ export class TokenManager {
   private cacheService?: CacheService;
   private jwksEndpoint: string;
   private remoteJWKS: ReturnType<typeof createRemoteJWKSet> | null = null;
-  private jwksInitPromise: Promise<void> | undefined;
+  private jwksInitPromise: Promise<void> | null = null;
 
   // Refresh token management
   private refreshTokenConfig: RefreshTokenConfig;
@@ -171,9 +164,6 @@ export class TokenManager {
     // Initialize refresh token configuration
     this.refreshTokenConfig = {
       refreshBuffer: 300, // 5 minutes before expiration
-      maxRetries: 3,
-      retryBaseDelay: 1000, // 1 second
-      maxRetryDelay: 30000, // 30 seconds
       enableEncryption: true,
       cleanupInterval: 300000, // 5 minutes
       ...refreshConfig,
@@ -223,10 +213,10 @@ export class TokenManager {
         jwksEndpoint: this.jwksEndpoint,
       });
       // Clear the promise to allow garbage collection and prevent memory leaks
-      this.jwksInitPromise = undefined;
+      this.jwksInitPromise = null;
     } catch (error) {
       // Clear the promise on failure to allow retry
-      this.jwksInitPromise = undefined;
+      this.jwksInitPromise = null;
       this.logger.error("Failed to initialize JWKS", {
         error: error instanceof Error ? error.message : String(error),
         jwksEndpoint: this.jwksEndpoint,
@@ -747,6 +737,22 @@ export class TokenManager {
   // ===== REFRESH TOKEN HELPER METHODS =====
 
   /**
+   * Validate user ID and session ID format
+   */
+  private validateUserSession(userId: string, sessionId: string): void {
+    if (!userId || typeof userId !== "string" || userId.trim().length === 0) {
+      throw new Error("Invalid userId: must be a non-empty string");
+    }
+    if (
+      !sessionId ||
+      typeof sessionId !== "string" ||
+      sessionId.trim().length === 0
+    ) {
+      throw new Error("Invalid sessionId: must be a non-empty string");
+    }
+  }
+
+  /**
    * Generate cache key for refresh token storage
    */
   private generateRefreshCacheKey(userId: string, sessionId: string): string {
@@ -857,6 +863,7 @@ export class TokenManager {
     // Cancel existing timer if any
     if (this.refreshTimers.has(refreshKey)) {
       clearTimeout(this.refreshTimers.get(refreshKey)!);
+      this.refreshTimers.delete(refreshKey);
     }
 
     // Calculate refresh time (buffer before expiration)
@@ -923,6 +930,8 @@ export class TokenManager {
     userId: string,
     sessionId: string
   ): Promise<StoredTokenInfo | null> {
+    this.validateUserSession(userId, sessionId);
+
     if (!this.refreshTokenConfig) {
       this.logger.debug(
         "Refresh token functionality not configured. Cannot retrieve stored tokens."
@@ -958,6 +967,8 @@ export class TokenManager {
     userId: string,
     sessionId: string
   ): Promise<RefreshResult> {
+    this.validateUserSession(userId, sessionId);
+
     if (!this.refreshTokenConfig) {
       throw new Error(
         "Refresh token functionality not configured. Cannot refresh tokens."
@@ -1112,9 +1123,6 @@ export class TokenManager {
       encryptionKey?: string;
     } = {
       refreshBuffer: 300, // 5 minutes
-      maxRetries: 3,
-      retryBaseDelay: 1000, // 1 second
-      maxRetryDelay: 30000, // 30 seconds
       enableEncryption: false,
       cleanupInterval: 300000, // 5 minutes
     };
@@ -1136,7 +1144,6 @@ export class TokenManager {
 
     this.logger.info("Refresh token functionality configured", {
       refreshBuffer: this.refreshTokenConfig.refreshBuffer,
-      maxRetries: this.refreshTokenConfig.maxRetries,
       enableEncryption: this.refreshTokenConfig.enableEncryption,
       cleanupInterval: this.refreshTokenConfig.cleanupInterval,
     });
@@ -1153,6 +1160,8 @@ export class TokenManager {
     expiresIn: number,
     refreshExpiresIn?: number
   ): Promise<void> {
+    this.validateUserSession(userId, sessionId);
+
     if (!this.refreshTokenConfig) {
       throw new Error("Refresh token functionality not configured");
     }
@@ -1182,12 +1191,8 @@ export class TokenManager {
       sessionId,
       createdAt: now,
       refreshCount: 0,
+      ...(refreshExpiresAt && { refreshExpiresAt }),
     };
-
-    // Add refreshExpiresAt only if it exists
-    if (refreshExpiresAt) {
-      (tokenInfo as any).refreshExpiresAt = refreshExpiresAt;
-    }
 
     // Store encrypted token info
     const cacheKey = this.generateRefreshCacheKey(userId, sessionId);
