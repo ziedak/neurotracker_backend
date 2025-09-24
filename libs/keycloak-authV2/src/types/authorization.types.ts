@@ -1,13 +1,4 @@
 /**
- * Authorization system type definitions
- *
- * Defines types for role-based access control (RBAC) and
- * attribute-based access control (ABAC) using CASL.
- */
-
-import type { AbilityBuilder, PureAbility } from "@casl/ability";
-
-/**
  * Available actions in the authorization system
  */
 export type Action =
@@ -33,11 +24,6 @@ export type Subjects =
   | "ApiKey"
   | "Session"
   | "all";
-
-/**
- * Application-specific ability type combining actions and subjects
- */
-export type AppAbility = PureAbility<[Action, Subjects]>;
 
 /**
  * User roles in the system
@@ -114,18 +100,5 @@ export interface AuthorizationResult {
   };
 }
 
-/**
- * Ability factory configuration
- */
-export interface AbilityFactoryConfig {
-  enableCaching?: boolean;
-  cacheTimeout?: number;
-  defaultRole?: Role;
-  strictMode?: boolean;
-  auditEnabled?: boolean;
-}
-
-/**
- * CASL ability builder type helper
- */
-export type AppAbilityBuilder = AbilityBuilder<AppAbility>;
+// Re-export AppAbility from ability types for convenience
+export type { AppAbility } from "../services/ability/ability.types";

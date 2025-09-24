@@ -11,11 +11,11 @@ import { decodeJwt } from "jose";
 import {
   EncryptionManager,
   createEncryptionManager,
-} from "./EncryptionManager";
+} from "../EncryptionManager";
 import {
   KeycloakClient,
   type KeycloakTokenResponse,
-} from "../client/KeycloakClient";
+} from "../../client/KeycloakClient";
 import type { SecureCacheManager } from "./SecureCacheManager";
 
 /**

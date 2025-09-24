@@ -2,31 +2,35 @@
  * Services exports
  */
 
-export * from "./config";
-export * from "./APIKeyManager";
-export { KeycloakUserManager } from "./KeycloakUserManager";
+export * from "./apikey";
+
+// User Management - Modular SOLID Architecture (Recommended)
+export * from "./user";
+
+// Legacy Monolithic Implementation (Deprecated)
+// export { KeycloakUserManager } from "./KeycloakUserManager.ts.old";
+
 export {
   KeycloakSessionManager,
   type KeycloakSessionData,
-  type KeycloakSessionCreationOptions,
   type SessionValidationResult,
   type SessionStats,
-} from "./KeycloakSessionManager";
+} from "./session";
 
 // Token Management (Refactored)
+export * from "./token/config";
 export {
+  JWTValidator,
+  SecureCacheManager,
+  TokenIntrospector,
   TokenManager,
   createTokenManagerWithRefresh,
   createBasicTokenManager,
-} from "./TokenManagerRefactored";
-
-// Legacy Token Management (for backward compatibility)
-export { TokenManager as LegacyTokenManager } from "./KeycloakTokenManager";
+  RolePermissionExtractor,
+} from "./token";
 
 // Focused Token Services (can be used independently)
-export { JWTValidator } from "./JWTValidator";
-export { SecureCacheManager, type CacheResult } from "./SecureCacheManager";
-export { TokenIntrospector } from "./TokenIntrospector";
+
 export {
   RefreshTokenManager,
   type StoredTokenInfo,
@@ -35,8 +39,7 @@ export {
   type TokenExpiryEvent,
   type RefreshTokenConfig,
   type RefreshTokenEventHandlers,
-} from "./RefreshTokenManager";
-export { RolePermissionExtractor } from "./RolePermissionExtractor";
+} from "./token/RefreshTokenManager";
 
 // PKCE Support
 export {

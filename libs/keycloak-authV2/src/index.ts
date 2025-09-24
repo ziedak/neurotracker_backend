@@ -35,28 +35,60 @@ export {
 // =============================================================================
 // Services
 // =============================================================================
-export { TokenManager as KeycloakTokenManager } from "./services/KeycloakTokenManager";
+// export { TokenManager as KeycloakTokenManager } from "./services/KeycloakTokenManager.ts.old";
+export { TokenManager as KeycloakTokenManager } from "./services/token/TokenManager";
 
 export {
   APIKeyManager,
+  type APIKeyManagerConfig,
+  createAPIKeyManager,
+} from "./services/apikey/APIKeyManager";
+
+export {
   type APIKey,
   type APIKeyGenerationOptions,
   type APIKeyValidationResult,
   type APIKeyManagerStats,
-} from "./services/APIKeyManager";
+} from "./services/apikey/types";
 
+// Legacy session manager (deprecated in favor of new SOLID architecture)
 export {
-  KeycloakSessionManager as SessionManager,
-  type KeycloakSessionData as SessionData,
-  type KeycloakSessionCreationOptions as SessionCreationOptions,
+  KeycloakSessionManager as LegacySessionManager,
+  type KeycloakSessionData as LegacySessionData,
+  type SessionValidationResult as LegacySessionValidationResult,
+  type SessionStats as LegacySessionStats,
+} from "./services/session";
+
+// New SOLID Session Management Components (recommended)
+export {
+  KeycloakSessionManager,
+  SessionStore,
+  TokenManager,
+  SessionValidator,
+  SessionSecurity,
+  SessionMetrics,
+  SessionCleaner,
+  type KeycloakSessionManagerConfig,
+  type SessionStoreConfig,
+  type TokenManagerConfig,
+  type SessionValidatorConfig,
+  type SessionSecurityConfig,
+  type SessionMetricsConfig,
+  type SessionCleanerConfig,
+  type KeycloakSessionData,
   type SessionValidationResult,
+  type AuthResult,
   type SessionStats,
-} from "./services/KeycloakSessionManager";
+  type SecurityCheckResult,
+  type HealthCheckResult,
+  SecurityCheckReason,
+  SecurityEventType as SessionSecurityEventType,
+} from "./services/session";
 
 export {
   AuthorizationService,
   type AuthorizationServiceConfig,
-} from "./services/AuthorizationServiceRefactored";
+} from "./services/authorization/Authorization.Service";
 
 export { AbilityFactory, type AbilityFactoryConfig } from "./services/ability";
 
@@ -64,7 +96,7 @@ export {
   type AuthV2Config,
   createAuthV2Config,
   loadConfigFromEnv,
-} from "./services/config";
+} from "./services/token/config";
 
 // =============================================================================
 // Authorization Types and Configuration

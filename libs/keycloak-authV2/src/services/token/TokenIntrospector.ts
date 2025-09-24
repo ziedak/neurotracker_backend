@@ -5,8 +5,8 @@
 
 import { createLogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
-import type { AuthResult } from "../types";
-import { KeycloakClient } from "../client/KeycloakClient";
+import type { AuthResult } from "../../types";
+import { KeycloakClient } from "../../client/KeycloakClient";
 
 export class TokenIntrospector {
   private readonly logger = createLogger("TokenIntrospector");

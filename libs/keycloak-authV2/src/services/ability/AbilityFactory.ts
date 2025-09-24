@@ -8,25 +8,20 @@
 import { createLogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { CacheService } from "@libs/database";
-import type {
-  AppAbility,
-  AuthorizationContext,
-} from "../types/authorization.types";
+import type { AppAbility } from "./ability.types";
 
 // Modular components
 import {
   AbilityConfigManager,
   type AbilityFactoryConfig,
-} from "./ability/AbilityFactoryConfig";
-import { ComputationTracker } from "./ability/ComputationTracker";
-import { AbilityCacheManager } from "./ability/AbilityCacheManager";
-import { AbilityBuilderService } from "./ability/AbilityBuilderService";
-import { PermissionResolver } from "./ability/PermissionResolver";
-import type {
-  CacheStats,
-  HealthCheckResult,
-} from "./ability/AbilityFactoryTypes";
-import { AbilityFactoryError } from "./ability/AbilityFactoryErrors";
+} from "./AbilityFactoryConfig";
+import { ComputationTracker } from "./ComputationTracker";
+import { AbilityCacheManager } from "./AbilityCacheManager";
+import { AbilityBuilderService } from "./AbilityBuilderService";
+import { PermissionResolver } from "./PermissionResolver";
+import type { CacheStats, HealthCheckResult } from "./AbilityFactoryTypes";
+import { AbilityFactoryError } from "./AbilityFactoryErrors";
+import type { AuthorizationContext } from "../../types/authorization.types";
 
 /**
  * Refactored AbilityFactory - Clean orchestrator

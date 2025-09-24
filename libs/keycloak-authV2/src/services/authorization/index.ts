@@ -4,7 +4,7 @@
  */
 
 // Main orchestrator
-export { AuthorizationService } from "../AuthorizationServiceRefactored";
+export { AuthorizationService } from "./Authorization.Service";
 
 // Modular components
 export { AuthorizationConfigManager } from "./AuthorizationConfigManager";

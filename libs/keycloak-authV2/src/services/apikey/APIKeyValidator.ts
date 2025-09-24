@@ -1,13 +1,13 @@
 /**
  * APIKeyValidator - Focused API key validation with security checks
- * 
+ *
  * Responsibilities:
  * - API key format validation
  * - Database validation with constant-time security
  * - Cache integration for validation results
  * - Security-focused validation with timing attack protection
  * - Metrics tracking for validation operations
- * 
+ *
  * SOLID Principles:
  * - Single Responsibility: Only handles validation logic
  * - Open/Closed: Extensible validation rules
@@ -18,16 +18,13 @@
 
 import { performance } from "perf_hooks";
 import crypto from "crypto";
-import bcrypt from "bcryptjs";
-import type { ILogger, IMetricsCollector } from "@libs/monitoring";
+import bcrypt from "bcrypt";
+import type { IMetricsCollector } from "@libs/monitoring";
 import type { PostgreSQLClient } from "@libs/database";
-import type { 
-  APIKeyValidationResult, 
-  APIKey, 
-  UserInfo,
-  APIKeyFormatSchema 
-} from "./types";
+import { APIKeyValidationResult, APIKey, APIKeyFormatSchema } from "./types";
 import type { APIKeyCacheManager } from "./APIKeyCacheManager";
+import type { ILogger } from "@libs/utils";
+import type { UserInfo } from "../../types";
 
 export interface APIKeyValidatorConfig {
   readonly enableCache: boolean;
@@ -48,7 +45,7 @@ const DEFAULT_VALIDATOR_CONFIG: APIKeyValidatorConfig = {
  */
 export class APIKeyValidator {
   private readonly config: APIKeyValidatorConfig;
-  
+
   constructor(
     private readonly logger: ILogger,
     private readonly metrics: IMetricsCollector,
@@ -57,7 +54,7 @@ export class APIKeyValidator {
     config: Partial<APIKeyValidatorConfig> = {}
   ) {
     this.config = { ...DEFAULT_VALIDATOR_CONFIG, ...config };
-    
+
     this.logger.info("APIKeyValidator initialized", {
       cacheEnabled: this.config.enableCache && !!this.cacheManager,
       constantTimeSecurity: this.config.constantTimeSecurity,
@@ -86,7 +83,7 @@ export class APIKeyValidator {
         const cacheResult = await this.checkCache(apiKey, operationId);
         if (cacheResult) {
           this.metrics.recordTimer(
-            "apikey.validator.duration", 
+            "apikey.validator.duration",
             performance.now() - startTime
           );
           return cacheResult;
@@ -94,7 +91,10 @@ export class APIKeyValidator {
       }
 
       // 3. Perform database validation
-      const dbResult = await this.performDatabaseValidation(apiKey, operationId);
+      const dbResult = await this.performDatabaseValidation(
+        apiKey,
+        operationId
+      );
 
       // 4. Cache successful validations if cache is enabled
       if (this.config.enableCache && this.cacheManager && dbResult.success) {
@@ -114,7 +114,7 @@ export class APIKeyValidator {
    * Validate API key format using Zod schema
    */
   private async validateFormat(
-    apiKey: string, 
+    apiKey: string,
     operationId: string
   ): Promise<APIKeyValidationResult> {
     try {
@@ -142,7 +142,7 @@ export class APIKeyValidator {
     } catch (error) {
       this.logger.error("Format validation error", { operationId, error });
       this.metrics.recordCounter("apikey.validator.format_error", 1);
-      
+
       return {
         success: false,
         error: "Format validation failed",
@@ -154,7 +154,7 @@ export class APIKeyValidator {
    * Check cache for existing validation result
    */
   private async checkCache(
-    apiKey: string, 
+    apiKey: string,
     operationId: string
   ): Promise<APIKeyValidationResult | null> {
     if (!this.cacheManager) {
@@ -185,7 +185,7 @@ export class APIKeyValidator {
    * Cache validation result
    */
   private async cacheResult(
-    apiKey: string, 
+    apiKey: string,
     result: APIKeyValidationResult,
     operationId: string
   ): Promise<void> {
@@ -194,7 +194,11 @@ export class APIKeyValidator {
     }
 
     try {
-      await this.cacheManager.cacheValidation(apiKey, result, this.config.cacheTtl);
+      await this.cacheManager.cacheValidation(
+        apiKey,
+        result,
+        this.config.cacheTtl
+      );
       this.logger.debug("Validation result cached", { operationId });
       this.metrics.recordCounter("apikey.validator.cache_set", 1);
     } catch (error) {
@@ -257,8 +261,8 @@ export class APIKeyValidator {
       // SECURITY: Constant-time validation to prevent timing attacks
       const keyRecord = results[0];
       const validationResult = await this.performConstantTimeValidation(
-        apiKey, 
-        keyRecord, 
+        apiKey,
+        keyRecord,
         operationId
       );
 
@@ -271,7 +275,7 @@ export class APIKeyValidator {
     } catch (error) {
       this.logger.error("Database validation failed", { operationId, error });
       this.metrics.recordCounter("apikey.validator.database_error", 1);
-      
+
       return {
         success: false,
         error: "Database validation failed",
@@ -315,7 +319,7 @@ export class APIKeyValidator {
       if (this.config.constantTimeSecurity) {
         await this.performDummyBcryptOperation();
       }
-      
+
       this.logger.debug("No key record found", { operationId });
       this.metrics.recordCounter("apikey.validator.key_not_found", 1);
     }
@@ -361,9 +365,10 @@ export class APIKeyValidator {
   private async performDummyBcryptOperation(): Promise<void> {
     try {
       // Use a fixed dummy hash to compare against
-      const dummyHash = "$2b$12$dummy.hash.for.constant.time.validation.purposes.only";
+      const dummyHash =
+        "$2b$12$dummy.hash.for.constant.time.validation.purposes.only";
       const dummyKey = "dummy_key_for_timing_attack_prevention";
-      
+
       await bcrypt.compare(dummyKey, dummyHash);
     } catch (error) {
       // Dummy operation errors are expected and ignored
@@ -429,7 +434,8 @@ export class APIKeyValidator {
     if (error instanceof Error) {
       // Cache-related errors - non-critical, continue without cache
       if (error.message.includes("cache") || error.message.includes("redis")) {
-        errorMessage = "Cache service unavailable, validation proceeded without cache";
+        errorMessage =
+          "Cache service unavailable, validation proceeded without cache";
         shouldRetry = true;
         this.logger.warn("API key validation cache error", {
           operationId,
@@ -439,7 +445,10 @@ export class APIKeyValidator {
         this.metrics.recordCounter("apikey.validator.cache_error", 1);
       }
       // Database connection errors - critical, suggest retry
-      else if (error.message.includes("connection") || error.message.includes("timeout")) {
+      else if (
+        error.message.includes("connection") ||
+        error.message.includes("timeout")
+      ) {
         errorMessage = "Database connection error, please try again";
         shouldRetry = true;
         this.logger.error("API key validation database error", {
@@ -460,7 +469,10 @@ export class APIKeyValidator {
         this.metrics.recordCounter("apikey.validator.bcrypt_error", 1);
       }
       // JSON parsing errors - data corruption
-      else if (error.message.includes("JSON") || error.message.includes("parse")) {
+      else if (
+        error.message.includes("JSON") ||
+        error.message.includes("parse")
+      ) {
         errorMessage = "Data format error";
         this.logger.warn("API key validation JSON error", {
           operationId,
@@ -505,7 +517,7 @@ export class APIKeyValidator {
       "ETIMEDOUT",
     ];
 
-    return retryablePatterns.some(pattern => 
+    return retryablePatterns.some((pattern) =>
       error.message.toLowerCase().includes(pattern.toLowerCase())
     );
   }
@@ -513,14 +525,21 @@ export class APIKeyValidator {
   /**
    * Record validation metrics
    */
-  private recordMetrics(startTime: number, success: boolean, source: string): void {
+  private recordMetrics(
+    startTime: number,
+    success: boolean,
+    source: string
+  ): void {
     const duration = performance.now() - startTime;
-    
+
     this.metrics.recordTimer("apikey.validator.duration", duration);
     this.metrics.recordCounter("apikey.validator.validation", 1);
-    this.metrics.recordCounter(`apikey.validator.${success ? 'success' : 'failure'}`, 1);
+    this.metrics.recordCounter(
+      `apikey.validator.${success ? "success" : "failure"}`,
+      1
+    );
     this.metrics.recordCounter(`apikey.validator.source.${source}`, 1);
-    
+
     // Record slow validation warnings
     if (duration > this.config.maxValidationTime) {
       this.logger.warn("Slow API key validation detected", {
@@ -537,8 +556,8 @@ export class APIKeyValidator {
   async healthCheck(): Promise<{ available: boolean; error?: string }> {
     try {
       // Test database connectivity
-      await this.dbClient.query("SELECT 1");
-      
+      this.dbClient.isHealthy();
+
       // Test cache if enabled
       if (this.config.enableCache && this.cacheManager) {
         const cacheHealth = await this.cacheManager.healthCheck();
@@ -551,7 +570,8 @@ export class APIKeyValidator {
 
       return { available: true };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
       this.logger.error("Validator health check failed", { error });
       return { available: false, error: errorMessage };
     }

@@ -5,7 +5,7 @@
 
 import { createLogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
-import type { AuthResult } from "../types";
+import type { AuthResult } from "../../types";
 import { jwtVerify, createRemoteJWKSet } from "jose";
 import { z } from "zod";
 

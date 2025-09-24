@@ -4,7 +4,7 @@
  */
 
 // Main orchestrator
-export { AbilityFactory } from "../AbilityFactoryRefactored";
+export { AbilityFactory } from "./AbilityFactory";
 
 // Modular components
 export { AbilityConfigManager } from "./AbilityFactoryConfig";

@@ -5,9 +5,9 @@
 
 import { createLogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
-import type { AuthResult } from "../types";
+import type { AuthResult } from "../../types";
 import type { AuthV2Config } from "./config";
-import { KeycloakClient } from "../client/KeycloakClient";
+import { KeycloakClient } from "../../client/KeycloakClient";
 
 // Import focused services
 import { JWTValidator } from "./JWTValidator";

@@ -15,20 +15,20 @@ import type {
   ResourceContext,
   AuthorizationResult,
   Role,
-} from "../types/authorization.types";
+} from "../../types/authorization.types";
 
 // Modular components
 import {
   AuthorizationConfigManager,
   type AuthorizationServiceConfig,
-} from "./authorization/AuthorizationConfigManager";
-import { AuthorizationValidator } from "./authorization/AuthorizationValidator";
-import { PendingOperationTracker } from "./authorization/PendingOperationTracker";
-import { AuthorizationCacheManager } from "./authorization/AuthorizationCacheManager";
-import { AuthorizationMetrics } from "./authorization/AuthorizationMetrics";
-import { AuthorizationAuditor } from "./authorization/AuthorizationAuditor";
-import { AuthorizationEngine } from "./authorization/AuthorizationEngine";
-import { AbilityFactory } from "./ability";
+} from "./AuthorizationConfigManager";
+import { AuthorizationValidator } from "./AuthorizationValidator";
+import { PendingOperationTracker } from "./PendingOperationTracker";
+import { AuthorizationCacheManager } from "./AuthorizationCacheManager";
+import { AuthorizationMetrics } from "./AuthorizationMetrics";
+import { AuthorizationAuditor } from "./AuthorizationAuditor";
+import { AuthorizationEngine } from "./AuthorizationEngine";
+import { AbilityFactory } from "../ability";
 
 /**
  * Refactored AuthorizationService - Clean orchestrator

@@ -3,7 +3,7 @@
  * Handles role and permission validation and extraction
  */
 
-import type { AuthResult } from "../types";
+import type { AuthResult } from "../../types";
 
 export class RolePermissionExtractor {
   /**

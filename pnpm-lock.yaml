@@ -555,6 +555,9 @@ importers:
       jose:
         specifier: ^5.9.6
         version: 5.10.0
+      jsonwebtoken:
+        specifier: ^9.0.2
+        version: 9.0.2
       pkce-challenge:
         specifier: ^5.0.0
         version: 5.0.0
@@ -571,6 +574,9 @@ importers:
       '@types/jest':
         specifier: ^29.5.14
         version: 29.5.14
+      '@types/jsonwebtoken':
+        specifier: ^9.0.10
+        version: 9.0.10
       jest:
         specifier: ^29.7.0
         version: 29.7.0(@types/node@24.3.3)(ts-node@10.9.2(@types/node@24.3.3)(typescript@5.9.2))

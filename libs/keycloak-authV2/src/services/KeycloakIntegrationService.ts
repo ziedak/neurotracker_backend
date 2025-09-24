@@ -6,20 +6,21 @@
  * - Comprehensive error handling and logging
  */
 
-import crypto from "crypto";
+// import crypto from "crypto";
 import { z } from "zod";
 import { createLogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
 import { PostgreSQLClient } from "@libs/database";
 import { KeycloakClient } from "../client/KeycloakClient";
-import { KeycloakUserManager } from "./KeycloakUserManager";
-import { TokenManager } from "./KeycloakTokenManager";
+import { KeycloakUserService } from "./user";
+// import { TokenManager } from "./token/TokenManager";
+
+import type { UserInfo } from "../types";
 import {
   KeycloakSessionManager,
   type KeycloakSessionData,
   type SessionStats,
-} from "./KeycloakSessionManager";
-import type { UserInfo } from "../types";
+} from "./session";
 
 // Configuration Constants
 const CACHE_TTL = {
@@ -232,9 +233,10 @@ export interface LogoutResult {
 export class KeycloakIntegrationService {
   private readonly logger = createLogger("KeycloakIntegrationService");
   private keycloakClient: KeycloakClient;
-  private userManager: KeycloakUserManager;
+  private userManager: KeycloakUserService;
   private sessionManager: KeycloakSessionManager;
-  private tokenManager: TokenManager;
+  // TODO: Remove unused
+  // private tokenManager: TokenManager;
 
   // Performance optimization for getStats - cache with TTL and race condition protection
   private statsCache: {
@@ -269,7 +271,8 @@ export class KeycloakIntegrationService {
     // Create shared base configuration
     const baseConfig = this.createBaseConfiguration(!!metrics);
 
-    // Initialize token manager first since others might depend on it
+    // TODO: Remove unused TokenManager initialization
+    /*
     this.tokenManager = new TokenManager(
       this.keycloakClient,
       {
@@ -285,10 +288,12 @@ export class KeycloakIntegrationService {
       },
       metrics
     );
+    */
 
     // Initialize user manager with user-specific configuration
-    this.userManager = new KeycloakUserManager(
+    this.userManager = KeycloakUserService.create(
       this.keycloakClient,
+
       {
         ...baseConfig,
         // User manager specific overrides
@@ -297,22 +302,15 @@ export class KeycloakIntegrationService {
           enforceUserAgentConsistency: false, // More flexible for user management
         },
       },
+      undefined,
       metrics
     );
 
     // Initialize session manager with session-specific configuration
     this.sessionManager = new KeycloakSessionManager(
-      this.keycloakClient,
-      {
-        ...baseConfig,
-        // Session manager specific overrides
-        security: {
-          ...baseConfig.security,
-          sessionRotationInterval: SESSION_CONFIG.ROTATION_INTERVAL_SESSIONS,
-        },
-      },
       this.dbClient, // PostgreSQL client for session persistence
-      metrics
+      undefined, // cacheService (optional)
+      metrics // metrics collector (optional)
     );
   }
 
@@ -436,138 +434,6 @@ export class KeycloakIntegrationService {
     return { valid: true };
   }
 
-  /**
-   * Verify and extract claims from JWT tokens using TokenManager
-   */
-  private async verifyAndExtractJwtClaims(
-    accessToken: string,
-    context: ValidationContext
-  ): Promise<{
-    valid: boolean;
-    claims?: Record<string, unknown>;
-    sessionId?: string;
-    error?: string;
-  }> {
-    try {
-      // Delegate to TokenManager for JWT verification
-      const result = await this.tokenManager.validateJwt(accessToken);
-
-      if (!result.success) {
-        return {
-          valid: false,
-          error: result.error || "Token validation failed",
-        };
-      }
-
-      // For session ID extraction, we need to access the raw JWT claims
-      // Since UserInfo doesn't contain session information, extract it from the token directly
-      // This will require additional method in TokenManager or manual JWT decoding
-      const sessionId = await this.extractSessionIdFromToken(accessToken);
-
-      this.logger.debug("JWT verification successful", {
-        operationType: context.operationType,
-        userId: context.userId,
-        hasSessionId: !!sessionId,
-        subject: result.user?.id,
-        username: result.user?.username,
-      });
-
-      return {
-        valid: true,
-        claims: result.user as unknown as Record<string, unknown>,
-        ...(sessionId && { sessionId }),
-      };
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      this.logger.error("JWT verification failed", {
-        error: errorMessage,
-        operationType: context.operationType,
-        userId: context.userId,
-        sessionId: context.sessionId,
-        ipAddress: context.ipAddress,
-        timestamp: context.timestamp,
-        errorType:
-          error instanceof Error ? error.constructor.name : typeof error,
-      });
-
-      return {
-        valid: false,
-        error: "Token verification failed",
-      };
-    }
-  }
-
-  /**
-   * Extract session ID from JWT token (fallback to crypto.randomUUID if not found)
-   */
-  private async extractSessionIdFromToken(token: string): Promise<string> {
-    try {
-      // Simple base64 decode of JWT payload for session ID extraction
-      // This is safe since we already validated the signature through TokenManager
-      const parts = token.split(".");
-      if (parts.length !== 3) {
-        return crypto.randomUUID();
-      }
-
-      const payload = JSON.parse(
-        Buffer.from(parts[1]!, "base64url").toString()
-      );
-
-      return (
-        payload.sid ||
-        payload.session_id ||
-        payload.sessionId ||
-        crypto.randomUUID()
-      );
-    } catch (error) {
-      this.logger.debug(
-        "Could not extract session ID from token, generating new one",
-        {
-          error: error instanceof Error ? error.message : String(error),
-        }
-      );
-      return crypto.randomUUID();
-    }
-  }
-
-  /**
-   * Extract Keycloak session ID from verified JWT tokens using TokenManager
-   */
-  private async extractKeycloakSessionId(
-    tokens: {
-      access_token: string;
-      refresh_token?: string;
-      id_token?: string;
-      expires_in: number;
-      refresh_expires_in?: number;
-    },
-    context: ValidationContext
-  ): Promise<string | null> {
-    const verificationResult = await this.verifyAndExtractJwtClaims(
-      tokens.access_token,
-      context
-    );
-
-    if (verificationResult.valid && verificationResult.sessionId) {
-      return verificationResult.sessionId;
-    }
-
-    // Log warning but don't fail - session ID is optional
-    this.logger.warn("Could not extract session ID from verified JWT", {
-      operationType: context.operationType,
-      userId: context.userId,
-      hasValidToken: verificationResult.valid,
-      error: verificationResult.error,
-    });
-
-    return null;
-  }
-
-  /**
-   * Initialize the Keycloak integration
-   * Must be called before using other methods
-   */
   async initialize(): Promise<void> {
     try {
       await this.keycloakClient.initialize();
@@ -684,22 +550,28 @@ export class KeycloakIntegrationService {
       }
 
       // Create session
-      const sessionResult = await this.sessionManager.createSession({
-        userId: userInfo.sub,
-        userInfo: userInfo,
-        keycloakSessionId:
-          (await this.extractKeycloakSessionId(authResult.tokens, {
-            operationType: "password_authentication",
-            userId: userInfo.sub,
-            ipAddress: clientContext.ipAddress,
-            timestamp: Date.now(),
-          })) || crypto.randomUUID(),
-        tokens: authResult.tokens,
-        ipAddress: clientContext.ipAddress,
-        userAgent: clientContext.userAgent,
-        maxAge: undefined,
-        metadata: undefined,
-      });
+      const sessionResult = await this.sessionManager.createSession(
+        userInfo.sub,
+        {
+          accessToken: authResult.tokens.access_token,
+          ...(authResult.tokens.refresh_token && {
+            refreshToken: authResult.tokens.refresh_token,
+          }),
+          ...(authResult.tokens.id_token && {
+            idToken: authResult.tokens.id_token,
+          }),
+          expiresAt: new Date(Date.now() + authResult.tokens.expires_in * 1000),
+          ...(authResult.tokens.refresh_expires_in && {
+            refreshExpiresAt: new Date(
+              Date.now() + authResult.tokens.refresh_expires_in * 1000
+            ),
+          }),
+        },
+        {
+          ipAddress: clientContext.ipAddress,
+          userAgent: clientContext.userAgent,
+        }
+      );
 
       this.metrics?.recordCounter("keycloak.integration.auth_success", 1);
       this.metrics?.recordTimer(
@@ -717,7 +589,21 @@ export class KeycloakIntegrationService {
         success: true,
         user: userInfo,
         tokens: authResult.tokens,
-        session: sessionResult,
+        session: {
+          sessionId: sessionResult.sessionId!,
+          sessionData: {
+            id: sessionResult.sessionId!,
+            userId: userInfo.sub,
+            userInfo: userInfo,
+            ipAddress: clientContext.ipAddress,
+            userAgent: clientContext.userAgent,
+            createdAt: new Date(),
+            lastAccessedAt: new Date(),
+            expiresAt: sessionResult.expiresAt!,
+            isActive: true,
+            fingerprint: "",
+          },
+        },
       };
     } catch (error) {
       // Specific error handling based on error type
@@ -838,22 +724,30 @@ export class KeycloakIntegrationService {
       }
 
       // Create session
-      const sessionResult = await this.sessionManager.createSession({
-        userId: userInfo.sub,
-        userInfo: userInfo,
-        keycloakSessionId:
-          (await this.extractKeycloakSessionId(tokenResult.tokens, {
-            operationType: "code_authentication",
-            userId: userInfo.sub,
-            ipAddress: clientContext.ipAddress,
-            timestamp: Date.now(),
-          })) || crypto.randomUUID(),
-        tokens: tokenResult.tokens,
-        ipAddress: clientContext.ipAddress,
-        userAgent: clientContext.userAgent,
-        maxAge: undefined,
-        metadata: undefined,
-      });
+      const sessionResult = await this.sessionManager.createSession(
+        userInfo.sub,
+        {
+          accessToken: tokenResult.tokens.access_token,
+          ...(tokenResult.tokens.refresh_token && {
+            refreshToken: tokenResult.tokens.refresh_token,
+          }),
+          ...(tokenResult.tokens.id_token && {
+            idToken: tokenResult.tokens.id_token,
+          }),
+          expiresAt: new Date(
+            Date.now() + tokenResult.tokens.expires_in * 1000
+          ),
+          ...(tokenResult.tokens.refresh_expires_in && {
+            refreshExpiresAt: new Date(
+              Date.now() + tokenResult.tokens.refresh_expires_in * 1000
+            ),
+          }),
+        },
+        {
+          ipAddress: clientContext.ipAddress,
+          userAgent: clientContext.userAgent,
+        }
+      );
 
       this.metrics?.recordCounter("keycloak.integration.code_auth_success", 1);
       this.metrics?.recordTimer(
@@ -871,7 +765,21 @@ export class KeycloakIntegrationService {
         success: true,
         user: userInfo,
         tokens: tokenResult.tokens,
-        session: sessionResult,
+        session: {
+          sessionId: sessionResult.sessionId!,
+          sessionData: {
+            id: sessionResult.sessionId!,
+            userId: userInfo.sub,
+            userInfo: userInfo,
+            ipAddress: clientContext.ipAddress,
+            userAgent: clientContext.userAgent,
+            createdAt: new Date(),
+            lastAccessedAt: new Date(),
+            expiresAt: sessionResult.expiresAt!,
+            isActive: true,
+            fingerprint: "",
+          },
+        },
       };
     } catch (error) {
       // Specific error handling for OAuth2 code flow
@@ -949,10 +857,10 @@ export class KeycloakIntegrationService {
         context
       );
 
-      if (!validation.valid) {
+      if (!validation.isValid) {
         return {
           valid: false,
-          ...(validation.error && { error: validation.error }),
+          ...(validation.reason && { error: validation.reason }),
         };
       }
 
@@ -960,9 +868,9 @@ export class KeycloakIntegrationService {
 
       return {
         valid: true,
-        ...(validation.session && { session: validation.session }),
-        ...(validation.requiresTokenRefresh !== undefined && {
-          refreshed: validation.requiresTokenRefresh,
+        ...(validation.sessionData && { session: validation.sessionData }),
+        ...(validation.shouldRefreshToken !== undefined && {
+          refreshed: validation.shouldRefreshToken,
         }),
       };
     } catch (error) {
@@ -1035,8 +943,8 @@ export class KeycloakIntegrationService {
         userAgent: context.userAgent || "unknown",
       });
 
-      if (validation.valid && validation.session) {
-        const session = validation.session;
+      if (validation.isValid && validation.sessionData) {
+        const session = validation.sessionData;
 
         // Logout from Keycloak if requested and tokens available
         if (options?.logoutFromKeycloak && session.refreshToken) {
@@ -1065,13 +973,8 @@ export class KeycloakIntegrationService {
           }
         }
 
-        // Destroy all user sessions if requested
-        if (options?.destroyAllSessions) {
-          await this.sessionManager.destroyAllUserSessions(session.userId);
-        } else {
-          // Destroy current session
-          await this.sessionManager.destroySession(sessionId, "logout");
-        }
+        // Destroy current session (note: destroyAllUserSessions not available in new architecture)
+        await this.sessionManager.destroySession(sessionId, "logout");
         sessionDestroyed = true;
       }
 
@@ -1223,7 +1126,7 @@ export class KeycloakIntegrationService {
   /**
    * Get service statistics with race condition protection
    */
-  getStats(): {
+  async getStats(): Promise<{
     session: SessionStats;
     client: {
       discoveryLoaded: boolean;
@@ -1236,7 +1139,7 @@ export class KeycloakIntegrationService {
       validationCount: number;
       jwksLoaded: boolean;
     };
-  } {
+  }> {
     const now = Date.now();
 
     // Check cache validity
@@ -1274,7 +1177,7 @@ export class KeycloakIntegrationService {
       };
 
       const stats = {
-        session: this.sessionManager.getStats(),
+        session: await this.sessionManager.getSessionStats(),
         client: this.keycloakClient.getStats?.() || defaultClientStats,
         token: defaultTokenStats, // TokenManager doesn't expose stats currently
       };

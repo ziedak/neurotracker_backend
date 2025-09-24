@@ -7,7 +7,7 @@ import crypto from "crypto";
 import { createLogger } from "@libs/utils";
 import { CacheService } from "@libs/database";
 import type { IMetricsCollector } from "@libs/monitoring";
-import type { AuthResult } from "../types";
+import type { AuthResult } from "../../types";
 
 export interface CacheResult<T> {
   data?: T;

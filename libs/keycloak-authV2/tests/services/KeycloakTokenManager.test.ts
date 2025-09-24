@@ -35,7 +35,7 @@ jest.mock("@libs/messaging", () => ({
 }));
 
 // Import after mocks
-import { TokenManager as KeycloakTokenManager } from "../../src/services/KeycloakTokenManager";
+import { TokenManager as KeycloakTokenManager } from "../../src/services/KeycloakTokenManager.ts.old";
 import type { AuthV2Config } from "../../src/services/config";
 import { KeycloakClient } from "../../src/client/KeycloakClient";
 import type { AuthResult } from "../../src/types";

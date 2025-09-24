@@ -1,13 +1,27 @@
 /**
  * Keycloak User Manager Service
  * Handles user management operations using Keycloak Admin API
+ *
+ * @deprecated This monolithic class has been refactored into a modular SOLID architecture.
+ *             Use KeycloakUserService from './user' for new implementations.
+ *             See REFACTORING_GUIDE.md for migration instructions.
+ *
+ * @example Migration Path:
+ * ```typescript
+ * // OLD (deprecated)
+ * const userManager = new KeycloakUserManager(adminClient, config, metrics);
+ *
+ * // NEW (recommended)
+ * import { KeycloakUserService } from "./user";
+ * const userService = KeycloakUserService.create(keycloakClient, config, cacheService, metrics);
+ * ```
  */
 
 import { createLogger } from "@libs/utils";
 import { CacheService } from "@libs/database";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { UserInfo } from "../types";
-import type { AuthV2Config } from "./config";
+import type { AuthV2Config } from "./token/config";
 import {
   KeycloakClient,
   type KeycloakTokenResponse,
@@ -104,6 +118,10 @@ export interface ResetPasswordOptions {
   temporary?: boolean;
 }
 
+/**
+ * @deprecated This class is deprecated in favor of the modular SOLID architecture.
+ *             Use KeycloakUserService for new implementations.
+ */
 export class KeycloakUserManager {
   private readonly logger = createLogger("KeycloakUserManager");
   private readonly httpClient: HttpClient;
