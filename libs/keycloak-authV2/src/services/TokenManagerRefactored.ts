@@ -11,7 +11,7 @@ import { KeycloakClient } from "../client/KeycloakClient";
 
 // Import focused services
 import { JWTValidator } from "./JWTValidator";
-import { TokenCacheManager } from "./TokenCacheManager";
+import { SecureCacheManager } from "./SecureCacheManager";
 import { TokenIntrospector } from "./TokenIntrospector";
 import {
   RefreshTokenManager,
@@ -25,7 +25,7 @@ import { RolePermissionExtractor } from "./RolePermissionExtractor";
 export class TokenManager {
   private readonly logger = createLogger("TokenManager");
   private readonly jwtValidator: JWTValidator;
-  private readonly cacheManager: TokenCacheManager;
+  private readonly cacheManager: SecureCacheManager;
   private readonly introspector: TokenIntrospector;
   private refreshTokenManager?: RefreshTokenManager;
 
@@ -37,7 +37,7 @@ export class TokenManager {
     refreshEventHandlers: RefreshTokenEventHandlers = {}
   ) {
     // Initialize focused services
-    this.cacheManager = new TokenCacheManager(config.cache.enabled, metrics);
+    this.cacheManager = new SecureCacheManager(config.cache.enabled, metrics);
 
     this.introspector = new TokenIntrospector(keycloakClient, metrics);
 

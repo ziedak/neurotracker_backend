@@ -5,11 +5,153 @@
 
 import * as crypto from "crypto";
 import * as bcrypt from "bcrypt";
+import { z } from "zod";
 import { createLogger } from "@libs/utils";
 import { PostgreSQLClient, CacheService } from "@libs/database";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { UserInfo } from "../types";
 import type { AuthV2Config } from "./config";
+
+/**
+ * Zod schemas for API Key Manager validation
+ */
+const UserIdSchema = z.string().min(1).max(100).trim();
+const KeyIdSchema = z.string().uuid();
+const APIKeyFormatSchema = z
+  .string()
+  .min(10)
+  .max(200)
+  .regex(/^[a-zA-Z0-9_-]+$/);
+const APIKeyNameSchema = z.string().max(200).optional();
+const StoreIdSchema = z.string().min(1).max(100).trim().optional();
+const ScopeSchema = z.string().min(1).max(50).trim();
+const PermissionSchema = z.string().min(1).max(100).trim();
+const ExpirationDateSchema = z
+  .date()
+  .refine((date) => date > new Date(), {
+    message: "Expiration date must be in the future",
+  })
+  .refine(
+    (date) => {
+      const tenYearsFromNow = new Date();
+      tenYearsFromNow.setFullYear(tenYearsFromNow.getFullYear() + 10);
+      return date <= tenYearsFromNow;
+    },
+    {
+      message: "Expiration date cannot be more than 10 years in the future",
+    }
+  )
+  .optional();
+const PrefixSchema = z
+  .string()
+  .max(20)
+  .regex(/^[a-zA-Z0-9_]+$/)
+  .optional();
+const MetadataSchema = z
+  .record(z.any())
+  .refine(
+    (metadata) => {
+      // Check for circular references and excessive nesting
+      const seen = new Set();
+      const checkCircular = (obj: any, depth = 0): boolean => {
+        if (depth > 20) return false;
+        if (obj && typeof obj === "object") {
+          if (seen.has(obj)) return false;
+          seen.add(obj);
+          for (const key in obj) {
+            if (Object.prototype.hasOwnProperty.call(obj, key)) {
+              if (!checkCircular(obj[key], depth + 1)) return false;
+            }
+          }
+          seen.delete(obj);
+        }
+        return true;
+      };
+
+      if (!checkCircular(metadata)) return false;
+
+      // Check object key count
+      const countObjectKeys = (obj: any, depth = 0): number => {
+        if (depth > 20 || !obj || typeof obj !== "object") return 0;
+        let count = 0;
+        for (const key in obj) {
+          if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            count++;
+            if (typeof obj[key] === "object" && obj[key] !== null) {
+              count += countObjectKeys(obj[key], depth + 1);
+            }
+          }
+        }
+        return count;
+      };
+
+      if (countObjectKeys(metadata) > 100) return false;
+
+      // Check serialization size
+      try {
+        const serialized = JSON.stringify(metadata);
+        return serialized.length <= 10000;
+      } catch {
+        return false;
+      }
+    },
+    {
+      message:
+        "Invalid metadata: contains circular references, excessive nesting, too many keys, or exceeds size limit",
+    }
+  )
+  .optional();
+
+const APIKeyGenerationOptionsSchema = z.object({
+  userId: UserIdSchema,
+  name: APIKeyNameSchema,
+  storeId: StoreIdSchema,
+  scopes: z.array(ScopeSchema).max(20).optional(),
+  permissions: z.array(PermissionSchema).max(50).optional(),
+  expirationDate: ExpirationDateSchema,
+  prefix: PrefixSchema,
+  metadata: MetadataSchema,
+});
+
+const APIKeySchema = z.object({
+  id: KeyIdSchema,
+  name: z.string(),
+  keyHash: z.string(),
+  keyPreview: z.string(),
+  userId: UserIdSchema,
+  storeId: StoreIdSchema,
+  permissions: z.array(PermissionSchema).optional(),
+  scopes: z.array(z.string()),
+  lastUsedAt: z.date().optional(),
+  usageCount: z.number().int().min(0),
+  isActive: z.boolean(),
+  expiresAt: z.date().optional(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+  revokedAt: z.date().optional(),
+  revokedBy: z.string().optional(),
+  metadata: MetadataSchema,
+});
+
+// @ts-expect-error: may be used in future validation
+const APIKeyValidationResultSchema = z.object({
+  success: z.boolean(),
+  user: z.any().optional(), // UserInfo type
+  keyData: APIKeySchema.optional(),
+  expiresAt: z.date().optional(),
+  error: z.string().optional(),
+});
+
+// @ts-expect-error: may be used in future validation
+const APIKeyManagerStatsSchema = z.object({
+  totalKeys: z.number().int().min(0),
+  activeKeys: z.number().int().min(0),
+  expiredKeys: z.number().int().min(0),
+  revokedKeys: z.number().int().min(0),
+  validationsToday: z.number().int().min(0),
+  cacheHitRate: z.number().min(0).max(1),
+  lastResetAt: z.date(),
+});
 
 /**
  * API Key data structure matching Prisma schema
@@ -101,18 +243,24 @@ export class APIKeyManager {
   }> {
     const startTime = performance.now();
 
+    let validatedOptions: z.infer<typeof APIKeyGenerationOptionsSchema>;
+
     try {
-      // Comprehensive input validation
-      const validationError = this.validateAPIKeyGenerationOptions(options);
-      if (validationError) {
+      // Comprehensive input validation using Zod
+      const validationResult = APIKeyGenerationOptionsSchema.safeParse(options);
+      if (!validationResult.success) {
         return {
           success: false,
-          error: validationError,
+          error: `Invalid input: ${validationResult.error.issues
+            .map((i) => i.message)
+            .join(", ")}`,
         };
       }
 
+      validatedOptions = validationResult.data;
+
       // Generate secure API key
-      const apiKey = this.generateSecureKey(options.prefix);
+      const apiKey = this.generateSecureKey(validatedOptions.prefix);
       const keyHash = await bcrypt.hash(apiKey, this.saltRounds);
       const keyIdentifier = this.extractKeyIdentifier(apiKey);
       const keyPreview = `${apiKey.slice(0, 8)}...${apiKey.slice(-4)}`;
@@ -120,19 +268,23 @@ export class APIKeyManager {
       // Create database record
       const keyData: APIKey = {
         id: crypto.randomUUID(),
-        name: options.name || "Unnamed API Key",
+        name: validatedOptions.name || "Unnamed API Key",
         keyHash,
         keyPreview,
-        userId: options.userId,
-        ...(options.storeId && { storeId: options.storeId }),
-        permissions: options.permissions || [],
-        scopes: options.scopes || ["read"],
+        userId: validatedOptions.userId,
+        ...(validatedOptions.storeId && { storeId: validatedOptions.storeId }),
+        permissions: validatedOptions.permissions || [],
+        scopes: validatedOptions.scopes || ["read"],
         usageCount: 0,
         isActive: true,
-        ...(options.expirationDate && { expiresAt: options.expirationDate }),
+        ...(validatedOptions.expirationDate && {
+          expiresAt: validatedOptions.expirationDate,
+        }),
         createdAt: new Date(),
         updatedAt: new Date(),
-        ...(options.metadata && { metadata: options.metadata }),
+        ...(validatedOptions.metadata && {
+          metadata: validatedOptions.metadata,
+        }),
       };
 
       // Store in database with key identifier for O(1) lookups
@@ -177,8 +329,8 @@ export class APIKeyManager {
 
       this.logger.info("API key generated", {
         keyId: keyData.id,
-        userId: options.userId,
-        scopes: options.scopes,
+        userId: validatedOptions.userId,
+        scopes: validatedOptions.scopes,
       });
 
       this.metrics?.recordCounter("keycloak.api_key_manager.key_generated", 1);
@@ -233,13 +385,13 @@ export class APIKeyManager {
       if (logLevel === "error") {
         this.logger.error("API key generation failed", {
           error,
-          userId: options.userId,
+          userId: validatedOptions!.userId,
           errorMessage,
         });
       } else {
         this.logger.warn("API key generation issue", {
           error: error instanceof Error ? error.message : error,
-          userId: options.userId,
+          userId: validatedOptions!.userId,
           errorMessage,
         });
       }
@@ -260,12 +412,14 @@ export class APIKeyManager {
     const startTime = performance.now();
 
     try {
-      // Input validation
-      const validationError = this.validateAPIKeyFormat(apiKey);
-      if (validationError) {
+      // Input validation using Zod
+      const validationResult = APIKeyFormatSchema.safeParse(apiKey);
+      if (!validationResult.success) {
         return {
           success: false,
-          error: validationError,
+          error: `Invalid API key format: ${validationResult.error.issues
+            .map((i) => i.message)
+            .join(", ")}`,
         };
       }
 
@@ -500,223 +654,6 @@ export class APIKeyManager {
         error: "Validation system error",
       };
     }
-  }
-
-  /**
-   * Validate API key generation options
-   */
-  private validateAPIKeyGenerationOptions(
-    options: APIKeyGenerationOptions
-  ): string | null {
-    // Validate user ID
-    if (
-      !options.userId ||
-      typeof options.userId !== "string" ||
-      options.userId.trim().length === 0
-    ) {
-      return "Invalid user ID: must be a non-empty string";
-    }
-
-    if (options.userId.length > 100) {
-      return "Invalid user ID: maximum length is 100 characters";
-    }
-
-    // Validate name if provided
-    if (options.name !== undefined) {
-      if (typeof options.name !== "string") {
-        return "Invalid name: must be a string";
-      }
-      if (options.name.length > 200) {
-        return "Invalid name: maximum length is 200 characters";
-      }
-    }
-
-    // Validate store ID if provided
-    if (options.storeId !== undefined) {
-      if (
-        typeof options.storeId !== "string" ||
-        options.storeId.trim().length === 0
-      ) {
-        return "Invalid store ID: must be a non-empty string";
-      }
-      if (options.storeId.length > 100) {
-        return "Invalid store ID: maximum length is 100 characters";
-      }
-    }
-
-    // Validate scopes if provided
-    if (options.scopes !== undefined) {
-      if (!Array.isArray(options.scopes)) {
-        return "Invalid scopes: must be an array";
-      }
-      if (options.scopes.length > 20) {
-        return "Invalid scopes: maximum 20 scopes allowed";
-      }
-      for (const scope of options.scopes) {
-        if (typeof scope !== "string" || scope.trim().length === 0) {
-          return "Invalid scope: all scopes must be non-empty strings";
-        }
-        if (scope.length > 50) {
-          return "Invalid scope: maximum length is 50 characters";
-        }
-      }
-    }
-
-    // Validate permissions if provided
-    if (options.permissions !== undefined) {
-      if (!Array.isArray(options.permissions)) {
-        return "Invalid permissions: must be an array";
-      }
-      if (options.permissions.length > 50) {
-        return "Invalid permissions: maximum 50 permissions allowed";
-      }
-      for (const permission of options.permissions) {
-        if (typeof permission !== "string" || permission.trim().length === 0) {
-          return "Invalid permission: all permissions must be non-empty strings";
-        }
-        if (permission.length > 100) {
-          return "Invalid permission: maximum length is 100 characters";
-        }
-      }
-    }
-
-    // Validate expiration date if provided
-    if (options.expirationDate !== undefined) {
-      if (!(options.expirationDate instanceof Date)) {
-        return "Invalid expiration date: must be a Date object";
-      }
-      if (options.expirationDate <= new Date()) {
-        return "Invalid expiration date: must be in the future";
-      }
-      // Don't allow expiration more than 10 years in the future
-      const tenYearsFromNow = new Date();
-      tenYearsFromNow.setFullYear(tenYearsFromNow.getFullYear() + 10);
-      if (options.expirationDate > tenYearsFromNow) {
-        return "Invalid expiration date: maximum 10 years in the future";
-      }
-    }
-
-    // Validate prefix if provided
-    if (options.prefix !== undefined) {
-      if (typeof options.prefix !== "string") {
-        return "Invalid prefix: must be a string";
-      }
-      if (options.prefix.length > 20) {
-        return "Invalid prefix: maximum length is 20 characters";
-      }
-      // Only allow alphanumeric and underscore in prefix
-      if (!/^[a-zA-Z0-9_]+$/.test(options.prefix)) {
-        return "Invalid prefix: only alphanumeric characters and underscores allowed";
-      }
-    }
-
-    // Validate metadata if provided
-    if (options.metadata !== undefined) {
-      if (
-        typeof options.metadata !== "object" ||
-        options.metadata === null ||
-        Array.isArray(options.metadata)
-      ) {
-        return "Invalid metadata: must be a non-null object";
-      }
-
-      // Enhanced JSON bomb protection
-      try {
-        // Check for circular references before serialization
-        const seen = new Set();
-        const checkCircular = (obj: any, depth = 0): boolean => {
-          if (depth > 20) return false; // Prevent deep nesting attacks
-          if (obj && typeof obj === "object") {
-            if (seen.has(obj)) return false; // Circular reference detected
-            seen.add(obj);
-            for (const key in obj) {
-              if (Object.prototype.hasOwnProperty.call(obj, key)) {
-                if (!checkCircular(obj[key], depth + 1)) return false;
-              }
-            }
-            seen.delete(obj);
-          }
-          return true;
-        };
-
-        if (!checkCircular(options.metadata)) {
-          return "Invalid metadata: contains circular references or excessive nesting";
-        }
-
-        // Check object key count to prevent large object attacks
-        const keyCount = this.countObjectKeys(options.metadata);
-        if (keyCount > 100) {
-          return "Invalid metadata: too many keys (maximum 100)";
-        }
-
-        // Check serialization size with additional safety
-        const serialized = JSON.stringify(options.metadata);
-        if (serialized.length > 10000) {
-          return "Invalid metadata: maximum size is 10KB when serialized";
-        }
-      } catch (error) {
-        return "Invalid metadata: must be JSON serializable";
-      }
-    }
-
-    return null; // All validations passed
-  }
-
-  /**
-   * Validate API key string format
-   */
-  private validateAPIKeyFormat(apiKey: string): string | null {
-    if (!apiKey || typeof apiKey !== "string") {
-      return "Invalid API key: must be a non-empty string";
-    }
-
-    if (apiKey.length < 10) {
-      return "Invalid API key: too short";
-    }
-
-    if (apiKey.length > 200) {
-      return "Invalid API key: too long";
-    }
-
-    // Check for valid characters (base64url safe characters)
-    if (!/^[a-zA-Z0-9_-]+$/.test(apiKey)) {
-      return "Invalid API key: contains invalid characters";
-    }
-
-    return null; // Valid format
-  }
-
-  /**
-   * Validate key ID format
-   */
-  private validateKeyId(keyId: string): string | null {
-    if (!keyId || typeof keyId !== "string") {
-      return "Invalid key ID: must be a non-empty string";
-    }
-
-    // Check UUID format
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(keyId)) {
-      return "Invalid key ID: must be a valid UUID";
-    }
-
-    return null; // Valid UUID
-  }
-
-  /**
-   * Validate user ID format
-   */
-  private validateUserId(userId: string): string | null {
-    if (!userId || typeof userId !== "string" || userId.trim().length === 0) {
-      return "Invalid user ID: must be a non-empty string";
-    }
-
-    if (userId.length > 100) {
-      return "Invalid user ID: maximum length is 100 characters";
-    }
-
-    return null; // Valid user ID
   }
 
   /**
@@ -972,20 +909,24 @@ export class APIKeyManager {
     reason?: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      // Input validation
-      const keyIdError = this.validateKeyId(keyId);
-      if (keyIdError) {
+      // Input validation using Zod
+      const keyIdResult = KeyIdSchema.safeParse(keyId);
+      if (!keyIdResult.success) {
         return {
           success: false,
-          error: keyIdError,
+          error: `Invalid key ID: ${keyIdResult.error.issues
+            .map((i) => i.message)
+            .join(", ")}`,
         };
       }
 
-      const userIdError = this.validateUserId(revokedBy);
-      if (userIdError) {
+      const userIdResult = UserIdSchema.safeParse(revokedBy);
+      if (!userIdResult.success) {
         return {
           success: false,
-          error: `Invalid revokedBy parameter: ${userIdError}`,
+          error: `Invalid revokedBy parameter: ${userIdResult.error.issues
+            .map((i) => i.message)
+            .join(", ")}`,
         };
       }
 
@@ -1108,10 +1049,14 @@ export class APIKeyManager {
    */
   async getUserAPIKeys(userId: string): Promise<APIKey[]> {
     try {
-      // Input validation
-      const validationError = this.validateUserId(userId);
-      if (validationError) {
-        throw new Error(validationError);
+      // Input validation using Zod
+      const validationResult = UserIdSchema.safeParse(userId);
+      if (!validationResult.success) {
+        throw new Error(
+          `Invalid user ID: ${validationResult.error.issues
+            .map((i) => i.message)
+            .join(", ")}`
+        );
       }
 
       const results = await this.dbClient.cachedQuery<
@@ -1148,7 +1093,7 @@ export class APIKeyManager {
       return results.map((record) => ({
         id: record.id,
         name: record.name,
-        keyHash: "",//record.keyHash, // Note: Don't expose this in real APIs
+        keyHash: "", //record.keyHash, // Note: Don't expose this in real APIs
         keyPreview: record.keyPreview,
         userId: record.userId,
         ...(record.storeId && { storeId: record.storeId }),
@@ -1475,7 +1420,9 @@ export class APIKeyManager {
 
   /**
    * Count total keys in nested object structure for validation
+   * Used by MetadataSchema refinement for security validation
    */
+  // @ts-expect-error: used in MetadataSchema refinement
   private countObjectKeys(obj: any, depth = 0): number {
     if (depth > 20 || !obj || typeof obj !== "object") return 0;
 

@@ -56,12 +56,9 @@ export {
 export {
   AuthorizationService,
   type AuthorizationServiceConfig,
-} from "./services/AuthorizationService";
+} from "./services/AuthorizationServiceRefactored";
 
-export {
-  AbilityFactory,
-  type AbilityFactoryConfig,
-} from "./services/AbilityFactory";
+export { AbilityFactory, type AbilityFactoryConfig } from "./services/ability";
 
 export {
   type AuthV2Config,

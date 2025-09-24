@@ -15,8 +15,8 @@ export interface CacheResult<T> {
   source?: string;
 }
 
-export class TokenCacheManager {
-  private readonly logger = createLogger("TokenCacheManager");
+export class SecureCacheManager {
+  private readonly logger = createLogger("SecureCacheManager");
   private cacheService?: CacheService;
 
   constructor(

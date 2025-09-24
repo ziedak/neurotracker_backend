@@ -37,6 +37,59 @@ const TokenSchema = z
     "Invalid JWT format - must be a valid JSON Web Token"
   );
 
+// User and session validation schemas
+const UserIdSchema = z
+  .string()
+  .min(1, "userId cannot be empty")
+  .max(255, "userId too long (max 255 characters)")
+  .regex(/^[a-zA-Z0-9._@-]+$/, "userId contains invalid characters");
+
+const SessionIdSchema = z
+  .string()
+  .min(1, "sessionId cannot be empty")
+  .max(255, "sessionId too long (max 255 characters)")
+  .regex(/^[a-zA-Z0-9._-]+$/, "sessionId contains invalid characters");
+
+// Authorization header validation schema
+const AuthorizationHeaderSchema = z
+  .string()
+  .min(8, "Authorization header too short")
+  .max(8192, "Authorization header too large")
+  .regex(/^Bearer\s+.+$/, "Invalid authorization header format");
+
+// Stored token info validation schema
+const StoredTokenInfoSchema = z.object({
+  accessToken: TokenSchema,
+  refreshToken: z.string().min(1, "refreshToken cannot be empty"),
+  expiresAt: z.date(),
+  refreshExpiresAt: z.date().optional(),
+  tokenType: z.string().default("Bearer"),
+  scope: z.string().default(""),
+  userId: UserIdSchema,
+  sessionId: SessionIdSchema,
+  createdAt: z.date(),
+  lastRefreshedAt: z.date().optional(),
+  refreshCount: z.number().int().min(0).default(0),
+});
+
+// Refresh token configuration validation schema
+const RefreshTokenConfigSchema = z.object({
+  refreshBuffer: z.number().int().min(0).max(3600).default(300), // 0-1 hour
+  enableEncryption: z.boolean().default(false),
+  encryptionKey: z.string().min(32).max(64).optional(), // 32-64 bytes for encryption
+  cleanupInterval: z.number().int().min(60000).max(3600000).default(300000), // 1min-1hour
+});
+
+// Token refresh parameters validation schema
+const TokenRefreshParamsSchema = z.object({
+  userId: UserIdSchema,
+  sessionId: SessionIdSchema,
+  accessToken: TokenSchema,
+  refreshToken: z.string().min(1, "refreshToken cannot be empty"),
+  expiresIn: z.number().int().min(1).max(86400), // 1 second to 24 hours
+  refreshExpiresIn: z.number().int().min(1).max(2592000).optional(), // up to 30 days
+});
+
 // Enhanced error context interface with security considerations
 interface TokenValidationContext {
   readonly operation: string;
@@ -649,19 +702,20 @@ export class TokenManager {
   }
 
   /**
-   * Extract token from Authorization header
+   * Extract token from Authorization header using Zod validation
    */
   extractBearerToken(authorizationHeader?: string): string | null {
     if (!authorizationHeader || typeof authorizationHeader !== "string") {
       return null;
     }
 
-    const bearerPrefix = "Bearer ";
-    if (!authorizationHeader.startsWith(bearerPrefix)) {
+    const headerResult =
+      AuthorizationHeaderSchema.safeParse(authorizationHeader);
+    if (!headerResult.success) {
       return null;
     }
 
-    const token = authorizationHeader.slice(bearerPrefix.length).trim();
+    const token = authorizationHeader.slice(7).trim(); // Remove "Bearer " prefix
     return token.length > 0 ? token : null;
   }
 
@@ -737,18 +791,21 @@ export class TokenManager {
   // ===== REFRESH TOKEN HELPER METHODS =====
 
   /**
-   * Validate user ID and session ID format
+   * Validate user ID and session ID format using Zod
    */
   private validateUserSession(userId: string, sessionId: string): void {
-    if (!userId || typeof userId !== "string" || userId.trim().length === 0) {
-      throw new Error("Invalid userId: must be a non-empty string");
+    const userIdResult = UserIdSchema.safeParse(userId);
+    if (!userIdResult.success) {
+      throw new Error(
+        `Invalid userId: ${userIdResult.error.errors[0]?.message}`
+      );
     }
-    if (
-      !sessionId ||
-      typeof sessionId !== "string" ||
-      sessionId.trim().length === 0
-    ) {
-      throw new Error("Invalid sessionId: must be a non-empty string");
+
+    const sessionIdResult = SessionIdSchema.safeParse(sessionId);
+    if (!sessionIdResult.success) {
+      throw new Error(
+        `Invalid sessionId: ${sessionIdResult.error.errors[0]?.message}`
+      );
     }
   }
 
@@ -1112,12 +1169,20 @@ export class TokenManager {
   }
 
   /**
-   * Configure refresh token functionality
+   * Configure refresh token functionality with Zod validation
    */
   configureRefreshTokens(
     config: Partial<RefreshTokenConfig>,
     eventHandlers: RefreshTokenEventHandlers = {}
   ): void {
+    // Validate configuration using Zod
+    const configResult = RefreshTokenConfigSchema.safeParse(config);
+    if (!configResult.success) {
+      throw new Error(
+        `Invalid refresh token configuration: ${configResult.error.errors[0]?.message}`
+      );
+    }
+
     // Merge with default config
     const defaultRefreshConfig: Omit<RefreshTokenConfig, "encryptionKey"> & {
       encryptionKey?: string;
@@ -1150,7 +1215,7 @@ export class TokenManager {
   }
 
   /**
-   * Store tokens with refresh token support
+   * Store tokens with refresh token support using Zod validation
    */
   async storeTokensWithRefresh(
     userId: string,
@@ -1160,7 +1225,21 @@ export class TokenManager {
     expiresIn: number,
     refreshExpiresIn?: number
   ): Promise<void> {
-    this.validateUserSession(userId, sessionId);
+    // Validate input parameters using Zod
+    const paramsResult = TokenRefreshParamsSchema.safeParse({
+      userId,
+      sessionId,
+      accessToken,
+      refreshToken,
+      expiresIn,
+      refreshExpiresIn,
+    });
+
+    if (!paramsResult.success) {
+      throw new Error(
+        `Invalid token refresh parameters: ${paramsResult.error.errors[0]?.message}`
+      );
+    }
 
     if (!this.refreshTokenConfig) {
       throw new Error("Refresh token functionality not configured");
@@ -1193,6 +1272,14 @@ export class TokenManager {
       refreshCount: 0,
       ...(refreshExpiresAt && { refreshExpiresAt }),
     };
+
+    // Validate the token info structure
+    const tokenInfoResult = StoredTokenInfoSchema.safeParse(tokenInfo);
+    if (!tokenInfoResult.success) {
+      throw new Error(
+        `Invalid token info structure: ${tokenInfoResult.error.errors[0]?.message}`
+      );
+    }
 
     // Store encrypted token info
     const cacheKey = this.generateRefreshCacheKey(userId, sessionId);

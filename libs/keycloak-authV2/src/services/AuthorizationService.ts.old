@@ -6,6 +6,7 @@
  */
 
 import crypto from "crypto";
+import { z } from "zod";
 import type {
   Action,
   Subjects,
@@ -15,11 +16,62 @@ import type {
   Role,
   AppAbility,
 } from "../types/authorization.types";
-import { AbilityFactory } from "./AbilityFactory";
+import { AbilityFactory } from "./ability";
 import type { IMetricsCollector } from "@libs/monitoring";
 
 import type { CacheService } from "@libs/database";
 import { createLogger } from "@libs/utils";
+
+/**
+ * Zod schemas for input validation
+ */
+const authorizationContextSchema = z.object({
+  userId: z
+    .string()
+    .min(1, "userId cannot be empty")
+    .max(100, "userId too long (max 100 characters)")
+    .regex(/^[a-zA-Z0-9._@-]+$/, "userId contains invalid characters"),
+  roles: z
+    .array(
+      z
+        .string()
+        .min(1, "Role cannot be empty")
+        .max(50, "Role name too long (max 50 characters)")
+        .regex(/^[a-zA-Z0-9._-]+$/, "Role contains invalid characters")
+    )
+    .max(50, "Too many roles (max 50)"),
+  sessionId: z.string().max(200, "Invalid sessionId format").optional(),
+  ipAddress: z.string().max(45, "Invalid ipAddress format").optional(),
+  userAgent: z.string().max(500, "Invalid userAgent format").optional(),
+});
+
+const actionSchema = z
+  .string()
+  .min(1, "Invalid action: must be a non-empty string");
+
+const subjectSchema = z
+  .string()
+  .min(1, "Invalid subject: must be a non-empty string");
+
+const resourceContextSchema = z
+  .object({
+    type: z.string().optional(),
+    id: z.string().optional(),
+    ownerId: z.string().optional(),
+    organizationId: z.string().optional(),
+    metadata: z.record(z.any()).optional(),
+  })
+  .optional();
+
+const permissionCheckSchema = z.object({
+  action: actionSchema,
+  subject: subjectSchema,
+  resource: resourceContextSchema.optional(),
+});
+
+const permissionChecksSchema = z
+  .array(permissionCheckSchema)
+  .min(1, "No permission checks specified - access denied by default");
 
 /**
  * Configuration for the Authorization Service
@@ -41,8 +93,13 @@ export class AuthorizationService {
   private readonly permissionCache = new WeakMap<AppAbility, string[]>();
   private readonly pendingCacheOperations = new Map<
     string,
-    Promise<AuthorizationResult>
+    {
+      promise: Promise<AuthorizationResult>;
+      timestamp: number;
+      timeout: NodeJS.Timeout;
+    }
   >();
+  private cleanupInterval?: NodeJS.Timeout | undefined;
 
   constructor(
     private readonly logger = createLogger("AuthorizationService"),
@@ -64,12 +121,43 @@ export class AuthorizationService {
       strictMode: config.strictMode ?? true,
     };
 
-    this.abilityFactory = new AbilityFactory(metrics, {
+    this.abilityFactory = new AbilityFactory(metrics, this.cacheService, {
       enableCaching: true,
       cacheTimeout: Math.min(this.config.permissionCacheTtl * 1000, 3600000), // Max 1 hour
       strictMode: this.config.strictMode,
       auditEnabled: this.config.enableAuditLog,
     });
+
+    // Start cleanup interval for pending operations
+    this.startCleanupInterval();
+  }
+
+  /**
+   * Start periodic cleanup of stale pending operations
+   */
+  private startCleanupInterval(): void {
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupStalePendingOperations();
+    }, 5 * 60 * 1000); // 5 minutes
+  }
+
+  /**
+   * Clean up stale pending operations to prevent memory leaks
+   */
+  private cleanupStalePendingOperations(): void {
+    const now = Date.now();
+    const staleThreshold = 60 * 1000; // 1 minute
+
+    for (const [key, operation] of this.pendingCacheOperations) {
+      if (now - operation.timestamp > staleThreshold) {
+        clearTimeout(operation.timeout);
+        this.pendingCacheOperations.delete(key);
+        this.logger?.warn("Cleaned up stale pending authorization operation", {
+          cacheKey: key.substring(0, 20) + "...",
+          age: now - operation.timestamp,
+        });
+      }
+    }
   }
 
   /**
@@ -108,73 +196,21 @@ export class AuthorizationService {
   }
 
   /**
-   * Comprehensive input validation for authorization context
+   * Comprehensive input validation for authorization context using Zod
    */
   private validateAuthorizationContext(context: AuthorizationContext): {
     valid: boolean;
     reason?: string;
   } {
-    if (!context) {
-      return { valid: false, reason: "Authorization context is required" };
+    const result = authorizationContextSchema.safeParse(context);
+    if (!result.success) {
+      // Extract the first error message for user-friendly feedback
+      const firstError = result.error.issues[0];
+      return {
+        valid: false,
+        reason: firstError?.message || "Invalid authorization context",
+      };
     }
-
-    // Validate userId
-    if (!context.userId || typeof context.userId !== "string") {
-      return { valid: false, reason: "Valid userId is required" };
-    }
-    if (context.userId.trim().length === 0) {
-      return { valid: false, reason: "userId cannot be empty" };
-    }
-    if (context.userId.length > 100) {
-      return { valid: false, reason: "userId too long (max 100 characters)" };
-    }
-    // Basic format validation - prevent injection attacks
-    if (!/^[a-zA-Z0-9._@-]+$/.test(context.userId)) {
-      return { valid: false, reason: "userId contains invalid characters" };
-    }
-
-    // Validate roles array
-    if (!Array.isArray(context.roles)) {
-      return { valid: false, reason: "roles must be an array" };
-    }
-    if (context.roles.length > 50) {
-      return { valid: false, reason: "Too many roles (max 50)" };
-    }
-    for (const role of context.roles) {
-      if (typeof role !== "string" || role.trim().length === 0) {
-        return { valid: false, reason: "All roles must be non-empty strings" };
-      }
-      if (role.length > 50) {
-        return {
-          valid: false,
-          reason: "Role name too long (max 50 characters)",
-        };
-      }
-      if (!/^[a-zA-Z0-9._-]+$/.test(role)) {
-        return { valid: false, reason: "Role contains invalid characters" };
-      }
-    }
-
-    // Validate optional fields
-    if (
-      context.sessionId &&
-      (typeof context.sessionId !== "string" || context.sessionId.length > 200)
-    ) {
-      return { valid: false, reason: "Invalid sessionId format" };
-    }
-    if (
-      context.ipAddress &&
-      (typeof context.ipAddress !== "string" || context.ipAddress.length > 45)
-    ) {
-      return { valid: false, reason: "Invalid ipAddress format" };
-    }
-    if (
-      context.userAgent &&
-      (typeof context.userAgent !== "string" || context.userAgent.length > 500)
-    ) {
-      return { valid: false, reason: "Invalid userAgent format" };
-    }
-
     return { valid: true };
   }
 
@@ -202,11 +238,12 @@ export class AuthorizationService {
       };
     }
 
-    // Validate action and subject
-    if (!action || typeof action !== "string" || action.trim().length === 0) {
+    // Validate action and subject using Zod
+    const actionValidation = actionSchema.safeParse(action);
+    if (!actionValidation.success) {
       return {
         granted: false,
-        reason: "Invalid action: must be a non-empty string",
+        reason: "Invalid action format", // Sanitized error message
         context: {
           action: (action || "unknown") as Action,
           subject,
@@ -216,14 +253,11 @@ export class AuthorizationService {
       };
     }
 
-    if (
-      !subject ||
-      typeof subject !== "string" ||
-      subject.trim().length === 0
-    ) {
+    const subjectValidation = subjectSchema.safeParse(subject);
+    if (!subjectValidation.success) {
       return {
         granted: false,
-        reason: "Invalid subject: must be a non-empty string",
+        reason: "Invalid subject format", // Sanitized error message
         context: {
           action,
           subject: (subject || "unknown") as Subjects,
@@ -231,6 +265,23 @@ export class AuthorizationService {
           timestamp: new Date(),
         },
       };
+    }
+
+    // Validate resource context if provided
+    if (resource !== undefined) {
+      const resourceValidation = resourceContextSchema.safeParse(resource);
+      if (!resourceValidation.success) {
+        return {
+          granted: false,
+          reason: "Invalid resource context format", // Sanitized error message
+          context: {
+            action,
+            subject,
+            userId: context.userId,
+            timestamp: new Date(),
+          },
+        };
+      }
     }
 
     const startTime = Date.now();
@@ -257,9 +308,10 @@ export class AuthorizationService {
               subject,
               Date.now() - startTime
             );
-            return await pendingOperation;
+            return await pendingOperation.promise;
           } catch (pendingError) {
             // If pending operation fails, continue with fresh computation
+            clearTimeout(pendingOperation.timeout);
             this.pendingCacheOperations.delete(cacheKey);
           }
         }
@@ -295,7 +347,22 @@ export class AuthorizationService {
           subject,
           resource
         );
-        this.pendingCacheOperations.set(cacheKey, computationPromise);
+
+        // Create timeout to prevent hanging operations
+        const timeout = setTimeout(() => {
+          this.pendingCacheOperations.delete(cacheKey);
+          this.logger?.warn("Authorization computation timeout", {
+            cacheKey: cacheKey.substring(0, 20) + "...",
+          });
+        }, 60 * 1000); // 1 minute timeout
+
+        const operation = {
+          promise: computationPromise,
+          timestamp: Date.now(),
+          timeout,
+        };
+
+        this.pendingCacheOperations.set(cacheKey, operation);
 
         try {
           const result = await computationPromise;
@@ -306,7 +373,11 @@ export class AuthorizationService {
           return result;
         } finally {
           // Always clean up the pending operation
-          this.pendingCacheOperations.delete(cacheKey);
+          const operation = this.pendingCacheOperations.get(cacheKey);
+          if (operation) {
+            clearTimeout(operation.timeout);
+            this.pendingCacheOperations.delete(cacheKey);
+          }
         }
       }
 
@@ -366,7 +437,7 @@ export class AuthorizationService {
     const startTime = Date.now();
 
     // Create ability for user
-    const ability = this.abilityFactory.createAbilityForUser(context);
+    const ability = await this.abilityFactory.createAbilityForUser(context);
 
     // Perform authorization check
     const result = this._checkPermissionWithAbility(
@@ -464,12 +535,14 @@ export class AuthorizationService {
       };
     }
 
-    if (!Array.isArray(checks) || checks.length === 0) {
-      // SECURITY FIX: Empty checks should DENY access by default for security
-      // This prevents accidental privilege escalation when no checks are specified
+    // Validate permission checks using Zod
+    const checksValidation = permissionChecksSchema.safeParse(checks);
+    if (!checksValidation.success) {
       return {
         granted: false,
-        reason: "No permission checks specified - access denied by default",
+        reason:
+          checksValidation.error.issues[0]?.message ||
+          "Invalid permission checks",
         context: {
           action: "multiple" as Action,
           subject: "multiple" as Subjects,
@@ -553,7 +626,7 @@ export class AuthorizationService {
         return [];
       }
 
-      const ability = this.abilityFactory.createAbilityForUser(context);
+      const ability = await this.abilityFactory.createAbilityForUser(context);
 
       // Check WeakMap cache first for this ability instance
       const cachedPermissions = this.permissionCache.get(ability);
@@ -701,10 +774,27 @@ export class AuthorizationService {
    */
   async cleanup(): Promise<void> {
     try {
-      // Clear all pending cache operations to prevent memory leaks
+      // Clear cleanup interval
+      if (this.cleanupInterval) {
+        clearInterval(this.cleanupInterval);
+        this.cleanupInterval = undefined;
+      }
+
+      // Clear all pending cache operations and their timeouts to prevent memory leaks
+      for (const [, operation] of this.pendingCacheOperations) {
+        clearTimeout(operation.timeout);
+      }
       this.pendingCacheOperations.clear();
 
-      // The WeakMap will automatically be garbage collected
+      // Cleanup ability factory
+      if (
+        this.abilityFactory &&
+        typeof this.abilityFactory.cleanup === "function"
+      ) {
+        await this.abilityFactory.cleanup();
+      }
+
+      // The WeakMap (permissionCache) will automatically be garbage collected
       // when ability objects are no longer referenced
 
       this.logger?.info("AuthorizationService cleanup completed");
@@ -742,7 +832,7 @@ export class AuthorizationService {
   }
 
   /**
-   * Perform the actual authorization check
+   * Perform the actual authorization check with proper type safety
    */
   private _checkPermissionWithAbility(
     ability: AppAbility,
@@ -771,18 +861,29 @@ export class AuthorizationService {
         }
       : subject;
 
-    // CASL can handle the enhanced subject with resource data
-    // TYPE SAFETY FIX: Create properly typed subject for CASL
-    let typedSubject: any;
-    if (typeof subjectInstance === "object" && subjectInstance !== null) {
-      // For object subjects with resource data
-      typedSubject = subjectInstance;
-    } else {
-      // For string subjects
-      typedSubject = subject;
+    // TYPE SAFETY FIX: Properly handle different subject types for CASL
+    let granted: boolean;
+    try {
+      if (typeof subjectInstance === "object" && subjectInstance !== null) {
+        // For object subjects with resource data - cast to any for CASL compatibility
+        granted = ability.can(action, subjectInstance as any);
+      } else {
+        // For string subjects - use the subject directly
+        granted = ability.can(action, subject);
+      }
+    } catch (abilityError) {
+      // Handle CASL errors gracefully
+      this.logger?.warn("CASL ability check failed", {
+        error:
+          abilityError instanceof Error
+            ? abilityError.message
+            : "Unknown error",
+        action,
+        subject,
+        userId: context.userId,
+      });
+      granted = false; // Fail secure
     }
-
-    const granted = ability.can(action, typedSubject);
 
     const result: AuthorizationResult = {
       granted,
@@ -866,7 +967,7 @@ export class AuthorizationService {
 
   /**
    * Generate secure cache key for authorization result
-   * SECURITY FIX: Hash all sensitive data to prevent PII exposure
+   * SECURITY FIX: Use full hash to prevent collisions and PII exposure
    */
   private generateCacheKey(
     context: AuthorizationContext,
@@ -886,17 +987,29 @@ export class AuthorizationService {
               type: resource.type || "",
               id: resource.id || "",
               ownerId: resource.ownerId || "",
+              organizationId: resource.organizationId || "",
+              // Include metadata hash to ensure uniqueness
+              metadataHash: resource.metadata
+                ? crypto
+                    .createHash("sha256")
+                    .update(JSON.stringify(resource.metadata))
+                    .digest("hex")
+                    .substring(0, 16)
+                : "",
             }
           : null,
+        // Add timestamp component for cache rotation
+        timeWindow: Math.floor(
+          Date.now() / (this.config.permissionCacheTtl * 1000)
+        ),
       };
 
-      // SECURITY FIX: Always hash complete key data to prevent PII exposure
-      // No user information should be visible in cache key patterns
+      // SECURITY FIX: Use full hash to prevent collisions
       const keyString = JSON.stringify(keyData);
       const hash = crypto.createHash("sha256").update(keyString).digest("hex");
 
-      // Use shorter hash for better performance while maintaining uniqueness
-      return `auth:${hash.substring(0, 32)}`;
+      // Use full hash for maximum collision resistance
+      return `auth:${hash}`;
     } catch (error) {
       // Fallback with secure error handling
       this.logger?.warn("Failed to generate cache key, using fallback", {
@@ -911,7 +1024,7 @@ export class AuthorizationService {
         .createHash("sha256")
         .update(fallbackData)
         .digest("hex");
-      return `auth:fallback:${hash.substring(0, 16)}`;
+      return `auth:fallback:${hash}`;
     }
   }
 

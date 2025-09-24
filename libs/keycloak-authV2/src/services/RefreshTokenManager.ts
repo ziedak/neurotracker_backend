@@ -4,6 +4,7 @@
  */
 
 import crypto from "crypto";
+import { z } from "zod";
 import { createLogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
 import { decodeJwt } from "jose";
@@ -15,7 +16,57 @@ import {
   KeycloakClient,
   type KeycloakTokenResponse,
 } from "../client/KeycloakClient";
-import type { TokenCacheManager } from "./TokenCacheManager";
+import type { SecureCacheManager } from "./SecureCacheManager";
+
+/**
+ * Zod schemas for validation
+ */
+const UserIdSchema = z
+  .string()
+  .min(1, "User ID must be a non-empty string")
+  .max(255, "User ID too long");
+
+const SessionIdSchema = z
+  .string()
+  .min(1, "Session ID must be a non-empty string")
+  .max(255, "Session ID too long");
+
+const StoredTokenInfoSchema = z.object({
+  accessToken: z.string().min(1, "Access token must be a non-empty string"),
+  refreshToken: z.string().min(1, "Refresh token must be a non-empty string"),
+  expiresAt: z.date(),
+  refreshExpiresAt: z.date().optional(),
+  tokenType: z.string().min(1, "Token type must be a non-empty string"),
+  scope: z.string(),
+  userId: UserIdSchema,
+  sessionId: SessionIdSchema,
+  createdAt: z.date(),
+  lastRefreshedAt: z.date().optional(),
+  refreshCount: z.number().int().min(0, "Refresh count must be non-negative"),
+});
+
+const RefreshTokenConfigSchema = z.object({
+  refreshBuffer: z.number().int().min(0, "Refresh buffer must be non-negative"),
+  enableEncryption: z.boolean(),
+  encryptionKey: z.string().optional(),
+  cleanupInterval: z
+    .number()
+    .int()
+    .min(1000, "Cleanup interval must be at least 1000ms"),
+});
+
+const TokenRefreshParamsSchema = z.object({
+  userId: UserIdSchema,
+  sessionId: SessionIdSchema,
+  accessToken: z.string().min(1, "Access token must be a non-empty string"),
+  refreshToken: z.string().min(1, "Refresh token must be a non-empty string"),
+  expiresIn: z.number().int().min(1, "Expires in must be positive"),
+  refreshExpiresIn: z
+    .number()
+    .int()
+    .min(1, "Refresh expires in must be positive")
+    .optional(),
+});
 
 /**
  * Stored Token Information with refresh support
@@ -112,11 +163,14 @@ export class RefreshTokenManager {
 
   constructor(
     private readonly keycloakClient: KeycloakClient,
-    private readonly cacheManager: TokenCacheManager,
+    private readonly cacheManager: SecureCacheManager,
     private readonly config: RefreshTokenConfig,
     private readonly eventHandlers: RefreshTokenEventHandlers = {},
     private readonly metrics?: IMetricsCollector
   ) {
+    // Validate configuration
+    RefreshTokenConfigSchema.parse(config);
+
     // Initialize encryption manager if enabled
     if (config.enableEncryption) {
       this.encryptionManager = createEncryptionManager(config.encryptionKey);
@@ -127,16 +181,8 @@ export class RefreshTokenManager {
    * Validate user ID and session ID format
    */
   private validateUserSession(userId: string, sessionId: string): void {
-    if (!userId || typeof userId !== "string" || userId.trim().length === 0) {
-      throw new Error("Invalid userId: must be a non-empty string");
-    }
-    if (
-      !sessionId ||
-      typeof sessionId !== "string" ||
-      sessionId.trim().length === 0
-    ) {
-      throw new Error("Invalid sessionId: must be a non-empty string");
-    }
+    UserIdSchema.parse(userId);
+    SessionIdSchema.parse(sessionId);
   }
 
   /**
@@ -350,7 +396,15 @@ export class RefreshTokenManager {
     expiresIn: number,
     refreshExpiresIn?: number
   ): Promise<void> {
-    this.validateUserSession(userId, sessionId);
+    // Validate input parameters
+    TokenRefreshParamsSchema.parse({
+      userId,
+      sessionId,
+      accessToken,
+      refreshToken,
+      expiresIn,
+      refreshExpiresIn,
+    });
 
     // Parse access token to get expiration info
     let decodedToken: any = {};
@@ -380,7 +434,8 @@ export class RefreshTokenManager {
       ...(refreshExpiresAt && { refreshExpiresAt }),
     };
 
-    // Store encrypted token info
+    // Validate token info before storing
+    StoredTokenInfoSchema.parse(tokenInfo);
     const cacheKey = this.generateRefreshCacheKey(userId, sessionId);
     const encryptedInfo = this.encryptTokenInfo(tokenInfo);
 

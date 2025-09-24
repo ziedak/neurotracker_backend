@@ -25,7 +25,7 @@ export { TokenManager as LegacyTokenManager } from "./KeycloakTokenManager";
 
 // Focused Token Services (can be used independently)
 export { JWTValidator } from "./JWTValidator";
-export { TokenCacheManager, type CacheResult } from "./TokenCacheManager";
+export { SecureCacheManager, type CacheResult } from "./SecureCacheManager";
 export { TokenIntrospector } from "./TokenIntrospector";
 export {
   RefreshTokenManager,
@@ -38,17 +38,6 @@ export {
 } from "./RefreshTokenManager";
 export { RolePermissionExtractor } from "./RolePermissionExtractor";
 
-// WebSocket Authentication
-export {
-  WebSocketAuthService,
-  createWebSocketAuthService,
-  type WebSocketConnection,
-  type WebSocketAuthResult,
-  type WebSocketConfig,
-  type WebSocketHooks,
-  type AuthenticatedMessage,
-} from "./WebSocketAuthService";
-
 // PKCE Support
 export {
   PKCEManager,
@@ -57,4 +46,3 @@ export {
 } from "./PKCEManager";
 
 // Authorization
-export { AuthorizationService } from "./AuthorizationService";

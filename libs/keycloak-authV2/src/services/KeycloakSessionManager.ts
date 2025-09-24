@@ -23,6 +23,7 @@
  */
 
 import * as crypto from "crypto";
+import { z } from "zod";
 import { createLogger } from "@libs/utils";
 import { CacheService, PostgreSQLClient } from "@libs/database";
 import type { IMetricsCollector } from "@libs/monitoring";
@@ -36,6 +37,108 @@ import {
   KeycloakClient,
   type KeycloakTokenResponse,
 } from "../client/KeycloakClient";
+
+/**
+ * Zod schemas for validation
+ */
+const UserIdSchema = z
+  .string()
+  .min(1, "User ID must be a non-empty string")
+  .max(255, "User ID too long");
+
+const SessionIdSchema = z
+  .string()
+  .min(1, "Session ID must be a non-empty string")
+  .max(512, "Session ID too long");
+
+const SessionValidationContextSchema = z.object({
+  ipAddress: z
+    .string()
+    .min(1, "IP address must be a non-empty string")
+    .max(45, "IP address too long"), // IPv6 max length
+  userAgent: z
+    .string()
+    .min(1, "User agent must be a non-empty string")
+    .max(1000, "User agent too long"),
+});
+
+const KeycloakSessionCreationOptionsSchema = z.object({
+  userId: UserIdSchema,
+  userInfo: z.record(z.any()).optional(),
+  keycloakSessionId: z
+    .string()
+    .min(1, "Keycloak session ID must be a non-empty string")
+    .max(255, "Keycloak session ID too long"),
+  tokens: z
+    .object({
+      access_token: z
+        .string()
+        .min(1, "Access token must be a non-empty string"),
+      refresh_token: z.string().optional(),
+      id_token: z.string().optional(),
+      expires_in: z
+        .number()
+        .int()
+        .min(1, "Expires in must be positive")
+        .optional(),
+      refresh_expires_in: z
+        .number()
+        .int()
+        .min(1, "Refresh expires in must be positive")
+        .optional(),
+      token_type: z.string().optional(),
+      scope: z.string().optional(),
+    })
+    .optional(),
+  ipAddress: z
+    .string()
+    .min(1, "IP address must be a non-empty string")
+    .max(45, "IP address too long"),
+  userAgent: z
+    .string()
+    .min(1, "User agent must be a non-empty string")
+    .max(1000, "User agent too long"),
+  maxAge: z.number().int().min(1, "Max age must be positive").optional(),
+  metadata: z.record(z.any()).optional(),
+});
+
+const KeycloakSessionDataSchema = z.object({
+  id: SessionIdSchema,
+  userId: UserIdSchema,
+  userInfo: z.record(z.any()).optional(),
+  keycloakSessionId: z
+    .string()
+    .min(1, "Keycloak session ID must be a non-empty string")
+    .max(255, "Keycloak session ID too long"),
+  accessToken: z
+    .string()
+    .min(1, "Access token must be a non-empty string")
+    .optional(),
+  refreshToken: z
+    .string()
+    .min(1, "Refresh token must be a non-empty string")
+    .optional(),
+  idToken: z.string().min(1, "ID token must be a non-empty string").optional(),
+  tokenExpiresAt: z.date().optional(),
+  refreshExpiresAt: z.date().optional(),
+  createdAt: z.date(),
+  lastAccessedAt: z.date(),
+  expiresAt: z.date(),
+  ipAddress: z
+    .string()
+    .min(1, "IP address must be a non-empty string")
+    .max(45, "IP address too long"),
+  userAgent: z
+    .string()
+    .min(1, "User agent must be a non-empty string")
+    .max(1000, "User agent too long"),
+  isActive: z.boolean(),
+  metadata: z.record(z.any()).optional(),
+  fingerprint: z
+    .string()
+    .min(1, "Fingerprint must be a non-empty string")
+    .max(128, "Fingerprint too long"),
+});
 
 export type AuthResult = {
   success: boolean;
@@ -156,6 +259,9 @@ export class KeycloakSessionManager {
     sessionId: string;
     sessionData: KeycloakSessionData;
   }> {
+    // Validate input parameters
+    KeycloakSessionCreationOptionsSchema.parse(options);
+
     const startTime = performance.now();
     let sessionData: KeycloakSessionData | undefined;
 
@@ -262,6 +368,10 @@ export class KeycloakSessionManager {
       userAgent: string;
     }
   ): Promise<SessionValidationResult> {
+    // Validate input parameters
+    SessionIdSchema.parse(sessionId);
+    SessionValidationContextSchema.parse(context);
+
     const startTime = performance.now();
 
     try {
@@ -432,6 +542,10 @@ export class KeycloakSessionManager {
     sessionId: string;
     sessionData: KeycloakSessionData;
   }> {
+    // Validate input parameters
+    SessionIdSchema.parse(sessionId);
+    SessionValidationContextSchema.parse(context);
+
     const startTime = performance.now();
 
     try {
@@ -489,6 +603,9 @@ export class KeycloakSessionManager {
     sessionId: string,
     reason: string = "logout"
   ): Promise<void> {
+    // Validate input parameters
+    SessionIdSchema.parse(sessionId);
+
     const startTime = performance.now();
 
     try {
@@ -566,6 +683,9 @@ export class KeycloakSessionManager {
    * Get all active sessions for a user
    */
   async getUserSessions(userId: string): Promise<KeycloakSessionData[]> {
+    // Validate input parameters
+    UserIdSchema.parse(userId);
+
     const startTime = performance.now();
 
     try {
@@ -669,6 +789,9 @@ export class KeycloakSessionManager {
    * Destroy all sessions for a user
    */
   async destroyAllUserSessions(userId: string): Promise<void> {
+    // Validate input parameters
+    UserIdSchema.parse(userId);
+
     const startTime = performance.now();
 
     try {
@@ -753,6 +876,9 @@ export class KeycloakSessionManager {
    * Fixed: Use single transaction to prevent race conditions and inconsistent counts
    */
   private async enforceConcurrentSessionLimits(userId: string): Promise<void> {
+    // Validate input parameters
+    UserIdSchema.parse(userId);
+
     const maxConcurrentSessions =
       this.config.session?.maxConcurrentSessions || 0;
 
@@ -849,6 +975,9 @@ export class KeycloakSessionManager {
    * Store session data in database and cache
    */
   private async storeSession(sessionData: KeycloakSessionData): Promise<void> {
+    // Validate session data before storing
+    KeycloakSessionDataSchema.parse(sessionData);
+
     try {
       // Store in database first
       await this.dbClient.executeRaw(
@@ -918,6 +1047,9 @@ export class KeycloakSessionManager {
   private async retrieveSession(
     sessionId: string
   ): Promise<KeycloakSessionData | null> {
+    // Validate input parameters
+    SessionIdSchema.parse(sessionId);
+
     try {
       // Check cache first for performance
       if (this.cacheService) {
@@ -1045,6 +1177,16 @@ export class KeycloakSessionManager {
     ipAddress: string,
     userAgent: string
   ): string {
+    // Validate input parameters
+    z.string()
+      .min(1, "IP address must be a non-empty string")
+      .max(45, "IP address too long")
+      .parse(ipAddress);
+    z.string()
+      .min(1, "User agent must be a non-empty string")
+      .max(1000, "User agent too long")
+      .parse(userAgent);
+
     const hash = crypto.createHash("sha256");
     hash.update(`${ipAddress}:${userAgent}:${Date.now()}`);
     return hash.digest("hex");
@@ -1061,6 +1203,10 @@ export class KeycloakSessionManager {
     suspicious: boolean;
     result: SessionValidationResult;
   } {
+    // Validate input parameters
+    KeycloakSessionDataSchema.parse(sessionData);
+    SessionValidationContextSchema.parse(context);
+
     const enforceIpConsistency =
       this.config.session?.enforceIpConsistency ?? false;
     const enforceUserAgentConsistency =
@@ -1099,6 +1245,9 @@ export class KeycloakSessionManager {
    * Check if session should be rotated using configuration
    */
   private shouldRotateSession(sessionData: KeycloakSessionData): boolean {
+    // Validate input parameters
+    KeycloakSessionDataSchema.parse(sessionData);
+
     const rotationInterval = this.config.security?.sessionRotationInterval || 0;
 
     if (!rotationInterval) {
@@ -1119,6 +1268,9 @@ export class KeycloakSessionManager {
     result: SessionValidationResult,
     customTtl?: number
   ): Promise<void> {
+    // Validate input parameters
+    SessionIdSchema.parse(sessionId);
+
     if (this.cacheService) {
       const cacheKey = `keycloak_session_validation:${sessionId}`;
       const ttl = customTtl || 300; // 5 minutes default

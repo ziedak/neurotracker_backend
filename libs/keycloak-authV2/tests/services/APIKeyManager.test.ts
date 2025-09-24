@@ -90,8 +90,8 @@ describe("APIKeyManager", () => {
       {
         id: "uuid-123",
         name: "Test Key",
-        keyHash: "hashed_testkey",
-        keyPreview: "testkey",
+        keyHash: "hashed_dGVzdGtleQ", // Match the mocked bcrypt hash
+        keyPreview: "dGVzdGtleQ...",
         userId: "user1",
         scopes: ["read"],
         permissions: JSON.stringify(["read"]),
@@ -101,7 +101,8 @@ describe("APIKeyManager", () => {
         updatedAt: new Date(),
       },
     ]);
-    const result = await manager.validateAPIKey("testkey");
+    // Use a valid base64url format API key
+    const result = await manager.validateAPIKey("dGVzdGtleQ"); // base64url for "testkey"
     expect(result.success).toBe(true);
     expect(result.user).toBeDefined();
     expect(result.keyData).toBeDefined();
@@ -110,7 +111,7 @@ describe("APIKeyManager", () => {
   it("should revoke an API key", async () => {
     mockDbClient.executeRaw.mockResolvedValueOnce(true);
     const result = await manager.revokeAPIKey(
-      "uuid-123",
+      "12345678-1234-5678-9abc-def012345678", // Valid UUID format (without uuid- prefix)
       "admin",
       "test reason"
     );
@@ -140,10 +141,20 @@ describe("APIKeyManager", () => {
     expect(keys[0]?.id).toBe("uuid-123");
   });
 
-  it("should return stats", () => {
-    const stats = manager.getStats();
+  it("should return stats", async () => {
+    mockDbClient.cachedQuery.mockResolvedValueOnce([
+      {
+        total_keys: 10,
+        active_keys: 8,
+        expired_keys: 1,
+        revoked_keys: 1,
+      },
+    ]);
+    const stats = await manager.getStats();
     expect(stats).toHaveProperty("totalKeys");
     expect(stats).toHaveProperty("activeKeys");
+    expect(stats.totalKeys).toBe(10);
+    expect(stats.activeKeys).toBe(8);
   });
 
   it("should perform health check (healthy)", async () => {
@@ -155,6 +166,7 @@ describe("APIKeyManager", () => {
 
   it("should perform health check (unhealthy)", async () => {
     mockDbClient.executeRaw.mockRejectedValueOnce(new Error("fail"));
+    mockDbClient.cachedQuery.mockRejectedValueOnce(new Error("fail"));
     const result = await manager.healthCheck();
     expect(result.status).toBe("unhealthy");
     expect(result.details.database).toBe("disconnected");
