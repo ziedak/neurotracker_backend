@@ -9,17 +9,13 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { Payment, PaymentStatus } from "../models";
+import type {
+  Payment,
+  PaymentStatus,
+  PaymentCreateInput,
+  PaymentUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-export type PaymentCreateInput = Omit<
-  Prisma.PaymentCreateInput,
-  "id" | "createdAt" | "updatedAt"
-> & {
-  id?: string;
-};
-
-export type PaymentUpdateInput = Prisma.PaymentUpdateInput;
 
 export interface IPaymentRepository
   extends BaseRepository<Payment, PaymentCreateInput, PaymentUpdateInput> {

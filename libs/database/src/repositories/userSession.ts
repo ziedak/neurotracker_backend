@@ -9,23 +9,12 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { UserSession } from "../models";
+import type {
+  UserSession,
+  UserSessionCreateInput,
+  UserSessionUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * UserSession creation input type
- */
-export type UserSessionCreateInput = Omit<
-  Prisma.UserSessionCreateInput,
-  "id" | "createdAt" | "updatedAt"
-> & {
-  id?: string;
-};
-
-/**
- * UserSession update input type
- */
-export type UserSessionUpdateInput = Prisma.UserSessionUpdateInput;
 
 /**
  * UserSession repository interface
@@ -149,10 +138,9 @@ export class UserSessionRepository
   async count(options?: QueryOptions): Promise<number> {
     return this.executeOperation("count", async () => {
       // Count operations don't support include, so we omit it
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { include, ...countOptions } = options ?? {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return ((await this.db.userSession.count) as any)(countOptions);
+      return this.db.userSession.count({
+        ...(options?.where && { where: options.where }),
+      });
     });
   }
 

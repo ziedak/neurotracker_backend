@@ -9,33 +9,18 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { Webhook } from "../models";
+import type {
+  Webhook,
+  WebhookCreateInput,
+  WebhookUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * Webhook creation input type
- */
-export type WebhookCreateInput = Omit<
-  Prisma.WebhookCreateInput,
-  "id" | "createdAt" | "updatedAt"
-> & {
-  id?: string;
-};
-
-/**
- * Webhook update input type
- */
-export type WebhookUpdateInput = Prisma.WebhookUpdateInput;
 
 /**
  * Webhook repository interface
  */
 export interface IWebhookRepository
-  extends BaseRepository<
-    Webhook,
-    WebhookCreateInput,
-    WebhookUpdateInput
-  > {
+  extends BaseRepository<Webhook, WebhookCreateInput, WebhookUpdateInput> {
   /**
    * Find webhooks by store ID
    */
@@ -64,11 +49,7 @@ export interface IWebhookRepository
  * Webhook repository implementation
  */
 export class WebhookRepository
-  extends BaseRepository<
-    Webhook,
-    WebhookCreateInput,
-    WebhookUpdateInput
-  >
+  extends BaseRepository<Webhook, WebhookCreateInput, WebhookUpdateInput>
   implements IWebhookRepository
 {
   constructor(
@@ -123,10 +104,9 @@ export class WebhookRepository
   async count(options?: QueryOptions): Promise<number> {
     return this.executeOperation("count", async () => {
       // Count operations don't support include, so we omit it
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { include, ...countOptions } = options ?? {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (await this.db.webhook.count as any)(countOptions);
+      return this.db.webhook.count({
+        ...(options?.where && { where: options.where }),
+      });
     });
   }
 

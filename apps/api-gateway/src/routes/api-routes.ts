@@ -1,4 +1,4 @@
-import { Elysia } from "elysia";
+import { Elysia } from "@libs/elysia-server";
 import { ILogger, AppError } from "@libs/utils";
 import { proxyToService } from "../proxyToService";
 import { handleError } from "../types";

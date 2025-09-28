@@ -3,7 +3,7 @@ import type {
   EndpointRegistryService,
   LoadBalancingStrategy,
 } from "./services/EndpointRegistryService";
-import { requestWithRetry } from "@libs/messaging";
+
 
 /**
  * Proxies an HTTP request to a registered service endpoint with retry and logging.

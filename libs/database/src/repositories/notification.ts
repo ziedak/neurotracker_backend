@@ -9,24 +9,12 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { Notification } from "../models";
+import type {
+  Notification,
+  NotificationCreateInput,
+  NotificationUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * Notification creation input type
- */
-export type NotificationCreateInput = Omit<
-  Prisma.NotificationCreateInput,
-  "id" | "createdAt" | "readAt"
-> & {
-  id?: string;
-  readAt?: Date;
-};
-
-/**
- * Notification update input type
- */
-export type NotificationUpdateInput = Prisma.NotificationUpdateInput;
 
 /**
  * Notification repository interface
@@ -168,10 +156,9 @@ export class NotificationRepository
   async count(options?: QueryOptions): Promise<number> {
     return this.executeOperation("count", async () => {
       // Count operations don't support include, so we omit it
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { include, ...countOptions } = options ?? {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (this.db.notification.count as any)(countOptions);
+      return this.db.notification.count({
+        ...(options?.where && { where: options.where }),
+      });
     });
   }
 

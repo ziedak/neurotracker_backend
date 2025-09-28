@@ -9,18 +9,13 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { Cart, CartStatus } from "../models";
+import type {
+  Cart,
+  CartStatus,
+  CartCreateInput,
+  CartUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-export type CartCreateInput = Omit<
-  Prisma.CartCreateInput,
-  "id" | "createdAt" | "updatedAt" | "isDeleted" | "archived" | "user"
-> & {
-  id?: string;
-  userId: string;
-};
-
-export type CartUpdateInput = Prisma.CartUpdateInput;
 
 export interface ICartRepository
   extends BaseRepository<Cart, CartCreateInput, CartUpdateInput> {

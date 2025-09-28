@@ -9,24 +9,12 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { QualityAnomaly } from "../models";
+import type {
+  QualityAnomaly,
+  QualityAnomalyCreateInput,
+  QualityAnomalyUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * QualityAnomaly creation input type
- */
-export type QualityAnomalyCreateInput = Omit<
-  Prisma.QualityAnomalyCreateInput,
-  "id" | "timestamp"
-> & {
-  id?: string;
-  timestamp?: Date;
-};
-
-/**
- * QualityAnomaly update input type
- */
-export type QualityAnomalyUpdateInput = Prisma.QualityAnomalyUpdateInput;
 
 /**
  * QualityAnomaly repository interface
@@ -170,10 +158,9 @@ export class QualityAnomalyRepository
   async count(options?: QueryOptions): Promise<number> {
     return this.executeOperation("count", async () => {
       // Count operations don't support include, so we omit it
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { include, ...countOptions } = options ?? {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (this.db.qualityAnomaly.count as any)(countOptions);
+      return this.db.qualityAnomaly.count({
+        ...(options?.where && { where: options.where }),
+      });
     });
   }
 

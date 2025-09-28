@@ -1,4 +1,4 @@
-import { Elysia, t } from "elysia";
+import { Elysia, t } from "@libs/elysia-server";
 import { ILogger } from "@libs/utils";
 import {
   AuthenticationService,

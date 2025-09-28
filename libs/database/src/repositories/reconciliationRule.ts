@@ -9,24 +9,13 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { ReconciliationRule } from "../models";
+import type {
+  ReconciliationRule,
+  ReconciliationRuleCreateInput,
+  ReconciliationRuleUpdateInput,
+  ReconciliationExecution,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * ReconciliationRule creation input type
- */
-export type ReconciliationRuleCreateInput = Omit<
-  Prisma.ReconciliationRuleCreateInput,
-  "id" | "createdAt"
-> & {
-  id?: string;
-};
-
-/**
- * ReconciliationRule update input type
- */
-export type ReconciliationRuleUpdateInput =
-  Prisma.ReconciliationRuleUpdateInput;
 
 /**
  * ReconciliationRule repository interface
@@ -174,11 +163,9 @@ export class ReconciliationRuleRepository
    */
   async count(options?: QueryOptions): Promise<number> {
     return this.executeOperation("count", async () => {
-      // Count operations don't support include, so we omit it
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { include, ...countOptions } = options ?? {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (this.db.reconciliationRule.count as any)(countOptions);
+      return this.db.reconciliationRule.count({
+        ...(options?.where && { where: options.where }),
+      });
     });
   }
 
@@ -385,7 +372,9 @@ export class ReconciliationRuleRepository
    */
   async getRuleWithExecutions(
     id: string
-  ): Promise<(ReconciliationRule & { executions: any[] }) | null> {
+  ): Promise<
+    (ReconciliationRule & { executions: ReconciliationExecution[] }) | null
+  > {
     return this.executeOperation("getRuleWithExecutions", async () => {
       const result = await this.db.reconciliationRule.findUnique({
         where: { id },
@@ -397,7 +386,9 @@ export class ReconciliationRuleRepository
           },
         },
       });
-      return result as (ReconciliationRule & { executions: any[] }) | null;
+      return result as
+        | (ReconciliationRule & { executions: ReconciliationExecution[] })
+        | null;
     });
   }
 

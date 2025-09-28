@@ -9,23 +9,13 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { Report, ReportStatus } from "../models";
+import type {
+  Report,
+  ReportStatus,
+  ReportCreateInput,
+  ReportUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * Report creation input type
- */
-export type ReportCreateInput = Omit<
-  Prisma.ReportCreateInput,
-  "id" | "createdAt" | "updatedAt" | "generatedAt"
-> & {
-  id?: string;
-};
-
-/**
- * Report update input type
- */
-export type ReportUpdateInput = Prisma.ReportUpdateInput;
 
 /**
  * Report repository interface

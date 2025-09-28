@@ -14,40 +14,13 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions, type BatchResult } from "./base";
-import type { User, UserStatus } from "../models";
+import type {
+  User,
+  UserStatus,
+  UserCreateInput,
+  UserUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * User creation input type
- */
-export type UserCreateInput = Omit<
-  Prisma.UserCreateInput,
-  "id" | "createdAt" | "updatedAt" | "loginCount"
-> & {
-  id?: string;
-};
-
-/**
- * User update input type
- */
-export type UserUpdateInput = Prisma.UserUpdateInput;
-
-/**
- * User query filters
- */
-export interface UserFilters {
-  status?: UserStatus;
-  emailVerified?: boolean;
-  phoneVerified?: boolean;
-  roleId?: string;
-  storeId?: string;
-  organizationId?: string;
-  isDeleted?: boolean;
-  createdAfter?: Date;
-  createdBefore?: Date;
-  lastLoginAfter?: Date;
-  lastLoginBefore?: Date;
-}
 
 /**
  * User repository interface

@@ -9,33 +9,19 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { Product, ProductStatus } from "../models";
+import type {
+  Product,
+  ProductStatus,
+  ProductCreateInput,
+  ProductUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * Product creation input type
- */
-export type ProductCreateInput = Omit<
-  Prisma.ProductCreateInput,
-  "id" | "createdAt" | "updatedAt" | "isDeleted"
-> & {
-  id?: string;
-};
-
-/**
- * Product update input type
- */
-export type ProductUpdateInput = Prisma.ProductUpdateInput;
 
 /**
  * Product repository interface
  */
 export interface IProductRepository
-  extends BaseRepository<
-    Product,
-    ProductCreateInput,
-    ProductUpdateInput
-  > {
+  extends BaseRepository<Product, ProductCreateInput, ProductUpdateInput> {
   /**
    * Find product by SKU
    */
@@ -69,12 +55,7 @@ export interface IProductRepository
  * Product repository implementation
  */
 export class ProductRepository
-  extends BaseRepository<
-    Product,
-    ProductCreateInput,
-    ProductUpdateInput,
-    string
-  >
+  extends BaseRepository<Product, ProductCreateInput, ProductUpdateInput>
   implements IProductRepository
 {
   constructor(

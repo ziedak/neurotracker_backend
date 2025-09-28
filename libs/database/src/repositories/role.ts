@@ -9,23 +9,13 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { Role, RolePermission } from "../models";
+import type {
+  Role,
+  RolePermission,
+  RoleCreateInput,
+  RoleUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * Role creation input type
- */
-export type RoleCreateInput = Omit<
-  Prisma.RoleCreateInput,
-  "id" | "createdAt" | "updatedAt" | "version"
-> & {
-  id?: string;
-};
-
-/**
- * Role update input type
- */
-export type RoleUpdateInput = Prisma.RoleUpdateInput;
 
 /**
  * Role permission creation input

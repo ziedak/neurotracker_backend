@@ -9,23 +9,8 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache/interfaces/ICache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { Config } from "../models";
+import type { Config, ConfigCreateInput, ConfigUpdateInput } from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * Config creation input type
- */
-export type ConfigCreateInput = Omit<
-  Prisma.ConfigCreateInput,
-  "id" | "createdAt" | "updatedAt"
-> & {
-  id?: string;
-};
-
-/**
- * Config update input type
- */
-export type ConfigUpdateInput = Prisma.ConfigUpdateInput;
 
 /**
  * Config repository interface

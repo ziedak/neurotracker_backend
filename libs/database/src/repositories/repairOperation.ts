@@ -9,24 +9,11 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { RepairOperation } from "../models";
-import type { Prisma } from "@prisma/client";
-
-/**
- * RepairOperation creation input type
- */
-export type RepairOperationCreateInput = Omit<
-  Prisma.RepairOperationCreateInput,
-  "id" | "executedAt"
-> & {
-  id?: string;
-  executedAt?: Date;
-};
-
-/**
- * RepairOperation update input type
- */
-export type RepairOperationUpdateInput = Prisma.RepairOperationUpdateInput;
+import type {
+  RepairOperation,
+  RepairOperationCreateInput,
+  RepairOperationUpdateInput,
+} from "../models";
 
 /**
  * RepairOperation repository interface

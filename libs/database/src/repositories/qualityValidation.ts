@@ -9,24 +9,12 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { QualityValidation } from "../models";
+import type {
+  QualityValidation,
+  QualityValidationCreateInput,
+  QualityValidationUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * QualityValidation creation input type
- */
-export type QualityValidationCreateInput = Omit<
-  Prisma.QualityValidationCreateInput,
-  "id" | "executedAt"
-> & {
-  id?: string;
-  executedAt?: Date;
-};
-
-/**
- * QualityValidation update input type
- */
-export type QualityValidationUpdateInput = Prisma.QualityValidationUpdateInput;
 
 /**
  * QualityValidation repository interface

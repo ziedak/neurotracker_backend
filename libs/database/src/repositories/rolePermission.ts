@@ -9,23 +9,12 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { RolePermission } from "../models";
+import type {
+  RolePermission,
+  RolePermissionCreateInput,
+  RolePermissionUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * RolePermission creation input type
- */
-export type RolePermissionCreateInput = Omit<
-  Prisma.RolePermissionCreateInput,
-  "id" | "createdAt" | "updatedAt"
-> & {
-  id?: string;
-};
-
-/**
- * RolePermission update input type
- */
-export type RolePermissionUpdateInput = Prisma.RolePermissionUpdateInput;
 
 /**
  * RolePermission repository interface
@@ -145,10 +134,9 @@ export class RolePermissionRepository
   async count(options?: QueryOptions): Promise<number> {
     return this.executeOperation("count", async () => {
       // Count operations don't support include, so we omit it
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { include, ...countOptions } = options ?? {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (this.db.rolePermission.count as any)(countOptions);
+      return this.db.rolePermission.count({
+        ...(options?.where && { where: options.where }),
+      });
     });
   }
 

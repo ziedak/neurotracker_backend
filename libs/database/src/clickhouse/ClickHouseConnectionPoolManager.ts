@@ -434,7 +434,7 @@ export class ClickHouseConnectionPoolManager {
     this.startHealthChecks();
 
     // Record initial metrics
-    this.recordPoolMetrics();
+    await this.recordPoolMetrics();
   }
 
   /**
@@ -576,7 +576,7 @@ export class ClickHouseConnectionPoolManager {
       // Close the connection if shutting down
       await connection.disconnect();
       this.activeConnections--;
-      this.recordPoolMetrics();
+      await this.recordPoolMetrics();
       return;
     }
 
@@ -601,7 +601,7 @@ export class ClickHouseConnectionPoolManager {
     // Close excess connection
     await connection.disconnect();
     this.activeConnections--;
-    this.recordPoolMetrics();
+    await this.recordPoolMetrics();
   }
 
   /**
@@ -712,7 +712,7 @@ export class ClickHouseConnectionPoolManager {
       }
     }
 
-    this.recordPoolMetrics();
+    await this.recordPoolMetrics();
   }
 
   /**

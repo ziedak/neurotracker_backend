@@ -9,17 +9,12 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { OrderItem } from "../models";
+import type {
+  OrderItem,
+  OrderItemCreateInput,
+  OrderItemUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-export type OrderItemCreateInput = Omit<
-  Prisma.OrderItemCreateInput,
-  "id" | "createdAt" | "updatedAt"
-> & {
-  id?: string;
-};
-
-export type OrderItemUpdateInput = Prisma.OrderItemUpdateInput;
 
 export interface IOrderItemRepository
   extends BaseRepository<

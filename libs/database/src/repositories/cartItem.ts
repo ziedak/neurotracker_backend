@@ -9,33 +9,18 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { CartItem } from "../models";
+import type {
+  CartItem,
+  CartItemCreateInput,
+  CartItemUpdateInput,
+} from "../models";
 import { Prisma } from "@prisma/client";
-
-/**
- * CartItem creation input type
- */
-export type CartItemCreateInput = Omit<
-  Prisma.CartItemCreateInput,
-  "id" | "createdAt" | "updatedAt"
-> & {
-  id?: string;
-};
-
-/**
- * CartItem update input type
- */
-export type CartItemUpdateInput = Prisma.CartItemUpdateInput;
 
 /**
  * CartItem repository interface
  */
 export interface ICartItemRepository
-  extends BaseRepository<
-    CartItem,
-    CartItemCreateInput,
-    CartItemUpdateInput
-  > {
+  extends BaseRepository<CartItem, CartItemCreateInput, CartItemUpdateInput> {
   /**
    * Find items by cart ID
    */
@@ -92,11 +77,7 @@ export interface ICartItemRepository
  * CartItem repository implementation
  */
 export class CartItemRepository
-  extends BaseRepository<
-    CartItem,
-    CartItemCreateInput,
-    CartItemUpdateInput
-  >
+  extends BaseRepository<CartItem, CartItemCreateInput, CartItemUpdateInput>
   implements ICartItemRepository
 {
   constructor(
@@ -154,10 +135,9 @@ export class CartItemRepository
   async count(options?: QueryOptions): Promise<number> {
     return this.executeOperation("count", async () => {
       // Count operations don't support include, so we omit it
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { include, ...countOptions } = options ?? {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (this.db.cartItem.count as any)(countOptions);
+      return this.db.cartItem.count({
+        ...(options?.where && { where: options.where }),
+      });
     });
   }
 

@@ -9,33 +9,18 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { Feature } from "../models";
+import type {
+  Feature,
+  FeatureCreateInput,
+  FeatureUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * Feature creation input type
- */
-export type FeatureCreateInput = Omit<
-  Prisma.FeatureCreateInput,
-  "id" | "createdAt" | "updatedAt"
-> & {
-  id?: string;
-};
-
-/**
- * Feature update input type
- */
-export type FeatureUpdateInput = Prisma.FeatureUpdateInput;
 
 /**
  * Feature repository interface
  */
 export interface IFeatureRepository
-  extends BaseRepository<
-    Feature,
-    FeatureCreateInput,
-    FeatureUpdateInput
-  > {
+  extends BaseRepository<Feature, FeatureCreateInput, FeatureUpdateInput> {
   /**
    * Find features by cart ID
    */
@@ -99,11 +84,7 @@ export interface IFeatureRepository
  * Feature repository implementation
  */
 export class FeatureRepository
-  extends BaseRepository<
-    Feature,
-    FeatureCreateInput,
-    FeatureUpdateInput
-  >
+  extends BaseRepository<Feature, FeatureCreateInput, FeatureUpdateInput>
   implements IFeatureRepository
 {
   constructor(
@@ -161,10 +142,9 @@ export class FeatureRepository
   async count(options?: QueryOptions): Promise<number> {
     return this.executeOperation("count", async () => {
       // Count operations don't support include, so we omit it
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { include, ...countOptions } = options ?? {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (this.db.feature.count as any)(countOptions);
+      return this.db.feature.count({
+        ...(options?.where && { where: options.where }),
+      });
     });
   }
 

@@ -9,24 +9,12 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { SessionLog } from "../models";
+import type {
+  SessionLog,
+  SessionLogCreateInput,
+  SessionLogUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * SessionLog creation input type
- */
-export type SessionLogCreateInput = Omit<
-  Prisma.SessionLogCreateInput,
-  "id" | "timestamp"
-> & {
-  id?: string;
-  timestamp?: Date;
-};
-
-/**
- * SessionLog update input type
- */
-export type SessionLogUpdateInput = Prisma.SessionLogUpdateInput;
 
 /**
  * SessionLog repository interface
@@ -150,10 +138,9 @@ export class SessionLogRepository
   async count(options?: QueryOptions): Promise<number> {
     return this.executeOperation("count", async () => {
       // Count operations don't support include, so we omit it
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { include, ...countOptions } = options ?? {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (this.db.sessionLog.count as any)(countOptions);
+       return this.db.sessionLog.count({
+        ...(options?.where && { where: options.where }),
+      });
     });
   }
 

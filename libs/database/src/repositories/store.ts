@@ -9,23 +9,13 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { Store, StoreStatus } from "../models";
+import type {
+  Store,
+  StoreStatus,
+  StoreCreateInput,
+  StoreUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * Store creation input type
- */
-export type StoreCreateInput = Omit<
-  Prisma.StoreCreateInput,
-  "id" | "createdAt" | "updatedAt" | "isDeleted"
-> & {
-  id?: string;
-};
-
-/**
- * Store update input type
- */
-export type StoreUpdateInput = Prisma.StoreUpdateInput;
 
 /**
  * Store repository interface

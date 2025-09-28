@@ -9,23 +9,13 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { RecoveryEvent, RecoveryStatus } from "../models";
+import type {
+  RecoveryEvent,
+  RecoveryStatus,
+  RecoveryEventCreateInput,
+  RecoveryEventUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * RecoveryEvent creation input type
- */
-export type RecoveryEventCreateInput = Omit<
-  Prisma.RecoveryEventCreateInput,
-  "id" | "createdAt" | "updatedAt"
-> & {
-  id?: string;
-};
-
-/**
- * RecoveryEvent update input type
- */
-export type RecoveryEventUpdateInput = Prisma.RecoveryEventUpdateInput;
 
 /**
  * RecoveryEvent repository interface
@@ -151,8 +141,9 @@ export class RecoveryEventRepository
    */
   async count(options?: QueryOptions): Promise<number> {
     return this.executeOperation("count", async () => {
-      const { include, ...countOptions } = options ?? {};
-      return this.db.recoveryEvent.count(countOptions);
+      return this.db.recoveryEvent.count({
+        ...(options?.where && { where: options.where }),
+      });
     });
   }
 

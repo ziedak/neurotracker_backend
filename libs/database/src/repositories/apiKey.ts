@@ -9,17 +9,8 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { ApiKey } from "../models";
+import type { ApiKey, ApiKeyCreateInput, ApiKeyUpdateInput } from "../models";
 import type { Prisma } from "@prisma/client";
-
-export type ApiKeyCreateInput = Omit<
-  Prisma.ApiKeyCreateInput,
-  "id" | "createdAt" | "updatedAt" | "lastUsedAt"
-> & {
-  id?: string;
-};
-
-export type ApiKeyUpdateInput = Prisma.ApiKeyUpdateInput;
 
 export interface IApiKeyRepository
   extends BaseRepository<ApiKey, ApiKeyCreateInput, ApiKeyUpdateInput> {

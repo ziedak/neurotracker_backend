@@ -9,25 +9,13 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { ReconciliationExecution, DecimalType } from "../models";
+import type {
+  ReconciliationExecution,
+  DecimalType,
+  ReconciliationExecutionCreateInput,
+  ReconciliationExecutionUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * ReconciliationExecution creation input type
- */
-export type ReconciliationExecutionCreateInput = Omit<
-  Prisma.ReconciliationExecutionCreateInput,
-  "id" | "executedAt"
-> & {
-  id?: string;
-  executedAt?: Date;
-};
-
-/**
- * ReconciliationExecution update input type
- */
-export type ReconciliationExecutionUpdateInput =
-  Prisma.ReconciliationExecutionUpdateInput;
 
 /**
  * ReconciliationExecution repository interface
@@ -191,7 +179,7 @@ export class ReconciliationExecutionRepository
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { include, ...countOptions } = options ?? {};
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (this.db.reconciliationExecution.count as any)(countOptions);
+      return this.db.reconciliationExecution.count(countOptions);
     });
   }
 
@@ -479,9 +467,9 @@ export class ReconciliationExecutionRepository
         { totalTime: number; successes: number; total: number }
       >();
       aggregates.forEach((execution) => {
-        const date = execution.executedAt.toISOString().split("T")[0];
+        const [date] = execution.executedAt.toISOString().split("T");
         if (date) {
-          const existing = performanceByDate.get(date) || {
+          const existing = performanceByDate.get(date) ?? {
             totalTime: 0,
             successes: 0,
             total: 0,

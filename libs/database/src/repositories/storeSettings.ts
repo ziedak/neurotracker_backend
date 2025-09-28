@@ -9,23 +9,12 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { StoreSettings } from "../models";
+import type {
+  StoreSettings,
+  StoreSettingsCreateInput,
+  StoreSettingsUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * StoreSettings creation input type
- */
-export type StoreSettingsCreateInput = Omit<
-  Prisma.StoreSettingsCreateInput,
-  "id" | "createdAt" | "updatedAt"
-> & {
-  id?: string;
-};
-
-/**
- * StoreSettings update input type
- */
-export type StoreSettingsUpdateInput = Prisma.StoreSettingsUpdateInput;
 
 /**
  * StoreSettings repository interface
@@ -108,10 +97,9 @@ export class StoreSettingsRepository
   async count(options?: QueryOptions): Promise<number> {
     return this.executeOperation("count", async () => {
       // Count operations don't support include, so we omit it
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { include, ...countOptions } = options ?? {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (this.db.storeSettings.count as any)(countOptions);
+       return this.db.storeSettings.count({
+        ...(options?.where && { where: options.where }),
+      });
     });
   }
 

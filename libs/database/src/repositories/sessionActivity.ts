@@ -9,23 +9,12 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { SessionActivity } from "../models";
+import type {
+  SessionActivity,
+  SessionActivityCreateInput,
+  SessionActivityUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * SessionActivity creation input type
- */
-export type SessionActivityCreateInput = Omit<
-  Prisma.SessionActivityCreateInput,
-  "id" | "timestamp"
-> & {
-  id?: string;
-};
-
-/**
- * SessionActivity update input type
- */
-export type SessionActivityUpdateInput = Prisma.SessionActivityUpdateInput;
 
 /**
  * SessionActivity repository interface
@@ -149,8 +138,9 @@ export class SessionActivityRepository
    */
   async count(options?: QueryOptions): Promise<number> {
     return this.executeOperation("count", async () => {
-      const { include, ...countOptions } = options ?? {};
-      return this.db.sessionActivity.count(countOptions);
+      return this.db.sessionActivity.count({
+        ...(options?.where && { where: options.where }),
+      });
     });
   }
 

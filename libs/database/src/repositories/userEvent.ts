@@ -9,24 +9,12 @@ import type { DatabaseClient } from "../types/DatabaseClient";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ICache } from "../cache";
 import { BaseRepository, type QueryOptions } from "./base";
-import type { UserEvent } from "../models";
+import type {
+  UserEvent,
+  UserEventCreateInput,
+  UserEventUpdateInput,
+} from "../models";
 import type { Prisma } from "@prisma/client";
-
-/**
- * UserEvent creation input type
- */
-export type UserEventCreateInput = Omit<
-  Prisma.UserEventCreateInput,
-  "id" | "timestamp"
-> & {
-  id?: string;
-  timestamp?: Date;
-};
-
-/**
- * UserEvent update input type
- */
-export type UserEventUpdateInput = Prisma.UserEventUpdateInput;
 
 /**
  * UserEvent repository interface
@@ -105,11 +93,7 @@ export interface IUserEventRepository
  * UserEvent repository implementation
  */
 export class UserEventRepository
-  extends BaseRepository<
-    UserEvent,
-    UserEventCreateInput,
-    UserEventUpdateInput
-  >
+  extends BaseRepository<UserEvent, UserEventCreateInput, UserEventUpdateInput>
   implements IUserEventRepository
 {
   constructor(
@@ -170,10 +154,9 @@ export class UserEventRepository
   async count(options?: QueryOptions): Promise<number> {
     return this.executeOperation("count", async () => {
       // Count operations don't support include, so we omit it
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { include, ...countOptions } = options ?? {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (this.db.userEvent.count as any)(countOptions);
+     return this.db.userEvent.count({
+        ...(options?.where && { where: options.where }),
+      });
     });
   }
 
