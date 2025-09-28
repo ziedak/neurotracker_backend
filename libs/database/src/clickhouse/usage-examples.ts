@@ -158,7 +158,7 @@ async function arrayOperationsExample(client: ClickHouseClient): Promise<void> {
 async function advancedAggregationsExample(
   client: ClickHouseClient
 ): Promise<void> {
-  const aggregations = client.aggregations;
+  const {aggregations} = client;
 
   // Find best-selling products by revenue
   const topProducts = await aggregations.argMax(
@@ -226,7 +226,7 @@ async function advancedAggregationsExample(
 async function timeSeriesAnalysisExample(
   client: ClickHouseClient
 ): Promise<void> {
-  const timeSeries = client.timeSeries;
+  const {timeSeries} = client;
 
   // Hourly event counts using tumbling windows
   const hourlyStats = await timeSeries.tumblingWindow(
@@ -297,7 +297,7 @@ async function timeSeriesAnalysisExample(
 async function samplingOperationsExample(
   client: ClickHouseClient
 ): Promise<void> {
-  const sampling = client.sampling;
+  const {sampling} = client;
 
   // Random sample of user behavior data
   const userSample = await sampling.sample(

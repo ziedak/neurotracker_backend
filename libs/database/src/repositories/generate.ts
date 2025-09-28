@@ -33,7 +33,7 @@ export class RepositoryGenerator {
   /**
    * Generate all repositories
    */
-  async generateAll(): Promise<void> {
+  generateAll(): Promise<void> {
     throw new Error(
       "Repository generation is currently disabled - models export needs to be fixed"
     );
@@ -59,7 +59,7 @@ export class RepositoryGenerator {
   /**
    * Generate repository for a specific model
    */
-  private async generateRepository(modelName: string): Promise<void> {
+  private generateRepository(modelName: string): void {
     const metadata = this.getModelMetadata(modelName);
     const template = this.getRepositoryTemplate(metadata);
 
@@ -102,7 +102,12 @@ export class RepositoryGenerator {
    * Check if model has a specific field
    */
   private hasField(model: unknown, fieldName: string): boolean {
-    return model && typeof model === "object" && fieldName in model;
+    return (
+      model !== undefined &&
+      model !== null &&
+      typeof model === "object" &&
+      fieldName in model
+    );
   }
 
   /**

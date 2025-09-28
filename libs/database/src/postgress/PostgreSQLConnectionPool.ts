@@ -91,24 +91,24 @@ export class PostgreSQLConnectionPool
   }
 
   private setupEventHandlers(): void {
-    this.pool.on("connect", (_client: PoolClient) => {
+    this.pool.on("connect", async (_client: PoolClient) => {
       this.logger.debug("New client connected to pool");
-      this.metrics?.recordCounter("postgresql.pool.connect");
+      await this.metrics?.recordCounter("postgresql.pool.connect");
     });
 
-    this.pool.on("acquire", (_client: PoolClient) => {
+    this.pool.on("acquire", async (_client: PoolClient) => {
       this.logger.debug("Client acquired from pool");
-      this.metrics?.recordCounter("postgresql.pool.acquire");
+      await this.metrics?.recordCounter("postgresql.pool.acquire");
     });
 
-    this.pool.on("remove", (_client: PoolClient) => {
+    this.pool.on("remove", async (_client: PoolClient) => {
       this.logger.debug("Client removed from pool");
-      this.metrics?.recordCounter("postgresql.pool.remove");
+      await this.metrics?.recordCounter("postgresql.pool.remove");
     });
 
-    this.pool.on("error", (err: Error, _client: PoolClient) => {
+    this.pool.on("error", async (err: Error, _client: PoolClient) => {
       this.logger.error("Unexpected error on idle client", err);
-      this.metrics?.recordCounter("postgresql.pool.error");
+      await this.metrics?.recordCounter("postgresql.pool.error");
     });
   }
 
@@ -142,11 +142,14 @@ export class PostgreSQLConnectionPool
     try {
       const client = await this.pool.connect();
       const duration = performance.now() - startTime;
-      this.metrics?.recordTimer("postgresql.client.acquire_duration", duration);
+      await this.metrics?.recordTimer(
+        "postgresql.client.acquire_duration",
+        duration
+      );
       return client;
     } catch (error) {
       const duration = performance.now() - startTime;
-      this.metrics?.recordTimer(
+      await this.metrics?.recordTimer(
         "postgresql.client.acquire_error_duration",
         duration
       );
@@ -167,8 +170,8 @@ export class PostgreSQLConnectionPool
         const result = await client.query(text, params);
         const duration = performance.now() - startTime;
 
-        this.metrics?.recordTimer("postgresql.query.duration", duration);
-        this.metrics?.recordCounter("postgresql.query.success");
+        await this.metrics?.recordTimer("postgresql.query.duration", duration);
+        await this.metrics?.recordCounter("postgresql.query.success");
 
         return {
           rows: result.rows as T[],
@@ -176,8 +179,11 @@ export class PostgreSQLConnectionPool
         };
       } catch (error) {
         const duration = performance.now() - startTime;
-        this.metrics?.recordTimer("postgresql.query.error_duration", duration);
-        this.metrics?.recordCounter("postgresql.query.error");
+        await this.metrics?.recordTimer(
+          "postgresql.query.error_duration",
+          duration
+        );
+        await this.metrics?.recordCounter("postgresql.query.error");
         throw error;
       } finally {
         if (client) {
@@ -206,18 +212,21 @@ export class PostgreSQLConnectionPool
         await client.query("COMMIT");
 
         const duration = performance.now() - startTime;
-        this.metrics?.recordTimer("postgresql.transaction.duration", duration);
-        this.metrics?.recordCounter("postgresql.transaction.success");
+        await this.metrics?.recordTimer(
+          "postgresql.transaction.duration",
+          duration
+        );
+        await this.metrics?.recordCounter("postgresql.transaction.success");
 
         return result;
       } catch (error) {
         await client.query("ROLLBACK");
         const duration = performance.now() - startTime;
-        this.metrics?.recordTimer(
+        await this.metrics?.recordTimer(
           "postgresql.transaction.error_duration",
           duration
         );
-        this.metrics?.recordCounter("postgresql.transaction.error");
+        await this.metrics?.recordCounter("postgresql.transaction.error");
         throw error;
       } finally {
         client.release();

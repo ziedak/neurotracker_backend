@@ -4,7 +4,7 @@ import {
   AuthenticationService,
   LoginCredentials,
   RegisterData,
-} from "@libs/auth";
+} from "@libs/keycloak-authv2";
 
 const LoginSchema = t.Object({
   email: t.String({ format: "email" }),

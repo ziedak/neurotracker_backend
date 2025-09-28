@@ -71,40 +71,40 @@ export class RedisClient {
       return; // Prevent duplicate event handler attachment
     }
 
-    this.redis.on("connect", () => {
+    this.redis.on("connect", async () => {
       this.logger.info("Redis connected");
       this.isConnected = true;
       this.retryCount = 0;
-      this.metrics?.recordCounter?.("redis_connection_success");
+      await this.metrics?.recordCounter?.("redis_connection_success");
     });
 
-    this.redis.on("ready", () => {
+    this.redis.on("ready", async () => {
       this.logger.info("Redis ready to accept commands");
-      this.metrics?.recordCounter?.("redis_ready");
+      await this.metrics?.recordCounter?.("redis_ready");
     });
 
-    this.redis.on("error", (error) => {
+    this.redis.on("error", async (error) => {
       this.logger.error("Redis error", error);
       this.isConnected = false;
-      this.metrics?.recordCounter?.("redis_connection_error");
+      await this.metrics?.recordCounter?.("redis_connection_error");
     });
 
-    this.redis.on("close", () => {
+    this.redis.on("close", async () => {
       this.logger.info("Redis connection closed");
       this.isConnected = false;
-      this.metrics?.recordCounter?.("redis_connection_closed");
+      await this.metrics?.recordCounter?.("redis_connection_closed");
       this.scheduleReconnect();
     });
 
-    this.redis.on("reconnecting", () => {
+    this.redis.on("reconnecting", async () => {
       this.logger.info("Redis reconnecting...");
-      this.metrics?.recordCounter?.("redis_reconnecting");
+      await this.metrics?.recordCounter?.("redis_reconnecting");
     });
 
-    this.redis.on("end", () => {
+    this.redis.on("end", async () => {
       this.logger.warn("Redis connection ended");
       this.isConnected = false;
-      this.metrics?.recordCounter?.("redis_connection_ended");
+      await this.metrics?.recordCounter?.("redis_connection_ended");
     });
 
     this.eventHandlersAttached = true;

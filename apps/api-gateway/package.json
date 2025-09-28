@@ -18,6 +18,7 @@
   "license": "ISC",
   "packageManager": "pnpm@10.14.0",
   "dependencies": {
+    "@libs/keycloak-authv2": "workspace:*",
     "@libs/elysia-server": "workspace:*",
     "@libs/monitoring": "workspace:*",
     "@libs/utils": "workspace:*"
