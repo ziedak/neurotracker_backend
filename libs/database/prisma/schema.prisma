@@ -57,6 +57,8 @@ model Store {
   apiKeys        ApiKey[] // API keys associated with this store
 
   @@index([ownerId])
+  @@index([status])
+  @@index([createdAt])
   @@map("stores")
 }
 
@@ -114,6 +116,7 @@ model RecoveryEvent {
 
   @@index([eventType])
   @@index([status])
+  @@index([createdAt])
   @@map("recovery_events")
 }
 
@@ -140,6 +143,7 @@ model Report {
 
   @@index([type])
   @@index([status])
+  @@index([createdAt])
   @@map("reports")
 }
 
@@ -154,15 +158,18 @@ model SessionActivity {
   id        String   @id @default(cuid())
   sessionId String
   storeId   String
+  userId    String
   activity  String   @db.VarChar(128)
   timestamp DateTime @default(now())
   metadata  Json?
 
   session UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   store   Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  User    User[]
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([activity])
+  @@index([userId])
+  @@index([timestamp])
   @@map("session_activities")
 }
 
@@ -180,6 +187,8 @@ model Webhook {
   store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
   @@index([eventType])
+  @@index([isActive])
+  @@index([lastTriggered])
   @@map("webhooks")
 }
 
@@ -307,6 +316,7 @@ enum UserStatus {
 model UserSession {
   id                String    @id @default(cuid())
   userId            String
+  storeId           String
   sessionId         String    @unique @db.VarChar(128)
   keycloakSessionId String?   @db.VarChar(255) // Keycloak session ID
   accessToken       String?   @db.Text // Encrypted access token
@@ -326,16 +336,19 @@ model UserSession {
   endedAt           DateTime?
 
   // Relations
-  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  events          UserEvent[]
-  logs            SessionLog[]
-  Store           Store[]
-  RecoveryEvent   RecoveryEvent[]
-  SessionActivity SessionActivity[]
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events         UserEvent[]
+  logs           SessionLog[]
+  store          Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  recoveryEvents RecoveryEvent[]
+  activities     SessionActivity[]
 
   @@index([sessionId])
   @@index([userId])
   @@index([keycloakSessionId])
+  @@index([expiresAt])
+  @@index([lastAccessedAt])
+  @@index([isActive, expiresAt])
   @@map("user_sessions")
 }
 
@@ -370,6 +383,9 @@ model UserEvent {
   session UserSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
 
   @@index([eventType])
+  @@index([userId, timestamp])
+  @@index([sessionId, timestamp])
+  @@index([timestamp])
   @@map("user_events")
 }
 
@@ -394,7 +410,7 @@ model Product {
   // Relations
   cartItems  CartItem[]
   orderItems OrderItem[]
-  Store      Store[]
+  stores     Store[]
 
   @@index([sku])
   @@map("products")
@@ -426,11 +442,12 @@ model Cart {
   items         CartItem[]
   features      Feature[]
   orders        Order[]
-  Store         Store[]
+  stores        Store[]
   RecoveryEvent RecoveryEvent[]
 
   @@index([status])
   @@index([userId])
+  @@index([createdAt])
   @@map("carts")
 }
 
@@ -455,6 +472,8 @@ model Order {
   payments Payment[]
 
   @@index([status])
+  @@index([userId])
+  @@index([createdAt])
   @@map("orders")
 }
 
@@ -500,6 +519,7 @@ model Payment {
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([status])
+  @@index([createdAt])
   @@map("payments")
 }
 
@@ -561,6 +581,8 @@ model Notification {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([type])
+  @@index([read])
+  @@index([createdAt])
   @@map("notifications")
 }
 
@@ -582,23 +604,77 @@ enum CartStatus {
   EXPIRED
 }
 
+enum ValidationStatus {
+  PASSED
+  FAILED
+  WARNING
+  ERROR
+}
+
+enum ValidationSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum QualityCheckType {
+  NULL_CHECK
+  DUPLICATE_CHECK
+  RANGE_CHECK
+  FORMAT_CHECK
+  REFERENCE_CHECK
+  CONSISTENCY_CHECK
+}
+
 model QualityValidation {
-  id        String   @id @default(uuid())
-  table     String
-  check     String
-  status    String // e.g., "passed", "failed"
-  timestamp DateTime @default(now())
+  id            String             @id @default(cuid())
+  tableName     String             @db.VarChar(128)
+  checkType     QualityCheckType
+  checkName     String             @db.VarChar(255)
+  status        ValidationStatus   @default(PASSED)
+  severity      ValidationSeverity @default(MEDIUM)
+  details       Json?
+  affectedRows  Int                @default(0)
+  executedAt    DateTime           @default(now())
+  executionTime Decimal? // In milliseconds
+
+  @@index([tableName])
+  @@index([status])
+  @@index([executedAt])
+}
+
+enum AnomalyType {
+  OUTLIER
+  MISSING_DATA
+  DUPLICATE
+  INCONSISTENT
+  INVALID_FORMAT
+  REFERENCE_ERROR
 }
 
 model QualityAnomaly {
-  id        String   @id @default(uuid())
-  type      String // e.g., "outlier", "missing", "duplicate"
-  details   Json?
-  timestamp DateTime @default(now())
+  id           String             @id @default(cuid())
+  type         AnomalyType
+  tableName    String             @db.VarChar(128)
+  columnName   String?            @db.VarChar(128)
+  recordId     String? // ID of the problematic record
+  severity     ValidationSeverity @default(MEDIUM)
+  details      Json? // Structured details about the anomaly
+  sampleData   Json? // Sample of problematic data
+  affectedRows Int                @default(1)
+  resolved     Boolean            @default(false)
+  resolvedAt   DateTime?
+  timestamp    DateTime           @default(now())
+
+  @@index([type])
+  @@index([tableName])
+  @@index([resolved])
+  @@index([timestamp])
 }
 
 model ReconciliationRule {
-  id            String                    @id @default(uuid())
+  id            String                    @id @default(cuid())
   name          String
   sourceTable   String
   targetTable   String
@@ -612,19 +688,23 @@ model ReconciliationRule {
 }
 
 model ReconciliationExecution {
-  id             String             @id @default(uuid())
+  id             String             @id @default(cuid())
   ruleId         String
   status         String
   recordsChecked Int
   discrepancies  Int
   executedAt     DateTime           @default(now())
-  executionTime  Float
-  details        String?
+  executionTime  Decimal // In milliseconds with decimal precision
+  details        Json? // Structured execution details
+  errorMessage   String?
   rule           ReconciliationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([executedAt])
 }
 
 model RepairOperation {
-  id          String   @id @default(uuid())
+  id          String   @id @default(cuid())
   operationId String
   type        String
   status      String
@@ -668,5 +748,6 @@ model ApiKey {
   @@index([userId])
   @@index([storeId])
   @@index([isActive])
+  @@index([expiresAt])
   @@map("api_keys")
 }

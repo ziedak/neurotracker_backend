@@ -5,18 +5,6 @@ import { IMetricsCollector } from "@libs/monitoring";
 import { createHash } from "crypto";
 import { ICache } from "../cache";
 
-/**
- * Configuration interface for ClickHouse client.
- * Ensures type safet    try {
-      // Try to get from cache first
-      // TODO: Re-implement caching with proper DI
-      // const cacheResult = await this.cacheService.get<T>(cacheKey);
-      // if (cacheResult.data !== null) {
-      //   await this.metricsCollector?.recordCounter("clickhouse.cache.hit", 1);
-      //   this.logger.debug("Cache hit for ClickHouse query", { cacheKey });
-      //   return cacheResult.data;
-      // }idation for connection settings.
- */
 export interface IClickHouseConfig {
   url: string;
   username: string;
@@ -59,6 +47,26 @@ export interface IClickHouseClient {
     options?: IBatchInsertOptions,
     format?: string
   ): Promise<IBatchInsertResult>;
+
+  /**
+   * ClickHouse-specific array operations for analytical workloads.
+   */
+  arrayOperations: IClickHouseArrayOperations;
+
+  /**
+   * ClickHouse-specific aggregation functions for advanced analytics.
+   */
+  aggregations: IClickHouseAggregations;
+
+  /**
+   * Time-series specific operations optimized for ClickHouse.
+   */
+  timeSeries: IClickHouseTimeSeries;
+
+  /**
+   * Sampling operations for large dataset analysis.
+   */
+  sampling: IClickHouseSampling;
 }
 
 /**
@@ -151,6 +159,13 @@ export class ClickHouseClient implements IClickHouseClient {
    */
   private readonly cacheService?: ICache;
   private readonly logger = createLogger("ClickHouseClient");
+
+  // ClickHouse-specific operation implementations
+  public readonly arrayOperations: IClickHouseArrayOperations;
+  public readonly aggregations: IClickHouseAggregations;
+  public readonly timeSeries: IClickHouseTimeSeries;
+  public readonly sampling: IClickHouseSampling;
+
   constructor(
     cacheService?: ICache,
     private readonly metricsCollector?: IMetricsCollector
@@ -164,6 +179,12 @@ export class ClickHouseClient implements IClickHouseClient {
     if (cacheService) {
       this.cacheService = cacheService;
     }
+
+    // Initialize ClickHouse-specific operations
+    this.arrayOperations = new ClickHouseArrayOperations(this);
+    this.aggregations = new ClickHouseAggregations(this);
+    this.timeSeries = new ClickHouseTimeSeries(this);
+    this.sampling = new ClickHouseSampling(this);
 
     this.logger.info("ClickHouse client initialized", {
       url: this.config.url,
@@ -754,6 +775,305 @@ export interface IBatchInsertResult {
 }
 
 /**
+ * ClickHouse-specific array operations interface.
+ */
+export interface IClickHouseArrayOperations {
+  /**
+   * Unnest array columns into separate rows.
+   */
+  arrayJoin<T = unknown>(
+    table: string,
+    arrayColumn: string,
+    options?: {
+      select?: string[];
+      where?: Record<string, unknown>;
+      limit?: number;
+    }
+  ): Promise<T[]>;
+
+  /**
+   * Filter array elements based on conditions.
+   */
+  arrayFilter<T = unknown>(
+    table: string,
+    arrayColumn: string,
+    filterCondition: string,
+    options?: {
+      select?: string[];
+      where?: Record<string, unknown>;
+    }
+  ): Promise<T[]>;
+
+  /**
+   * Apply function to each array element.
+   */
+  arrayMap<T = unknown>(
+    table: string,
+    arrayColumn: string,
+    mapFunction: string,
+    options?: {
+      select?: string[];
+      where?: Record<string, unknown>;
+    }
+  ): Promise<T[]>;
+
+  /**
+   * Count elements in arrays.
+   */
+  arrayCount(
+    table: string,
+    arrayColumn: string,
+    options?: {
+      where?: Record<string, unknown>;
+      groupBy?: string[];
+    }
+  ): Promise<Array<{ count: number; [key: string]: unknown }>>;
+
+  /**
+   * Check if array contains specific value.
+   */
+  arrayHas(
+    table: string,
+    arrayColumn: string,
+    searchValue: unknown,
+    options?: {
+      select?: string[];
+      where?: Record<string, unknown>;
+    }
+  ): Promise<Array<{ has_value: boolean; [key: string]: unknown }>>;
+}
+
+/**
+ * ClickHouse-specific aggregation functions interface.
+ */
+export interface IClickHouseAggregations {
+  /**
+   * Get the argument (row) that corresponds to the maximum value.
+   */
+  argMax<T = unknown>(
+    table: string,
+    argColumn: string,
+    valueColumn: string,
+    options?: {
+      where?: Record<string, unknown>;
+      groupBy?: string[];
+    }
+  ): Promise<T[]>;
+
+  /**
+   * Get the argument (row) that corresponds to the minimum value.
+   */
+  argMin<T = unknown>(
+    table: string,
+    argColumn: string,
+    valueColumn: string,
+    options?: {
+      where?: Record<string, unknown>;
+      groupBy?: string[];
+    }
+  ): Promise<T[]>;
+
+  /**
+   * Get top K values with their frequencies.
+   */
+  topK(
+    table: string,
+    column: string,
+    k: number,
+    options?: {
+      where?: Record<string, unknown>;
+      weightColumn?: string;
+    }
+  ): Promise<Array<{ value: unknown; count: number }>>;
+
+  /**
+   * Get top K weighted values.
+   */
+  topKWeighted(
+    table: string,
+    column: string,
+    weightColumn: string,
+    k: number,
+    options?: {
+      where?: Record<string, unknown>;
+    }
+  ): Promise<Array<{ value: unknown; weight: number }>>;
+
+  /**
+   * Calculate quantiles for numerical data.
+   */
+  quantiles(
+    table: string,
+    column: string,
+    quantiles: number[],
+    options?: {
+      where?: Record<string, unknown>;
+      groupBy?: string[];
+    }
+  ): Promise<Array<{ [key: string]: number }>>;
+
+  /**
+   * Calculate statistical aggregations.
+   */
+  stats(
+    table: string,
+    column: string,
+    options?: {
+      where?: Record<string, unknown>;
+      groupBy?: string[];
+    }
+  ): Promise<
+    Array<{
+      count: number;
+      sum: number;
+      avg: number;
+      min: number;
+      max: number;
+      variance: number;
+      stddev: number;
+    }>
+  >;
+}
+
+/**
+ * ClickHouse time-series operations interface.
+ */
+export interface IClickHouseTimeSeries {
+  /**
+   * Group data by time intervals (tumbling windows).
+   */
+  tumblingWindow<T = unknown>(
+    table: string,
+    timeColumn: string,
+    windowSize: string, // e.g., '1 hour', '30 minute'
+    options?: {
+      select?: string[];
+      where?: Record<string, unknown>;
+      groupBy?: string[];
+      orderBy?: string;
+    }
+  ): Promise<T[]>;
+
+  /**
+   * Calculate moving averages over time windows.
+   */
+  movingAverage(
+    table: string,
+    valueColumn: string,
+    timeColumn: string,
+    windowSize: number,
+    options?: {
+      where?: Record<string, unknown>;
+      partitionBy?: string[];
+    }
+  ): Promise<Array<{ timestamp: string; value: number; moving_avg: number }>>;
+
+  /**
+   * Detect anomalies in time-series data.
+   */
+  detectAnomalies(
+    table: string,
+    valueColumn: string,
+    timeColumn: string,
+    options?: {
+      algorithm?: "zscore" | "iqr" | "mad";
+      threshold?: number;
+      windowSize?: number;
+      where?: Record<string, unknown>;
+    }
+  ): Promise<
+    Array<{
+      timestamp: string;
+      value: number;
+      is_anomaly: boolean;
+      score: number;
+    }>
+  >;
+
+  /**
+   * Fill missing time series data points.
+   */
+  fillGaps<T = unknown>(
+    table: string,
+    timeColumn: string,
+    interval: string,
+    fillValue?: unknown,
+    options?: {
+      select?: string[];
+      where?: Record<string, unknown>;
+      startTime?: string;
+      endTime?: string;
+    }
+  ): Promise<T[]>;
+}
+
+/**
+ * ClickHouse sampling operations interface.
+ */
+export interface IClickHouseSampling {
+  /**
+   * Sample data using ClickHouse's SAMPLE clause.
+   */
+  sample<T = unknown>(
+    table: string,
+    sampleSize: number | string, // number (0-1) or string like '10000'
+    options?: {
+      select?: string[];
+      where?: Record<string, unknown>;
+      orderBy?: string;
+    }
+  ): Promise<T[]>;
+
+  /**
+   * Sample data with consistent hashing for reproducible results.
+   */
+  sampleConsistent<T = unknown>(
+    table: string,
+    sampleSize: number,
+    hashColumn: string,
+    options?: {
+      select?: string[];
+      where?: Record<string, unknown>;
+    }
+  ): Promise<T[]>;
+
+  /**
+   * Get approximate distinct count using sampling.
+   */
+  approximateCountDistinct(
+    table: string,
+    column: string,
+    sampleSize?: number,
+    options?: {
+      where?: Record<string, unknown>;
+    }
+  ): Promise<{ approximate_count: number; exact_count?: number }>;
+
+  /**
+   * Get sample statistics for data exploration.
+   */
+  sampleStats(
+    table: string,
+    columns: string[],
+    sampleSize?: number,
+    options?: {
+      where?: Record<string, unknown>;
+    }
+  ): Promise<
+    {
+      column: string;
+      count: number;
+      distinct_count: number;
+      null_count: number;
+      min?: unknown;
+      max?: unknown;
+      avg?: number;
+      sample_size: number;
+    }[]
+  >;
+}
+
+/**
  * TSyringe container registration helper.
  * Call this during application initialization to register dependencies.
  */
@@ -776,3 +1096,665 @@ export const registerClickHouseDependencies = (
 // import { container } from "tsyringe";
 // registerClickHouseDependencies(container);
 // const client = container.resolve(ClickHouseClient);
+
+/**
+ * ClickHouse Array Operations Implementation
+ */
+class ClickHouseArrayOperations implements IClickHouseArrayOperations {
+  constructor(private readonly client: ClickHouseClient) {}
+
+  async arrayJoin<T = unknown>(
+    table: string,
+    arrayColumn: string,
+    options: {
+      select?: string[];
+      where?: Record<string, unknown>;
+      limit?: number;
+    } = {}
+  ): Promise<T[]> {
+    const select = options.select?.join(", ") ?? "*";
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+    const limitClause = options.limit ? `LIMIT ${options.limit}` : "";
+
+    const query = `
+      SELECT ${select}
+      FROM ${table}
+      ARRAY JOIN ${arrayColumn} AS ${arrayColumn}_item
+      ${whereClause}
+      ${limitClause}
+    `.trim();
+
+    return this.client.execute<T[]>(query, options.where);
+  }
+
+  async arrayFilter<T = unknown>(
+    table: string,
+    arrayColumn: string,
+    filterCondition: string,
+    options: {
+      select?: string[];
+      where?: Record<string, unknown>;
+    } = {}
+  ): Promise<T[]> {
+    const select = options.select?.join(", ") ?? "*";
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+
+    const query = `
+      SELECT ${select},
+             arrayFilter(x -> ${filterCondition}, ${arrayColumn}) as filtered_array
+      FROM ${table}
+      ${whereClause}
+    `.trim();
+
+    return this.client.execute<T[]>(query, options.where);
+  }
+
+  async arrayMap<T = unknown>(
+    table: string,
+    arrayColumn: string,
+    mapFunction: string,
+    options: {
+      select?: string[];
+      where?: Record<string, unknown>;
+    } = {}
+  ): Promise<T[]> {
+    const select = options.select?.join(", ") ?? "*";
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+
+    const query = `
+      SELECT ${select},
+             arrayMap(x -> ${mapFunction}, ${arrayColumn}) as mapped_array
+      FROM ${table}
+      ${whereClause}
+    `.trim();
+
+    return this.client.execute<T[]>(query, options.where);
+  }
+
+  async arrayCount(
+    table: string,
+    arrayColumn: string,
+    options: {
+      where?: Record<string, unknown>;
+      groupBy?: string[];
+    } = {}
+  ): Promise<Array<{ count: number; [key: string]: unknown }>> {
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+    const groupByClause = options.groupBy?.length
+      ? `GROUP BY ${options.groupBy.join(", ")}`
+      : "";
+
+    const query = `
+      SELECT arrayCount(x -> 1, ${arrayColumn}) as count
+             ${options.groupBy ? `, ${options.groupBy.join(", ")}` : ""}
+      FROM ${table}
+      ${whereClause}
+      ${groupByClause}
+    `.trim();
+
+    return this.client.execute(query, options.where);
+  }
+
+  async arrayHas(
+    table: string,
+    arrayColumn: string,
+    searchValue: unknown,
+    options: {
+      select?: string[];
+      where?: Record<string, unknown>;
+    } = {}
+  ): Promise<Array<{ has_value: boolean; [key: string]: unknown }>> {
+    const select = options.select?.join(", ") ?? "*";
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+
+    const query = `
+      SELECT ${select},
+             has(${arrayColumn}, {searchValue}) as has_value
+      FROM ${table}
+      ${whereClause}
+    `.trim();
+
+    return this.client.execute(query, { ...options.where, searchValue });
+  }
+}
+
+/**
+ * ClickHouse Aggregations Implementation
+ */
+class ClickHouseAggregations implements IClickHouseAggregations {
+  constructor(private readonly client: ClickHouseClient) {}
+
+  async argMax<T = unknown>(
+    table: string,
+    argColumn: string,
+    valueColumn: string,
+    options: {
+      where?: Record<string, unknown>;
+      groupBy?: string[];
+    } = {}
+  ): Promise<T[]> {
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+    const groupByClause = options.groupBy?.length
+      ? `GROUP BY ${options.groupBy.join(", ")}`
+      : "";
+
+    const query = `
+      SELECT argMax(${argColumn}, ${valueColumn}) as ${argColumn}
+      ${options.groupBy ? `, ${options.groupBy.join(", ")}` : ""}
+      FROM ${table}
+      ${whereClause}
+      ${groupByClause}
+    `.trim();
+
+    return this.client.execute<T[]>(query, options.where);
+  }
+
+  async argMin<T = unknown>(
+    table: string,
+    argColumn: string,
+    valueColumn: string,
+    options: {
+      where?: Record<string, unknown>;
+      groupBy?: string[];
+    } = {}
+  ): Promise<T[]> {
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+    const groupByClause = options.groupBy?.length
+      ? `GROUP BY ${options.groupBy.join(", ")}`
+      : "";
+
+    const query = `
+      SELECT argMin(${argColumn}, ${valueColumn}) as ${argColumn}
+      ${options.groupBy ? `, ${options.groupBy.join(", ")}` : ""}
+      FROM ${table}
+      ${whereClause}
+      ${groupByClause}
+    `.trim();
+
+    return this.client.execute<T[]>(query, options.where);
+  }
+
+  async topK(
+    table: string,
+    column: string,
+    k: number,
+    options: {
+      where?: Record<string, unknown>;
+      weightColumn?: string;
+    } = {}
+  ): Promise<Array<{ value: unknown; count: number }>> {
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+
+    const query = `
+      SELECT ${column} as value, count() as count
+      FROM ${table}
+      ${whereClause}
+      GROUP BY ${column}
+      ORDER BY count DESC
+      LIMIT ${k}
+    `.trim();
+
+    return this.client.execute(query, options.where);
+  }
+
+  async topKWeighted(
+    table: string,
+    column: string,
+    weightColumn: string,
+    k: number,
+    options: {
+      where?: Record<string, unknown>;
+    } = {}
+  ): Promise<Array<{ value: unknown; weight: number }>> {
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+
+    const query = `
+      SELECT ${column} as value, sum(${weightColumn}) as weight
+      FROM ${table}
+      ${whereClause}
+      GROUP BY ${column}
+      ORDER BY weight DESC
+      LIMIT ${k}
+    `.trim();
+
+    return this.client.execute(query, options.where);
+  }
+
+  async quantiles(
+    table: string,
+    column: string,
+    quantiles: number[],
+    options: {
+      where?: Record<string, unknown>;
+      groupBy?: string[];
+    } = {}
+  ): Promise<Array<{ [key: string]: number }>> {
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+    const groupByClause = options.groupBy?.length
+      ? `GROUP BY ${options.groupBy.join(", ")}`
+      : "";
+
+    const quantileFunctions = quantiles
+      .map((q) => `quantile(${q})(${column}) as p${Math.round(q * 100)}`)
+      .join(", ");
+
+    const query = `
+      SELECT ${quantileFunctions}
+      ${options.groupBy ? `, ${options.groupBy.join(", ")}` : ""}
+      FROM ${table}
+      ${whereClause}
+      ${groupByClause}
+    `.trim();
+
+    return this.client.execute(query, options.where);
+  }
+
+  async stats(
+    table: string,
+    column: string,
+    options: {
+      where?: Record<string, unknown>;
+      groupBy?: string[];
+    } = {}
+  ): Promise<
+    Array<{
+      count: number;
+      sum: number;
+      avg: number;
+      min: number;
+      max: number;
+      variance: number;
+      stddev: number;
+    }>
+  > {
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+    const groupByClause = options.groupBy?.length
+      ? `GROUP BY ${options.groupBy.join(", ")}`
+      : "";
+
+    const query = `
+      SELECT count() as count,
+             sum(${column}) as sum,
+             avg(${column}) as avg,
+             min(${column}) as min,
+             max(${column}) as max,
+             varPop(${column}) as variance,
+             stddevPop(${column}) as stddev
+      ${options.groupBy ? `, ${options.groupBy.join(", ")}` : ""}
+      FROM ${table}
+      ${whereClause}
+      ${groupByClause}
+    `.trim();
+
+    return this.client.execute(query, options.where);
+  }
+}
+
+/**
+ * ClickHouse Time Series Implementation
+ */
+class ClickHouseTimeSeries implements IClickHouseTimeSeries {
+  constructor(private readonly client: ClickHouseClient) {}
+
+  async tumblingWindow<T = unknown>(
+    table: string,
+    timeColumn: string,
+    windowSize: string,
+    options: {
+      select?: string[];
+      where?: Record<string, unknown>;
+      groupBy?: string[];
+      orderBy?: string;
+    } = {}
+  ): Promise<T[]> {
+    const select = options.select?.join(", ") ?? "*";
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+    const groupByClause = options.groupBy?.length
+      ? `GROUP BY ${options.groupBy.join(", ")}`
+      : "";
+    const orderByClause = options.orderBy ? `ORDER BY ${options.orderBy}` : "";
+
+    const query = `
+      SELECT ${select},
+             tumbleStart(${timeColumn}, INTERVAL ${windowSize}) as window_start,
+             tumbleEnd(${timeColumn}, INTERVAL ${windowSize}) as window_end
+      FROM ${table}
+      ${whereClause}
+      GROUP BY tumble(${timeColumn}, INTERVAL ${windowSize})
+      ${groupByClause ? `, ${groupByClause}` : ""}
+      ${orderByClause}
+    `.trim();
+
+    return this.client.execute<T[]>(query, options.where);
+  }
+
+  async movingAverage(
+    table: string,
+    valueColumn: string,
+    timeColumn: string,
+    windowSize: number,
+    options: {
+      where?: Record<string, unknown>;
+      partitionBy?: string[];
+    } = {}
+  ): Promise<Array<{ timestamp: string; value: number; moving_avg: number }>> {
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+    const partitionClause = options.partitionBy?.length
+      ? `PARTITION BY ${options.partitionBy.join(", ")}`
+      : "";
+
+    const query = `
+      SELECT ${timeColumn} as timestamp,
+             ${valueColumn} as value,
+             avg(${valueColumn}) OVER (
+               ${partitionClause}
+               ORDER BY ${timeColumn}
+               ROWS ${windowSize - 1} PRECEDING
+             ) as moving_avg
+      FROM ${table}
+      ${whereClause}
+      ORDER BY ${timeColumn}
+    `.trim();
+
+    return this.client.execute(query, options.where);
+  }
+
+  async detectAnomalies(
+    table: string,
+    valueColumn: string,
+    timeColumn: string,
+    options: {
+      algorithm?: "zscore" | "iqr" | "mad";
+      threshold?: number;
+      windowSize?: number;
+      where?: Record<string, unknown>;
+    } = {}
+  ): Promise<
+    Array<{
+      timestamp: string;
+      value: number;
+      is_anomaly: boolean;
+      score: number;
+    }>
+  > {
+    const algorithm = options.algorithm ?? "zscore";
+    const threshold = options.threshold ?? 3.0;
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+
+    let anomalyCondition: string;
+    switch (algorithm) {
+      case "zscore":
+        anomalyCondition = `abs((${valueColumn} - avg(${valueColumn})) / stddev(${valueColumn})) > ${threshold}`;
+        break;
+      case "iqr":
+        anomalyCondition = `${valueColumn} < quantile(0.25)(${valueColumn}) - ${threshold} * (quantile(0.75)(${valueColumn}) - quantile(0.25)(${valueColumn})) OR ${valueColumn} > quantile(0.75)(${valueColumn}) + ${threshold} * (quantile(0.75)(${valueColumn}) - quantile(0.25)(${valueColumn}))`;
+        break;
+      case "mad":
+        anomalyCondition = `abs(${valueColumn} - median(${valueColumn})) / mad(${valueColumn}) > ${threshold}`;
+        break;
+      default:
+        throw new Error(
+          `Unsupported anomaly detection algorithm: ${algorithm}`
+        );
+    }
+
+    const query = `
+      SELECT ${timeColumn} as timestamp,
+             ${valueColumn} as value,
+             ${anomalyCondition} as is_anomaly,
+             CASE
+               WHEN '${algorithm}' = 'zscore' THEN abs((${valueColumn} - avg(${valueColumn})) / stddev(${valueColumn}))
+               WHEN '${algorithm}' = 'iqr' THEN
+                 CASE
+                   WHEN ${valueColumn} < quantile(0.25)(${valueColumn}) THEN (quantile(0.25)(${valueColumn}) - ${valueColumn}) / (quantile(0.75)(${valueColumn}) - quantile(0.25)(${valueColumn}))
+                   ELSE (${valueColumn} - quantile(0.75)(${valueColumn})) / (quantile(0.75)(${valueColumn}) - quantile(0.25)(${valueColumn}))
+                 END
+               WHEN '${algorithm}' = 'mad' THEN abs(${valueColumn} - median(${valueColumn})) / mad(${valueColumn})
+               ELSE 0
+             END as score
+      FROM ${table}
+      ${whereClause}
+      ORDER BY ${timeColumn}
+    `.trim();
+
+    return this.client.execute(query, options.where);
+  }
+
+  async fillGaps<T = unknown>(
+    table: string,
+    timeColumn: string,
+    interval: string,
+    options: {
+      select?: string[];
+      where?: Record<string, unknown>;
+      startTime?: string;
+      endTime?: string;
+    } = {}
+  ): Promise<T[]> {
+    const select = options.select?.join(", ") ?? "*";
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+    const startTime = options.startTime
+      ? `'${options.startTime}'`
+      : `(SELECT min(${timeColumn}) FROM ${table})`;
+    const endTime = options.endTime
+      ? `'${options.endTime}'`
+      : `(SELECT max(${timeColumn}) FROM ${table})`;
+
+    const query = `
+      SELECT ${select}
+      FROM (
+        SELECT arrayJoin(
+          arrayMap(
+            x -> ${startTime} + INTERVAL x ${interval},
+            range(0, toUInt32((${endTime} - ${startTime}) / INTERVAL ${interval}) + 1)
+          )
+        ) as ${timeColumn}
+      ) as time_series
+      LEFT JOIN ${table} ON time_series.${timeColumn} = ${table}.${timeColumn}
+      ${whereClause.replace(timeColumn, `time_series.${timeColumn}`)}
+      ORDER BY time_series.${timeColumn}
+    `.trim();
+
+    return this.client.execute<T[]>(query, options.where);
+  }
+}
+
+/**
+ * ClickHouse Sampling Implementation
+ */
+class ClickHouseSampling implements IClickHouseSampling {
+  constructor(private readonly client: ClickHouseClient) {}
+
+  async sample<T = unknown>(
+    table: string,
+    sampleSize: number | string,
+    options: {
+      select?: string[];
+      where?: Record<string, unknown>;
+      orderBy?: string;
+    } = {}
+  ): Promise<T[]> {
+    const select = options.select?.join(", ") ?? "*";
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+    const orderByClause = options.orderBy ? `ORDER BY ${options.orderBy}` : "";
+    const sampleClause =
+      typeof sampleSize === "number" && sampleSize < 1
+        ? `SAMPLE ${sampleSize}`
+        : `SAMPLE ${sampleSize}`;
+
+    const query = `
+      SELECT ${select}
+      FROM ${table}
+      ${sampleClause}
+      ${whereClause}
+      ${orderByClause}
+    `.trim();
+
+    return this.client.execute<T[]>(query, options.where);
+  }
+
+  async sampleConsistent<T = unknown>(
+    table: string,
+    sampleSize: number,
+    hashColumn: string,
+    options: {
+      select?: string[];
+      where?: Record<string, unknown>;
+    } = {}
+  ): Promise<T[]> {
+    const select = options.select?.join(", ") ?? "*";
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+
+    const query = `
+      SELECT ${select}
+      FROM ${table}
+      SAMPLE ${sampleSize / 100}
+      WHERE cityHash64(${hashColumn}) % 100 < ${sampleSize}
+      ${whereClause}
+    `.trim();
+
+    return this.client.execute<T[]>(query, options.where);
+  }
+
+  async approximateCountDistinct(
+    table: string,
+    column: string,
+    sampleSize: number = 0.1,
+    options: {
+      where?: Record<string, unknown>;
+    } = {}
+  ): Promise<{ approximate_count: number; exact_count?: number }> {
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+
+    const query = `
+      SELECT uniq(${column}) as approximate_count,
+             exact_count_distinct(${column}) as exact_count
+      FROM ${table}
+      SAMPLE ${sampleSize}
+      ${whereClause}
+    `.trim();
+
+    const result = await this.client.execute<
+      Array<{ approximate_count: number; exact_count?: number }>
+    >(query, options.where);
+    return result[0] ?? { approximate_count: 0 };
+  }
+
+  async sampleStats(
+    table: string,
+    columns: string[],
+    sampleSize: number = 0.1,
+    options: {
+      where?: Record<string, unknown>;
+    } = {}
+  ): Promise<
+    {
+      column: string;
+      count: number;
+      distinct_count: number;
+      null_count: number;
+      min?: unknown;
+      max?: unknown;
+      avg?: number;
+      sample_size: number;
+    }[]
+  > {
+    const whereClause = options.where
+      ? `WHERE ${Object.entries(options.where)
+          .map(([key]) => `${key} = {${key}:String}`)
+          .join(" AND ")}`
+      : "";
+
+    const columnStats = columns
+      .map(
+        (col) => `
+      SELECT '${col}' as column,
+             count() as count,
+             uniq(${col}) as distinct_count,
+             countIf(${col} IS NULL) as null_count,
+             min(${col}) as min,
+             max(${col}) as max,
+             avg(toFloat64OrNull(${col})) as avg,
+             (SELECT count() FROM ${table} SAMPLE ${sampleSize}) as sample_size
+      FROM ${table}
+      SAMPLE ${sampleSize}
+      ${whereClause}
+    `
+      )
+      .join(" UNION ALL ");
+
+    return this.client.execute(columnStats, options.where);
+  }
+}

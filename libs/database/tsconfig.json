@@ -11,5 +11,5 @@
     { "path": "../../libs/monitoring" }
   ],
   "include": ["src"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "src/repositories/generate.ts"]
 }

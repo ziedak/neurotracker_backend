@@ -1,12 +1,9 @@
-/**
- * @fileoverview Enterprise Database Models - Type-Safe Foundation
- * @module models
- * @version 2.0.0
- * @description FIXED: Corrected Decimal types for financial precision
- */
+import { Decimal } from "@prisma/client/runtime/library";
+import * as Prisma from "@prisma/client";
 
-// Prisma enums - validated against schema
+export type DecimalType = Decimal;
 export type StoreStatus = "ACTIVE" | "SUSPENDED" | "DELETED";
+
 export type EventType =
   | "LOGIN"
   | "LOGOUT"
@@ -20,17 +17,24 @@ export type EventType =
   | "QUALITY_ALERT"
   | "RECONCILIATION_RUN"
   | "OTHER";
-export type UserRoleType = "ADMIN" | "ANALYST" | "VIEWER" | "USER";
-export type RecoveryStatus = "PENDING" | "SUCCESS" | "FAILED" | "IGNORED";
-export type ReportStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED";
-export type UserStatus = "ACTIVE" | "BANNED" | "INACTIVE" | "DELETED";
-export type ProductStatus = "ACTIVE" | "INACTIVE" | "ARCHIVED" | "DELETED";
-export type OrderStatus = "PENDING" | "COMPLETED" | "CANCELLED" | "FAILED";
-export type PaymentStatus = "PENDING" | "COMPLETED" | "FAILED" | "REFUNDED";
-export type CartStatus = "ACTIVE" | "ABANDONED" | "CONVERTED" | "EXPIRED";
 
-// CRITICAL FIX: Use string for Decimal fields to preserve precision
-export type PrismaDecimal = string;
+export type UserRoleType = "ADMIN" | "ANALYST" | "VIEWER" | "USER";
+
+export type RecoveryStatus = "PENDING" | "SUCCESS" | "FAILED" | "IGNORED";
+
+export type ReportStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED";
+
+export type UserStatus = "ACTIVE" | "BANNED" | "INACTIVE" | "DELETED";
+
+export type ProductStatus = "ACTIVE" | "INACTIVE" | "ARCHIVED" | "DELETED";
+
+export type OrderStatus = "PENDING" | "COMPLETED" | "CANCELLED" | "FAILED";
+
+export type PaymentStatus = "PENDING" | "COMPLETED" | "FAILED" | "REFUNDED";
+
+export type ApiKeyStatus = "ACTIVE" | "REVOKED" | "EXPIRED";
+
+export type CartStatus = "ACTIVE" | "ABANDONED" | "CONVERTED" | "EXPIRED";
 
 export interface Store {
   id: string;
@@ -43,15 +47,15 @@ export interface Store {
   isDeleted: boolean;
   status: StoreStatus;
   settings?: StoreSettings | null;
-  users: User[];
-  carts: Cart[];
-  products: Product[];
-  sessions: UserSession[];
-  recoveryEvents: RecoveryEvent[];
-  webhooks: Webhook[];
-  reports: Report[];
-  activities: SessionActivity[];
-  apiKeys: ApiKey[];
+  users?: User[];
+  carts?: Cart[];
+  products?: Product[];
+  sessions?: UserSession[];
+  recoveryEvents?: RecoveryEvent[];
+  webhooks?: Webhook[];
+  reports?: Report[];
+  activities?: SessionActivity[];
+  apiKeys?: ApiKey[];
 }
 
 export interface StoreSettings {
@@ -60,7 +64,7 @@ export interface StoreSettings {
   config: unknown;
   createdAt: Date;
   updatedAt: Date;
-  store: Store;
+  store?: Store;
 }
 
 export interface RecoveryEvent {
@@ -75,8 +79,8 @@ export interface RecoveryEvent {
   metadata?: unknown | null;
   createdAt: Date;
   updatedAt: Date;
-  cart: Cart;
-  store: Store;
+  cart?: Cart;
+  store?: Store;
   user?: User | null;
   session?: UserSession | null;
 }
@@ -92,19 +96,20 @@ export interface Report {
   error?: string | null;
   createdAt: Date;
   updatedAt: Date;
-  store: Store;
+  store?: Store;
 }
 
 export interface SessionActivity {
   id: string;
   sessionId: string;
   storeId: string;
+  userId: string;
   activity: string;
   timestamp: Date;
   metadata?: unknown | null;
-  session: UserSession;
-  store: Store;
-  User: User[];
+  session?: UserSession;
+  store?: Store;
+  user?: User;
 }
 
 export interface Webhook {
@@ -117,7 +122,7 @@ export interface Webhook {
   updatedAt: Date;
   lastTriggered?: Date | null;
   metadata?: unknown | null;
-  store: Store;
+  store?: Store;
 }
 
 export interface Role {
@@ -134,11 +139,11 @@ export interface Role {
   metadata?: unknown | null;
   parentRoleId?: string | null;
   parentRole?: Role | null;
-  childRoles: Role[];
+  childRoles?: Role[];
   parentRoleIds: string[];
   childRoleIds: string[];
-  users: User[];
-  permissions: RolePermission[];
+  users?: User[];
+  permissions?: RolePermission[];
 }
 
 export interface RolePermission {
@@ -154,7 +159,7 @@ export interface RolePermission {
   version: string;
   createdAt: Date;
   updatedAt: Date;
-  role: Role;
+  role?: Role;
 }
 
 export interface User {
@@ -186,22 +191,31 @@ export interface User {
   roleRevokedBy?: string | null;
   roleExpiresAt?: Date | null;
   metadata?: unknown | null;
-  sessions: UserSession[];
-  events: UserEvent[];
-  carts: Cart[];
-  notifications: Notification[];
-  orders: Order[];
+  sessions?: UserSession[];
+  events?: UserEvent[];
+  carts?: Cart[];
+  notifications?: Notification[];
+  orders?: Order[];
   storeId?: string | null;
   store?: Store | null;
-  recoveryEvents: RecoveryEvent[];
-  activities: SessionActivity[];
-  apiKeys: ApiKey[];
+  recoveryEvents?: RecoveryEvent[];
+  activities?: SessionActivity[];
+  apiKeys?: ApiKey[];
 }
 
 export interface UserSession {
   id: string;
   userId: string;
+  storeId: string;
   sessionId: string;
+  keycloakSessionId?: string | null;
+  accessToken?: string | null;
+  refreshToken?: string | null;
+  idToken?: string | null;
+  tokenExpiresAt?: Date | null;
+  refreshExpiresAt?: Date | null;
+  fingerprint?: string | null;
+  lastAccessedAt: Date;
   createdAt: Date;
   updatedAt: Date;
   expiresAt?: Date | null;
@@ -210,12 +224,12 @@ export interface UserSession {
   metadata?: unknown | null;
   isActive: boolean;
   endedAt?: Date | null;
-  user: User;
-  events: UserEvent[];
-  logs: SessionLog[];
-  Store: Store[];
-  RecoveryEvent: RecoveryEvent[];
-  SessionActivity: SessionActivity[];
+  user?: User;
+  events?: UserEvent[];
+  logs?: SessionLog[];
+  store?: Store;
+  recoveryEvents?: RecoveryEvent[];
+  activities?: SessionActivity[];
 }
 
 export interface SessionLog {
@@ -224,7 +238,7 @@ export interface SessionLog {
   event: string;
   timestamp: Date;
   metadata?: unknown | null;
-  session: UserSession;
+  session?: UserSession;
 }
 
 export interface UserEvent {
@@ -239,7 +253,7 @@ export interface UserEvent {
   ipAddress?: string | null;
   isError: boolean;
   errorMsg?: string | null;
-  user: User;
+  user?: User;
   session?: UserSession | null;
 }
 
@@ -247,7 +261,7 @@ export interface Product {
   id: string;
   name: string;
   description?: string | null;
-  price: PrismaDecimal; // FIXED: Was number, now Decimal for precision
+  price: DecimalType;
   currency: string;
   sku?: string | null;
   imageUrl?: string | null;
@@ -260,16 +274,16 @@ export interface Product {
   createdBy?: string | null;
   updatedBy?: string | null;
   metadata?: unknown | null;
-  cartItems: CartItem[];
-  orderItems: OrderItem[];
-  Store: Store[];
+  cartItems?: CartItem[];
+  orderItems?: OrderItem[];
+  stores?: Store[];
 }
 
 export interface Cart {
   id: string;
   userId: string;
   status: CartStatus;
-  total: PrismaDecimal; // FIXED: Was number, now Decimal for precision
+  total: DecimalType;
   currency: string;
   createdAt: Date;
   updatedAt: Date;
@@ -278,12 +292,12 @@ export interface Cart {
   archived: boolean;
   metadata?: unknown | null;
   auditLog?: unknown | null;
-  user: User;
-  items: CartItem[];
-  features: Feature[];
-  orders: Order[];
-  Store: Store[];
-  RecoveryEvent: RecoveryEvent[];
+  user?: User;
+  items?: CartItem[];
+  features?: Feature[];
+  orders?: Order[];
+  stores?: Store[];
+  recoveryEvents?: RecoveryEvent[];
 }
 
 export interface Order {
@@ -291,7 +305,7 @@ export interface Order {
   cartId: string;
   userId: string;
   status: OrderStatus;
-  total: PrismaDecimal; // FIXED: Was number, now Decimal for precision
+  total: Decimal;
   currency: string;
   paymentId?: string | null;
   createdAt: Date;
@@ -299,10 +313,10 @@ export interface Order {
   completedAt?: Date | null;
   cancelledAt?: Date | null;
   metadata?: unknown | null;
-  cart: Cart;
-  user: User;
-  items: OrderItem[];
-  payments: Payment[];
+  cart?: Cart;
+  user?: User;
+  items?: OrderItem[];
+  payments?: Payment[];
 }
 
 export interface OrderItem {
@@ -310,17 +324,17 @@ export interface OrderItem {
   orderId: string;
   productId: string;
   quantity: number;
-  price: PrismaDecimal; // FIXED: Was number, now Decimal for precision
+  price: DecimalType;
   createdAt: Date;
   updatedAt: Date;
-  order: Order;
-  product: Product;
+  order?: Order;
+  product?: Product;
 }
 
 export interface Payment {
   id: string;
   orderId: string;
-  amount: PrismaDecimal; // FIXED: Was number, now Decimal for precision
+  amount: string;
   currency: string;
   status: PaymentStatus;
   provider?: string | null;
@@ -330,7 +344,7 @@ export interface Payment {
   completedAt?: Date | null;
   failedAt?: Date | null;
   metadata?: unknown | null;
-  order: Order;
+  order?: Order;
 }
 
 export interface CartItem {
@@ -338,11 +352,12 @@ export interface CartItem {
   cartId: string;
   productId: string;
   quantity: number;
-  price: PrismaDecimal; // FIXED: Was number, now Decimal for precision
+  price: DecimalType;
   createdAt: Date;
+  updatedAt: Date;
   metadata?: unknown | null;
-  cart: Cart;
-  product: Product;
+  cart?: Cart;
+  product?: Product;
 }
 
 export interface Feature {
@@ -368,7 +383,7 @@ export interface Notification {
   createdAt: Date;
   readAt?: Date | null;
   metadata?: unknown | null;
-  user: User;
+  user?: User;
 }
 
 export interface Config {
@@ -382,10 +397,15 @@ export interface Config {
 
 export interface QualityValidation {
   id: string;
-  table: string;
-  check: string;
+  tableName: string;
+  checkType: string;
+  checkName: string;
   status: string;
-  timestamp: Date;
+  severity: string;
+  details?: unknown | null;
+  affectedRows: number;
+  executedAt: Date;
+  executionTime?: DecimalType | null;
 }
 
 export interface QualityAnomaly {
@@ -416,9 +436,10 @@ export interface ReconciliationExecution {
   recordsChecked: number;
   discrepancies: number;
   executedAt: Date;
-  executionTime: number;
-  details?: string | null;
-  rule: ReconciliationRule;
+  executionTime: DecimalType;
+  details?: unknown | null;
+  errorMessage?: string | null;
+  rule?: ReconciliationRule;
 }
 
 export interface RepairOperation {
@@ -437,7 +458,7 @@ export interface ApiKey {
   keyIdentifier: string;
   keyPreview: string;
   userId: string;
-  user: User;
+  user?: User;
   storeId?: string | null;
   store?: Store | null;
   permissions?: unknown | null;
@@ -452,3 +473,5 @@ export interface ApiKey {
   revokedBy?: string | null;
   metadata?: unknown | null;
 }
+
+export { Prisma };

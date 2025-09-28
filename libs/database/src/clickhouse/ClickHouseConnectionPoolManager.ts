@@ -192,6 +192,34 @@ export class PooledClickHouseConnection implements IClickHouseClient {
       });
     });
   }
+
+  /**
+   * ClickHouse array operations for advanced array manipulation.
+   */
+  get arrayOperations(): import("./clickhouseClient").IClickHouseArrayOperations {
+    return this.client.arrayOperations;
+  }
+
+  /**
+   * ClickHouse aggregations for advanced analytical functions.
+   */
+  get aggregations(): import("./clickhouseClient").IClickHouseAggregations {
+    return this.client.aggregations;
+  }
+
+  /**
+   * ClickHouse time series operations for temporal data analysis.
+   */
+  get timeSeries(): import("./clickhouseClient").IClickHouseTimeSeries {
+    return this.client.timeSeries;
+  }
+
+  /**
+   * ClickHouse sampling operations for data sampling and statistics.
+   */
+  get sampling(): import("./clickhouseClient").IClickHouseSampling {
+    return this.client.sampling;
+  }
 }
 
 /**
@@ -698,40 +726,40 @@ export class ClickHouseConnectionPoolManager {
   /**
    * Record pool metrics.
    */
-  private recordPoolMetrics(): void {
+  private async recordPoolMetrics(): Promise<void> {
     if (!this.metricsCollector) return;
 
     const stats = this.getPoolStats();
 
-    this.metricsCollector.recordGauge(
+    await this.metricsCollector.recordGauge(
       "clickhouse.pool.total_connections",
       stats.totalConnections
     );
-    this.metricsCollector.recordGauge(
+    await this.metricsCollector.recordGauge(
       "clickhouse.pool.active_connections",
       stats.activeConnections
     );
-    this.metricsCollector.recordGauge(
+    await this.metricsCollector.recordGauge(
       "clickhouse.pool.idle_connections",
       stats.idleConnections
     );
-    this.metricsCollector.recordGauge(
+    await this.metricsCollector.recordGauge(
       "clickhouse.pool.pending_acquires",
       stats.pendingAcquires
     );
-    this.metricsCollector.recordGauge(
+    await this.metricsCollector.recordGauge(
       "clickhouse.pool.utilization",
       stats.poolUtilization
     );
-    this.metricsCollector.recordGauge(
+    await this.metricsCollector.recordGauge(
       "clickhouse.pool.average_wait_time",
       stats.averageWaitTime
     );
-    this.metricsCollector.recordCounter(
+    await this.metricsCollector.recordCounter(
       "clickhouse.pool.connection_errors",
       stats.connectionErrors
     );
-    this.metricsCollector.recordCounter(
+    await this.metricsCollector.recordCounter(
       "clickhouse.pool.health_check_failures",
       stats.healthCheckFailures
     );

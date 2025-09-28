@@ -4,6 +4,20 @@
  * - KeycloakUserManager for user management via Admin API
  * - KeycloakSessionManager for session management with token integration
  * - Comprehensive error handling and logging
+ *
+ * @deprecated This monolithic class has been refactored into a modular SOLID architecture.
+ *             Use KeycloakIntegrationService from './integration' for new implementations.
+ *             See integration/README.md for migration instructions.
+ *
+ * @example Migration Path:
+ * ```typescript
+ * // OLD (deprecated)
+ * const service = new KeycloakIntegrationService(options, dbClient, metrics);
+ *
+ * // NEW (recommended)
+ * import { KeycloakIntegrationService } from "./integration";
+ * const service = KeycloakIntegrationService.create(options, dbClient, metrics);
+ * ```
  */
 
 // import crypto from "crypto";
@@ -229,6 +243,8 @@ export interface LogoutResult {
  * - Session management with token handling
  * - User management operations
  * - Comprehensive logging and metrics
+ *
+ * @deprecated Use the new SOLID-compliant KeycloakIntegrationService from './integration'
  */
 export class KeycloakIntegrationService {
   private readonly logger = createLogger("KeycloakIntegrationService");

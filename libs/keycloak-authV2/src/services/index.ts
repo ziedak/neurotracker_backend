@@ -1,5 +1,15 @@
 /**
- * Services exports
+export * from "./apikey";
+
+// User Management - Modular SOLID Architecture (Recommended)
+export * from "./user";
+
+// Integration Service - Modular SOLID Architecture (Recommended)
+export * from "./integration";
+
+// Legacy Monolithic Implementations (Deprecated)
+export { KeycloakUserManager } from "./KeycloakUserManager";
+export { KeycloakIntegrationService as LegacyKeycloakIntegrationService } from "./KeycloakIntegrationService";ices exports
  */
 
 export * from "./apikey";
@@ -48,4 +58,4 @@ export {
   type PKCEValidationResult,
 } from "./PKCEManager";
 
-// Authorization
+export * from "./integration";

@@ -120,7 +120,9 @@ export class PostgreSQLClient {
       errorFormat: "pretty",
     });
 
-    this.prismaClient = client.$extends(withAccelerate());
+    this.prismaClient = client.$extends(
+      withAccelerate()
+    ) as unknown as PrismaClient;
     this.isConnected = false;
 
     this.logger.info("PostgreSQL client initialized", {
