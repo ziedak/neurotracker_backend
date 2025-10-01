@@ -509,7 +509,7 @@ export class ClickHouseConnectionPoolManager {
     if (idleConnection) {
       idleConnection.markUsed();
       this.recordWaitTime(Date.now() - startTime);
-      this.recordPoolMetrics();
+      await this.recordPoolMetrics();
       return idleConnection;
     }
 
@@ -521,7 +521,7 @@ export class ClickHouseConnectionPoolManager {
         this.activeConnections++;
         newConnection.markUsed();
         this.recordWaitTime(Date.now() - startTime);
-        this.recordPoolMetrics();
+        await this.recordPoolMetrics();
         return newConnection;
       } catch (error) {
         this.logger.error("Failed to create new connection", error);

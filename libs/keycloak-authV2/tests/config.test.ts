@@ -6,7 +6,7 @@ import {
   DEFAULT_CONFIG,
   createAuthV2Config,
   loadConfigFromEnv,
-} from "../src/services/config";
+} from "../src/services/token/config";
 
 describe("AuthV2Config", () => {
   it("should export default config", () => {
@@ -15,14 +15,16 @@ describe("AuthV2Config", () => {
   });
 
   it("should create config with overrides", () => {
-    const config = createAuthV2Config({ encryption: { key: "custom-key" } });
-    expect(config.encryption.key).toBe("custom-key");
+    const customKey = "custom-key-that-is-at-least-32-chars-long";
+    const config = createAuthV2Config({ encryption: { key: customKey } });
+    expect(config.encryption.key).toBe(customKey);
   });
 
   it("should load config from env", () => {
-    process.env["KEYCLOAK_ENCRYPTION_KEY"] = "env-key";
+    const envKey = "env-key-that-is-at-least-32-chars-long";
+    process.env["KEYCLOAK_ENCRYPTION_KEY"] = envKey;
     const config = loadConfigFromEnv();
-    expect(config.encryption.key).toBe("env-key");
+    expect(config.encryption.key).toBe(envKey);
     delete process.env["KEYCLOAK_ENCRYPTION_KEY"];
   });
 

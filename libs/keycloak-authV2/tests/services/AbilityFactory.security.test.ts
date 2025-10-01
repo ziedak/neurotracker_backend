@@ -7,7 +7,7 @@ import { AbilityCacheError } from "../../src/services/ability/AbilityFactoryErro
 import {
   AbilityFactory,
   
-} from "../../src/services/AbilityFactoryRefactored";
+} from "../../src/services/ability/AbilityFactory";
 import type { AuthorizationContext } from "../../src/types/authorization.types";
 
 // Mock @libs/monitoring

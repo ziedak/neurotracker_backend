@@ -6,11 +6,11 @@
  * and database/cache integration.
  */
 
-import { KeycloakSessionManager } from "../../src/services/KeycloakSessionManager";
+import { KeycloakSessionManager } from "../../src/services/session/KeycloakSessionManager";
 import { KeycloakClient } from "../../src/client/KeycloakClient";
 import { PostgreSQLClient, CacheService } from "@libs/database";
 import type { IMetricsCollector } from "@libs/monitoring";
-import type { AuthV2Config } from "../../src/services/config";
+import type { AuthV2Config } from "../../src/services/token/config";
 import type {
   KeycloakSessionCreationOptions,
   KeycloakSessionData,

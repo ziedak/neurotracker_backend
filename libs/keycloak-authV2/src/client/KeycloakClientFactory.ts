@@ -91,7 +91,7 @@ export class KeycloakClientFactory {
         realmCount: Object.keys(this.config.realms).length,
       });
 
-      // Initialize all clients in parallel
+      // Initialize all clients in parallel with partial success handling
       const initPromises = Object.entries(this.config.realms).map(
         async ([clientType, realmConfig]) => {
           try {
@@ -106,19 +106,51 @@ export class KeycloakClientFactory {
             this.clients.set(clientType, client);
 
             this.logger.debug("Client initialized", { clientType });
+            return { clientType, success: true, error: null };
           } catch (error) {
             this.logger.error("Failed to initialize client", {
               clientType,
               error,
             });
-            throw new Error(
-              `Failed to initialize ${clientType} client: ${error}`
-            );
+            return {
+              clientType,
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            };
           }
         }
       );
 
-      await Promise.all(initPromises);
+      const results = await Promise.all(initPromises);
+
+      // Check initialization results
+      const failedClients = results.filter((result) => !result.success);
+      const successfulClients = results.filter((result) => result.success);
+
+      if (failedClients.length > 0) {
+        this.logger.warn("Some clients failed to initialize", {
+          failedClients: failedClients.map((f) => ({
+            type: f.clientType,
+            error: f.error,
+          })),
+          successfulClients: successfulClients.map((s) => s.clientType),
+        });
+
+        // If all clients failed, throw error
+        if (successfulClients.length === 0) {
+          throw new Error(
+            `All clients failed to initialize: ${failedClients
+              .map((f) => f.error)
+              .join(", ")}`
+          );
+        }
+
+        // Record partial initialization metrics
+        this.metrics?.recordCounter(
+          "keycloak.factory.partial_initialization",
+          1
+        );
+      }
 
       this.initialized = true;
 
@@ -216,18 +248,80 @@ export class KeycloakClientFactory {
   }
 
   /**
-   * Get factory status
+   * Get factory status with health information
    */
   getStatus(): {
     initialized: boolean;
     clientCount: number;
     availableClients: ClientType[];
+    healthStatus: {
+      overall: "healthy" | "degraded" | "unhealthy";
+      clients: Record<string, boolean>;
+    };
   } {
+    const clientHealth: Record<string, boolean> = {};
+    let healthyClients = 0;
+
+    // Check health of each client
+    for (const [clientType, client] of this.clients.entries()) {
+      const isHealthy = client.isReady();
+      clientHealth[clientType] = isHealthy;
+      if (isHealthy) healthyClients++;
+    }
+
+    // Determine overall health
+    let overallHealth: "healthy" | "degraded" | "unhealthy";
+    if (healthyClients === this.clients.size) {
+      overallHealth = "healthy";
+    } else if (healthyClients > 0) {
+      overallHealth = "degraded";
+    } else {
+      overallHealth = "unhealthy";
+    }
+
     return {
       initialized: this.initialized,
       clientCount: this.clients.size,
       availableClients: this.getAvailableClientTypes(),
+      healthStatus: {
+        overall: overallHealth,
+        clients: clientHealth,
+      },
     };
+  }
+
+  /**
+   * Perform health check on all clients
+   */
+  async healthCheck(): Promise<{
+    healthy: boolean;
+    results: Record<string, boolean>;
+    errors: Record<string, string>;
+  }> {
+    const results: Record<string, boolean> = {};
+    const errors: Record<string, string> = {};
+
+    const healthPromises = Array.from(this.clients.entries()).map(
+      async ([clientType, client]) => {
+        try {
+          const isHealthy = await client.healthCheck();
+          results[clientType] = isHealthy;
+          if (!isHealthy) {
+            errors[clientType] = "Health check failed";
+          }
+        } catch (error) {
+          results[clientType] = false;
+          errors[clientType] =
+            error instanceof Error ? error.message : "Unknown error";
+        }
+      }
+    );
+
+    await Promise.all(healthPromises);
+
+    const healthy = Object.values(results).every((result) => result);
+
+    return { healthy, results, errors };
   }
 
   /**
@@ -236,10 +330,39 @@ export class KeycloakClientFactory {
   async shutdown(): Promise<void> {
     this.logger.info("Shutting down Keycloak client factory");
 
-    this.clients.clear();
-    this.initialized = false;
+    const startTime = performance.now();
 
-    this.logger.info("Keycloak client factory shutdown complete");
+    try {
+      // Dispose all clients in parallel
+      const disposePromises = Array.from(this.clients.entries()).map(
+        async ([clientType, client]) => {
+          try {
+            await client.dispose();
+            this.logger.debug("Client disposed successfully", { clientType });
+          } catch (error) {
+            this.logger.error("Failed to dispose client", {
+              clientType,
+              error,
+            });
+          }
+        }
+      );
+
+      await Promise.all(disposePromises);
+
+      this.clients.clear();
+      this.initialized = false;
+
+      this.metrics?.recordTimer(
+        "keycloak.factory.shutdown_duration",
+        performance.now() - startTime
+      );
+
+      this.logger.info("Keycloak client factory shutdown complete");
+    } catch (error) {
+      this.logger.error("Error during factory shutdown", { error });
+      throw error;
+    }
   }
 
   // Private helper methods
@@ -247,6 +370,9 @@ export class KeycloakClientFactory {
   private buildMultiClientConfig(
     envConfig: KeycloakEnvironmentConfig
   ): KeycloakMultiClientConfig {
+    // Validate required configuration
+    this.validateEnvironmentConfig(envConfig);
+
     const baseConfig = {
       serverUrl: envConfig.KEYCLOAK_SERVER_URL.replace(/\/+$/, ""), // Remove trailing slashes
       realm: envConfig.KEYCLOAK_REALM,
@@ -343,6 +469,84 @@ export class KeycloakClientFactory {
 
     return config;
   }
+
+  /**
+   * Validate environment configuration before building client configs
+   */
+  private validateEnvironmentConfig(
+    envConfig: KeycloakEnvironmentConfig
+  ): void {
+    // Required base configuration
+    if (!envConfig.KEYCLOAK_SERVER_URL) {
+      throw new Error("KEYCLOAK_SERVER_URL is required");
+    }
+
+    if (!envConfig.KEYCLOAK_REALM) {
+      throw new Error("KEYCLOAK_REALM is required");
+    }
+
+    // Validate server URL format
+    try {
+      new URL(envConfig.KEYCLOAK_SERVER_URL);
+    } catch (error) {
+      throw new Error("KEYCLOAK_SERVER_URL must be a valid URL");
+    }
+
+    // Validate that at least one client is configured
+    const hasAnyClient = [
+      envConfig.KEYCLOAK_FRONTEND_CLIENT_ID,
+      envConfig.KEYCLOAK_SERVICE_CLIENT_ID,
+      envConfig.KEYCLOAK_WEBSOCKET_CLIENT_ID,
+      envConfig.KEYCLOAK_ADMIN_CLIENT_ID,
+      envConfig.KEYCLOAK_TRACKER_CLIENT_ID,
+    ].some((clientId) => clientId && clientId.trim() !== "");
+
+    if (!hasAnyClient) {
+      throw new Error("At least one Keycloak client must be configured");
+    }
+
+    // Validate confidential clients have secrets
+    const confidentialClients = [
+      {
+        id: envConfig.KEYCLOAK_SERVICE_CLIENT_ID,
+        secret: envConfig.KEYCLOAK_SERVICE_CLIENT_SECRET,
+        name: "service",
+      },
+      {
+        id: envConfig.KEYCLOAK_ADMIN_CLIENT_ID,
+        secret: envConfig.KEYCLOAK_ADMIN_CLIENT_SECRET,
+        name: "admin",
+      },
+    ];
+
+    for (const client of confidentialClients) {
+      if (
+        client.id &&
+        client.id.trim() !== "" &&
+        (!client.secret || client.secret.trim() === "")
+      ) {
+        throw new Error(`${client.name} client requires a client secret`);
+      }
+    }
+
+    // Validate frontend URL if provided
+    if (envConfig.FRONTEND_URL) {
+      try {
+        new URL(envConfig.FRONTEND_URL);
+      } catch (error) {
+        throw new Error("FRONTEND_URL must be a valid URL when provided");
+      }
+    }
+
+    // Validate API base URL if provided
+    if (envConfig.API_BASE_URL) {
+      try {
+        new URL(envConfig.API_BASE_URL);
+      } catch (error) {
+        throw new Error("API_BASE_URL must be a valid URL when provided");
+      }
+    }
+  }
 }
 
 /**
@@ -363,7 +567,7 @@ export async function createKeycloakClientFactory(
 export function createEnvironmentConfig(
   overrides: Partial<KeycloakEnvironmentConfig> = {}
 ): KeycloakEnvironmentConfig {
-  return {
+  const config: KeycloakEnvironmentConfig = {
     KEYCLOAK_SERVER_URL: process.env["KEYCLOAK_SERVER_URL"] || "",
     KEYCLOAK_REALM: process.env["KEYCLOAK_REALM"] || "",
 
@@ -392,4 +596,31 @@ export function createEnvironmentConfig(
 
     ...overrides,
   };
+
+  // Log configuration warnings for missing optional values
+  if (!config.FRONTEND_URL) {
+    console.warn(
+      "FRONTEND_URL not configured, using default: http://localhost:3000"
+    );
+  }
+
+  if (!config.API_BASE_URL) {
+    console.warn(
+      "API_BASE_URL not configured, may affect service-to-service communication"
+    );
+  }
+
+  // Validate critical environment variables
+  const requiredVars = ["KEYCLOAK_SERVER_URL", "KEYCLOAK_REALM"];
+  const missingVars = requiredVars.filter(
+    (varName) => !config[varName as keyof KeycloakEnvironmentConfig]
+  );
+
+  if (missingVars.length > 0) {
+    throw new Error(
+      `Missing required environment variables: ${missingVars.join(", ")}`
+    );
+  }
+
+  return config;
 }

@@ -170,6 +170,7 @@ export interface APIKeyGenerationOptions {
 }
 
 export interface APIKeyValidationResult {
+  data?: any;
   success: boolean;
   user?: any; // UserInfo type from main module
   keyData?: APIKey;
@@ -206,7 +207,5 @@ export interface EntropyTestResult {
   details: any;
 }
 
-export interface HealthCheckResult {
-  status: "healthy" | "unhealthy";
-  details: any;
-}
+// Import and re-export standardized health check interface from common types
+export type { HealthCheckResult } from "../../types/common";

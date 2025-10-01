@@ -1,8 +1,10 @@
 /**
  * Refactored Token Manager Service
  * Orchestrates focused services for token validation and management
- */
-
+   /**
+   * Validate JWT token using signature verification  
+   */
+import { z } from "zod";
 import { createLogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { AuthResult } from "../../types";
@@ -12,7 +14,6 @@ import { KeycloakClient } from "../../client/KeycloakClient";
 // Import focused services
 import { JWTValidator } from "./JWTValidator";
 import { SecureCacheManager } from "./SecureCacheManager";
-import { TokenIntrospector } from "./TokenIntrospector";
 import {
   RefreshTokenManager,
   type RefreshTokenConfig,
@@ -22,63 +23,145 @@ import {
 } from "./RefreshTokenManager";
 import { RolePermissionExtractor } from "./RolePermissionExtractor";
 
-export class TokenManager {
+// Zod schemas for validation
+const AuthorizationHeaderSchema = z
+  .string()
+  .min(1, "Authorization header cannot be empty")
+  .max(8192, "Authorization header too large")
+  .trim();
+
+// Basic token format validation for extraction
+const TokenSchema = z
+  .string()
+  .min(10, "Token must be at least 10 characters")
+  .max(8192, "Token too large (max 8192 characters)");
+
+
+  export interface ITokenManager {
+    initialize(
+      refreshConfig?: Partial<RefreshTokenConfig>,
+      refreshEventHandlers?: RefreshTokenEventHandlers
+    ): Promise<void>;
+    validateJwt(token: string): Promise<AuthResult>;
+    introspectToken(token: string): Promise<AuthResult>;
+    validateToken(token: string, useIntrospection?: boolean): Promise<AuthResult>;
+    extractBearerToken(authorizationHeader?: string): string | null;
+    clearTokenFromMemory(token: string): void;
+    hasRole(authResult: AuthResult, role: string): boolean;
+    hasAnyRole(authResult: AuthResult, requiredRoles: string[]): boolean;
+    hasAllRoles(authResult: AuthResult, requiredRoles: string[]): boolean;
+    hasPermission(authResult: AuthResult, permission: string): boolean;
+    hasAnyPermission(authResult: AuthResult, requiredPermissions: string[]): boolean;
+    hasAllPermissions(authResult: AuthResult, requiredPermissions: string[]): boolean;
+    isTokenExpired(authResult: AuthResult): boolean;
+    getTokenLifetime(authResult: AuthResult): number;
+    willExpireSoon(authResult: AuthResult, withinSeconds: number): boolean;
+    getStoredTokens(userId: string, sessionId: string): Promise<StoredTokenInfo | null>;
+    refreshUserTokens(userId: string, sessionId: string): Promise<RefreshResult>;
+    storeTokensWithRefresh(
+      userId: string,
+      sessionId: string,
+      accessToken: string,
+      refreshToken: string,
+      expiresIn: number,
+      refreshExpiresIn?: number
+    ): Promise<void>;
+    removeStoredTokens(userId: string, sessionId: string): Promise<void>;
+    hasValidStoredTokens(userId: string, sessionId: string): Promise<boolean>;
+    hasRefreshTokenSupport(): boolean;
+    configureRefreshTokens(
+      config: Partial<RefreshTokenConfig>,
+      eventHandlers?: RefreshTokenEventHandlers
+    ): void;
+    getRefreshTokenStats(): any;
+    dispose(): Promise<void>;
+  }
+
+export class TokenManager implements ITokenManager {
   private readonly logger = createLogger("TokenManager");
-  private readonly jwtValidator: JWTValidator;
+  private jwtValidator!: JWTValidator;
   private readonly cacheManager: SecureCacheManager;
-  private readonly introspector: TokenIntrospector;
-  private refreshTokenManager?: RefreshTokenManager;
+  private _refreshTokenManager: RefreshTokenManager | undefined;
+  private initialized = false;
 
   constructor(
     private readonly keycloakClient: KeycloakClient,
     private readonly config: AuthV2Config,
-    private readonly metrics?: IMetricsCollector,
+    private readonly metrics?: IMetricsCollector
+  ) {
+    // Validate required inputs
+    if (!keycloakClient) {
+      throw new Error("KeycloakClient is required");
+    }
+    if (!config) {
+      throw new Error("Config is required");
+    }
+
+    // Initialize lightweight services in constructor
+    this.cacheManager = new SecureCacheManager(config.cache.enabled, metrics);
+  }
+
+  /**
+   * Initialize JWT validator and optional refresh token manager
+   * Must be called before using the TokenManager
+   */
+  async initialize(
     refreshConfig: Partial<RefreshTokenConfig> = {},
     refreshEventHandlers: RefreshTokenEventHandlers = {}
-  ) {
-    // Initialize focused services
-    this.cacheManager = new SecureCacheManager(config.cache.enabled, metrics);
+  ): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
 
-    this.introspector = new TokenIntrospector(keycloakClient, metrics);
+    try {
+      // Initialize JWT validator with proper configuration
+      const jwksEndpoint = this.getJWKSEndpoint();
+      if (!jwksEndpoint || !this.config.jwt.issuer) {
+        throw new Error(
+          "JWKS endpoint and issuer must be configured for JWT validation"
+        );
+      }
 
-    // Initialize JWT validator with proper configuration
-    const jwksEndpoint = this.getJWKSEndpoint();
-    if (jwksEndpoint && config.jwt.issuer) {
       this.jwtValidator = new JWTValidator(
         jwksEndpoint,
-        config.jwt.issuer,
-        config.jwt.audience,
-        metrics
+        this.config.jwt.issuer,
+        this.config.jwt.audience,
+        this.metrics,
+        this.cacheManager
       );
-    } else {
+
+      // Initialize refresh token manager if configuration provided
+      if (Object.keys(refreshConfig).length > 0) {
+        const defaultRefreshConfig: RefreshTokenConfig = {
+          refreshBuffer: 300,
+          enableEncryption: true,
+          cleanupInterval: 300000,
+          ...refreshConfig,
+        };
+
+        this._refreshTokenManager = new RefreshTokenManager(
+          this.keycloakClient,
+          this.cacheManager,
+          defaultRefreshConfig,
+          refreshEventHandlers,
+          this.metrics
+        );
+      }
+
+      this.initialized = true;
+
+      this.logger.debug("TokenManager initialized", {
+        jwksEndpoint,
+        cacheEnabled: this.cacheManager.isEnabled,
+        hasRefreshSupport: !!this._refreshTokenManager,
+      });
+    } catch (error) {
       throw new Error(
-        "JWKS endpoint and issuer must be configured for JWT validation"
+        `TokenManager initialization failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
     }
-
-    // Initialize refresh token manager if configuration provided
-    if (Object.keys(refreshConfig).length > 0) {
-      const defaultRefreshConfig: RefreshTokenConfig = {
-        refreshBuffer: 300,
-        enableEncryption: true,
-        cleanupInterval: 300000,
-        ...refreshConfig,
-      };
-
-      this.refreshTokenManager = new RefreshTokenManager(
-        keycloakClient,
-        this.cacheManager,
-        defaultRefreshConfig,
-        refreshEventHandlers,
-        metrics
-      );
-    }
-
-    this.logger.debug("TokenManager initialized", {
-      jwksEndpoint,
-      cacheEnabled: this.cacheManager.isEnabled,
-      hasRefreshSupport: !!this.refreshTokenManager,
-    });
   }
 
   /**
@@ -96,15 +179,30 @@ export class TokenManager {
   }
 
   /**
+   * Check if TokenManager is properly initialized
+   */
+  private ensureInitialized(): void {
+    if (!this.initialized) {
+      throw new Error(
+        "TokenManager must be initialized before use. Call initialize() first."
+      );
+    }
+  }
+
+  /**
    * Validate JWT token using signature verification
    */
   async validateJwt(token: string): Promise<AuthResult> {
+    this.ensureInitialized();
     const startTime = performance.now();
 
     try {
       // Check cache first
       if (this.cacheManager.isEnabled) {
-        const cachedResult = await this.cacheManager.get("jwt", token);
+        const cachedResult = await this.cacheManager.get<AuthResult>(
+          "jwt",
+          token
+        );
         if (cachedResult.hit && cachedResult.data) {
           this.logger.debug("JWT validation cache hit");
           return cachedResult.data;
@@ -147,20 +245,43 @@ export class TokenManager {
    * Validate token using Keycloak introspection endpoint
    */
   async introspectToken(token: string): Promise<AuthResult> {
+    this.ensureInitialized();
     const startTime = performance.now();
+
+    // Validate token format
+    try {
+      TokenSchema.parse(token);
+    } catch (error) {
+      this.logger.error("Token format validation failed", {
+        error: error instanceof Error ? error.message : String(error),
+        tokenLength: token.length,
+      });
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Invalid token format",
+      };
+    }
 
     try {
       // Check cache first (shorter cache for introspection)
       if (this.cacheManager.isEnabled) {
-        const cachedResult = await this.cacheManager.get("introspect", token);
+        const cachedResult = await this.cacheManager.get<AuthResult>(
+          "introspect",
+          token
+        );
         if (cachedResult.hit && cachedResult.data) {
           this.logger.debug("Introspection cache hit");
           return cachedResult.data;
         }
       }
 
-      // Use token introspector
-      const result = await this.introspector.introspectToken(token);
+      // Call Keycloak client directly for token introspection
+      const result = await this.keycloakClient.introspectToken(token);
+
+      this.logger.debug("Token introspection completed", {
+        success: result.success,
+        userId: result.user?.id,
+      });
 
       // Cache successful introspections for a short period
       if (this.cacheManager.isEnabled && result.success) {
@@ -194,6 +315,7 @@ export class TokenManager {
     token: string,
     useIntrospection = false
   ): Promise<AuthResult> {
+    this.ensureInitialized();
     const startTime = performance.now();
 
     try {
@@ -247,7 +369,18 @@ export class TokenManager {
    * Extract token from Authorization header
    */
   extractBearerToken(authorizationHeader?: string): string | null {
-    if (!authorizationHeader || typeof authorizationHeader !== "string") {
+    if (!authorizationHeader) {
+      return null;
+    }
+
+    // Validate authorization header format
+    try {
+      AuthorizationHeaderSchema.parse(authorizationHeader);
+    } catch (error) {
+      this.logger.debug("Invalid authorization header format", {
+        error: error instanceof Error ? error.message : String(error),
+        headerLength: authorizationHeader.length,
+      });
       return null;
     }
 
@@ -257,9 +390,36 @@ export class TokenManager {
     }
 
     const token = authorizationHeader.slice(bearerPrefix.length).trim();
-    return token.length > 0 ? token : null;
-  }
 
+    // Validate extracted token
+    try {
+      TokenSchema.parse(token);
+      return token;
+    } catch (error) {
+      this.logger.debug("Invalid token format in Bearer header", {
+        error: error instanceof Error ? error.message : String(error),
+        tokenLength: token.length,
+      });
+      return null;
+    }
+  }
+/**
+   * Securely clear token from memory
+   */
+  clearTokenFromMemory(token: string): void {
+    try {
+      // Overwrite the token string in memory (if possible)
+      if (typeof token === "string" && token.length > 0) {
+        // Note: This doesn't guarantee clearing from V8's heap
+        // but provides best-effort memory clearing
+        const buffer = Buffer.from(token);
+        buffer.fill(0);
+      }
+    } catch (error) {
+      // Silent failure for memory clearing
+      this.logger.debug("Token memory clearing attempted", { error });
+    }
+  }
   // Delegate role and permission methods to RolePermissionExtractor
   hasRole(authResult: AuthResult, role: string): boolean {
     return RolePermissionExtractor.hasRole(authResult, role);
@@ -314,21 +474,21 @@ export class TokenManager {
     userId: string,
     sessionId: string
   ): Promise<StoredTokenInfo | null> {
-    if (!this.refreshTokenManager) {
+    if (!this._refreshTokenManager) {
       this.logger.debug("Refresh token functionality not configured");
       return null;
     }
-    return this.refreshTokenManager.getStoredTokens(userId, sessionId);
+    return this._refreshTokenManager.getStoredTokens(userId, sessionId);
   }
 
   async refreshUserTokens(
     userId: string,
     sessionId: string
   ): Promise<RefreshResult> {
-    if (!this.refreshTokenManager) {
+    if (!this._refreshTokenManager) {
       throw new Error("Refresh token functionality not configured");
     }
-    return this.refreshTokenManager.refreshUserTokens(userId, sessionId);
+    return this._refreshTokenManager.refreshUserTokens(userId, sessionId);
   }
 
   async storeTokensWithRefresh(
@@ -339,10 +499,10 @@ export class TokenManager {
     expiresIn: number,
     refreshExpiresIn?: number
   ): Promise<void> {
-    if (!this.refreshTokenManager) {
+    if (!this._refreshTokenManager) {
       throw new Error("Refresh token functionality not configured");
     }
-    return this.refreshTokenManager.storeTokensWithRefresh(
+    return this._refreshTokenManager.storeTokensWithRefresh(
       userId,
       sessionId,
       accessToken,
@@ -353,24 +513,24 @@ export class TokenManager {
   }
 
   async removeStoredTokens(userId: string, sessionId: string): Promise<void> {
-    if (!this.refreshTokenManager) {
+    if (!this._refreshTokenManager) {
       return;
     }
-    return this.refreshTokenManager.removeStoredTokens(userId, sessionId);
+    return this._refreshTokenManager.removeStoredTokens(userId, sessionId);
   }
 
   async hasValidStoredTokens(
     userId: string,
     sessionId: string
   ): Promise<boolean> {
-    if (!this.refreshTokenManager) {
+    if (!this._refreshTokenManager) {
       return false;
     }
-    return this.refreshTokenManager.hasValidStoredTokens(userId, sessionId);
+    return this._refreshTokenManager.hasValidStoredTokens(userId, sessionId);
   }
 
   hasRefreshTokenSupport(): boolean {
-    return !!this.refreshTokenManager;
+    return !!this._refreshTokenManager;
   }
 
   configureRefreshTokens(
@@ -384,7 +544,7 @@ export class TokenManager {
       ...config,
     };
 
-    this.refreshTokenManager = new RefreshTokenManager(
+    this._refreshTokenManager = new RefreshTokenManager(
       this.keycloakClient,
       this.cacheManager,
       defaultRefreshConfig,
@@ -396,41 +556,56 @@ export class TokenManager {
   }
 
   getRefreshTokenStats() {
-    if (!this.refreshTokenManager) {
+    if (!this._refreshTokenManager) {
       return null;
     }
-    return this.refreshTokenManager.getRefreshTokenStats();
+    return this._refreshTokenManager.getRefreshTokenStats();
+  }
+
+  /**
+   * Dispose and cleanup all resources
+   * Call this when the application is shutting down or the TokenManager is no longer needed
+   */
+  async dispose(): Promise<void> {
+    this.logger.debug("Disposing TokenManager resources");
+
+    // Dispose refresh token manager if present
+    if (this._refreshTokenManager) {
+      await this._refreshTokenManager.dispose();
+      this._refreshTokenManager = undefined;
+    }
+
+    this.initialized = false;
+    this.logger.info("TokenManager disposed successfully");
   }
 }
 
 /**
  * Create TokenManager with refresh token functionality
  */
-export function createTokenManagerWithRefresh(
+export async function createTokenManagerWithRefresh(
   keycloakClient: KeycloakClient,
   config: AuthV2Config,
   refreshConfig: Partial<RefreshTokenConfig> = {},
   metrics?: IMetricsCollector,
   refreshEventHandlers: RefreshTokenEventHandlers = {}
-): TokenManager {
-  return new TokenManager(
-    keycloakClient,
-    config,
-    metrics,
-    refreshConfig,
-    refreshEventHandlers
-  );
+): Promise<TokenManager> {
+  const tokenManager = new TokenManager(keycloakClient, config, metrics);
+  await tokenManager.initialize(refreshConfig, refreshEventHandlers);
+  return tokenManager;
 }
 
 /**
  * Create basic TokenManager without refresh functionality
  */
-export function createBasicTokenManager(
+export async function createBasicTokenManager(
   keycloakClient: KeycloakClient,
   config: AuthV2Config,
   metrics?: IMetricsCollector
-): TokenManager {
-  return new TokenManager(keycloakClient, config, metrics);
+): Promise<TokenManager> {
+  const tokenManager = new TokenManager(keycloakClient, config, metrics);
+  await tokenManager.initialize();
+  return tokenManager;
 }
 
 // Re-export types for convenience

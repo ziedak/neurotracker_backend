@@ -8,6 +8,8 @@ import type { IMetricsCollector } from "@libs/monitoring";
 import type { AuthResult } from "../../types";
 import { jwtVerify, createRemoteJWKSet } from "jose";
 import { z } from "zod";
+import type { SecureCacheManager } from "./SecureCacheManager";
+import { RolePermissionExtractor } from "./RolePermissionExtractor";
 
 // Token validation schema
 const TokenSchema = z
@@ -22,13 +24,14 @@ const TokenSchema = z
 export class JWTValidator {
   private readonly logger = createLogger("JWTValidator");
   private remoteJWKS: ReturnType<typeof createRemoteJWKSet> | null = null;
-  private jwksInitPromise: Promise<void> | null = null;
+  private initializationMutex = false;
 
   constructor(
     private readonly jwksEndpoint: string,
     private readonly issuer: string,
     private readonly audience?: string,
-    private readonly metrics?: IMetricsCollector
+    private readonly metrics?: IMetricsCollector,
+    private readonly cacheManager?: SecureCacheManager
   ) {}
 
   /**
@@ -40,9 +43,7 @@ export class JWTValidator {
       this.logger.debug("JWKS initialized successfully", {
         jwksEndpoint: this.jwksEndpoint,
       });
-      this.jwksInitPromise = null;
     } catch (error) {
-      this.jwksInitPromise = null;
       this.logger.error("Failed to initialize JWKS", {
         error: error instanceof Error ? error.message : String(error),
         jwksEndpoint: this.jwksEndpoint,
@@ -59,11 +60,24 @@ export class JWTValidator {
    * Ensure JWKS is initialized (thread-safe)
    */
   private async ensureJWKSInitialized(): Promise<void> {
-    if (!this.remoteJWKS) {
-      if (!this.jwksInitPromise) {
-        this.jwksInitPromise = this.initializeJWKS();
+    if (this.remoteJWKS) return;
+
+    if (this.initializationMutex) {
+      // Wait for ongoing initialization
+      while (this.initializationMutex && !this.remoteJWKS) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
       }
-      await this.jwksInitPromise;
+      return;
+    }
+
+    this.initializationMutex = true;
+    try {
+      if (!this.remoteJWKS) {
+        // Double-check after acquiring lock
+        await this.initializeJWKS();
+      }
+    } finally {
+      this.initializationMutex = false;
     }
   }
 
@@ -85,70 +99,59 @@ export class JWTValidator {
   }
 
   /**
-   * Extract roles from JWT claims
+   * Validate token replay protection using jti and iat claims
    */
-  private extractRoles(claims: Record<string, unknown>): string[] {
-    const roles: string[] = [];
+  private async validateTokenReplay(payload: any): Promise<boolean> {
+    const jti = payload.jti;
+    const iat = payload.iat;
+    const exp = payload.exp;
 
-    // Extract realm roles
-    if (claims["realm_access"] && typeof claims["realm_access"] === "object") {
-      const realmAccess = claims["realm_access"] as Record<string, unknown>;
-      if (Array.isArray(realmAccess["roles"])) {
-        roles.push(
-          ...(realmAccess["roles"] as string[]).map((role) => `realm:${role}`)
-        );
-      }
+    if (!jti || !iat) {
+      this.logger.warn(
+        "Token missing jti or iat claims - replay protection disabled"
+      );
+      return true; // Allow tokens without jti/iat for compatibility
     }
 
-    // Extract resource/client roles
-    if (
-      claims["resource_access"] &&
-      typeof claims["resource_access"] === "object"
-    ) {
-      const resourceAccess = claims["resource_access"] as Record<
-        string,
-        unknown
-      >;
-      for (const [resource, access] of Object.entries(resourceAccess)) {
-        if (access && typeof access === "object") {
-          const resourceRoles = (access as Record<string, unknown>)["roles"];
-          if (Array.isArray(resourceRoles)) {
-            roles.push(
-              ...(resourceRoles as string[]).map(
-                (role) => `${resource}:${role}`
-              )
-            );
-          }
-        }
-      }
+    // If cache is not available, skip replay protection
+    if (!this.cacheManager?.isEnabled) {
+      this.logger.debug("Cache disabled - replay protection skipped");
+      return true;
     }
 
-    return roles;
-  }
+    const tokenId = `${jti}:${iat}`;
 
-  /**
-   * Extract permissions from JWT claims
-   */
-  private extractPermissions(claims: Record<string, unknown>): string[] {
-    const permissions: string[] = [];
-
-    // Extract from authorization claim (UMA permissions)
-    if (
-      claims["authorization"] &&
-      typeof claims["authorization"] === "object"
-    ) {
-      const auth = claims["authorization"] as Record<string, unknown>;
-      if (Array.isArray(auth["permissions"])) {
-        permissions.push(...(auth["permissions"] as string[]));
-      }
+    // Check if token was already processed
+    const cachedResult = await this.cacheManager.get("jwt_replay", tokenId);
+    if (cachedResult.hit) {
+      this.logger.error("Token replay detected", { jti, iat });
+      return false;
     }
 
-    // Extract from scope claim
-    if (claims["scope"] && typeof claims["scope"] === "string") {
-      permissions.push(...(claims["scope"] as string).split(" "));
-    }
+    // Mark token as processed with TTL based on token expiration
+    const ttl = exp ? Math.max(60, exp - Math.floor(Date.now() / 1000)) : 3600; // Default 1 hour
 
-    return permissions;
+    // Store a minimal AuthResult to mark token as processed
+    const replayMarker: AuthResult = {
+      success: true,
+      user: {
+        id: "replay_marker",
+        username: "replay_marker",
+        email: "",
+        name: "",
+        roles: [],
+        permissions: [],
+      },
+    };
+    await this.cacheManager.set("jwt_replay", tokenId, replayMarker, ttl);
+
+    this.logger.debug("Token marked as processed for replay protection", {
+      jti,
+      iat,
+      ttl,
+    });
+
+    return true;
   }
 
   /**
@@ -188,6 +191,15 @@ export class JWTValidator {
 
       // Extract user information from JWT claims
       const claims = payload as Record<string, unknown>;
+
+      // Validate token replay protection
+      if (!(await this.validateTokenReplay(claims))) {
+        return {
+          success: false,
+          error: "Token replay detected",
+        };
+      }
+
       const result: AuthResult = {
         success: true,
         user: {
@@ -195,8 +207,9 @@ export class JWTValidator {
           username: claims["preferred_username"] as string,
           email: claims["email"] as string,
           name: claims["name"] as string,
-          roles: this.extractRoles(claims),
-          permissions: this.extractPermissions(claims),
+          roles: RolePermissionExtractor.extractRolesFromJWT(claims),
+          permissions:
+            RolePermissionExtractor.extractPermissionsFromJWT(claims),
         },
         expiresAt: claims["exp"]
           ? new Date((claims["exp"] as number) * 1000)

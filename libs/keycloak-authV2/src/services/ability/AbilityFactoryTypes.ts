@@ -34,9 +34,6 @@ export interface CacheStats {
 }
 
 /**
- * Health check result
+ * Import and re-export standardized health check interface from common types
  */
-export interface HealthCheckResult {
-  status: "healthy" | "degraded" | "unhealthy";
-  details: any;
-}
+export type { HealthCheckResult } from "../../types/common";

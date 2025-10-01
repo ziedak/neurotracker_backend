@@ -2,8 +2,8 @@
  * Real APIKeyManager unit tests
  * Covers all public methods with proper dependency mocks
  */
-import { APIKeyManager } from "../../src/services/APIKeyManager";
-import type { AuthV2Config } from "../../src/services/config";
+import { APIKeyManager } from "../../src/services/apikey/APIKeyManager";
+import type { AuthV2Config } from "../../src/services/";
 
 jest.mock("@libs/database", () => ({
   PostgreSQLClient: jest.fn(() => mockDbClient),

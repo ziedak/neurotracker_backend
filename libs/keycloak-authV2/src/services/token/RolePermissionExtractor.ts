@@ -153,4 +153,71 @@ export class RolePermissionExtractor {
     const remainingSeconds = this.getTokenLifetime(authResult);
     return remainingSeconds <= withinSeconds;
   }
+
+  /**
+   * Extract roles from JWT claims
+   */
+  static extractRolesFromJWT(claims: Record<string, unknown>): string[] {
+    const roles: string[] = [];
+
+    // Extract realm roles
+    if (claims["realm_access"] && typeof claims["realm_access"] === "object") {
+      const realmAccess = claims["realm_access"] as Record<string, unknown>;
+      if (Array.isArray(realmAccess["roles"])) {
+        roles.push(
+          ...(realmAccess["roles"] as string[]).map((role) => `realm:${role}`)
+        );
+      }
+    }
+
+    // Extract resource/client roles
+    if (
+      claims["resource_access"] &&
+      typeof claims["resource_access"] === "object"
+    ) {
+      const resourceAccess = claims["resource_access"] as Record<
+        string,
+        unknown
+      >;
+      for (const [resource, access] of Object.entries(resourceAccess)) {
+        if (access && typeof access === "object") {
+          const resourceRoles = (access as Record<string, unknown>)["roles"];
+          if (Array.isArray(resourceRoles)) {
+            roles.push(
+              ...(resourceRoles as string[]).map(
+                (role) => `${resource}:${role}`
+              )
+            );
+          }
+        }
+      }
+    }
+
+    return roles;
+  }
+
+  /**
+   * Extract permissions from JWT claims
+   */
+  static extractPermissionsFromJWT(claims: Record<string, unknown>): string[] {
+    const permissions: string[] = [];
+
+    // Extract from authorization claim (UMA permissions)
+    if (
+      claims["authorization"] &&
+      typeof claims["authorization"] === "object"
+    ) {
+      const auth = claims["authorization"] as Record<string, unknown>;
+      if (Array.isArray(auth["permissions"])) {
+        permissions.push(...(auth["permissions"] as string[]));
+      }
+    }
+
+    // Extract from scope claim
+    if (claims["scope"] && typeof claims["scope"] === "string") {
+      permissions.push(...(claims["scope"] as string).split(" "));
+    }
+
+    return permissions;
+  }
 }

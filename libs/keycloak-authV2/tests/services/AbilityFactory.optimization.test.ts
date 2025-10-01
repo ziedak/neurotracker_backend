@@ -3,7 +3,7 @@
  * Demonstrates the CacheService integration and performance improvements
  */
 
-import { AbilityFactory } from "../../src/services/AbilityFactoryRefactored";
+import { AbilityFactory } from "../../src/services/ability/AbilityFactory";
 import type { AuthorizationContext } from "../../src/types/authorization.types";
 
 // Mock @libs/monitoring

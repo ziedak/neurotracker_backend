@@ -1,50 +1,13 @@
 /**
- * Shared types and interfaces for Session management components
+ * Session service types
  *
- * This module provides the foundation types used across all session management
- * components, ensuring type safety and consistency throughout the system.
+ * Consolidated type definitions for session management services
  */
 
 import { z } from "zod";
-import type { UserInfo } from "../../types";
-import type { KeycloakTokenResponse } from "../../client/KeycloakClient";
-
-/**
- * Zod validation schemas for runtime type checking
- */
-
-// User ID validation schema
-export const UserIdSchema = z.string().uuid("User ID must be a valid UUID");
-
-// Session ID validation schema
-export const SessionIdSchema = z
-  .string()
-  .min(1, "Session ID cannot be empty")
-  .max(255, "Session ID too long");
-
-// Token validation schema
-export const TokenSchema = z.string().min(10, "Token too short");
-
-// Keycloak session data validation schema
-export const KeycloakSessionDataSchema = z.object({
-  id: SessionIdSchema,
-  userId: UserIdSchema,
-  userInfo: z.record(z.any()),
-  keycloakSessionId: z.string().optional(),
-  accessToken: z.string().optional(),
-  refreshToken: z.string().optional(),
-  idToken: z.string().optional(),
-  tokenExpiresAt: z.date().optional(),
-  refreshExpiresAt: z.date().optional(),
-  createdAt: z.date(),
-  lastAccessedAt: z.date(),
-  expiresAt: z.date(),
-  ipAddress: z.string(),
-  userAgent: z.string(),
-  isActive: z.boolean(),
-  fingerprint: z.string(),
-  metadata: z.record(z.any()).optional().default({}),
-});
+import type { AuthResult, UserInfo } from "../shared/auth";
+import type { ValidationResult } from "../shared/validation";
+import type { HealthCheckResult } from "../common";
 
 /**
  * Core session data interface
@@ -53,12 +16,12 @@ export interface KeycloakSessionData {
   readonly id: string;
   readonly userId: string;
   readonly userInfo: UserInfo;
-  readonly keycloakSessionId?: string | undefined;
-  accessToken?: string | undefined;
-  refreshToken?: string | undefined;
-  readonly idToken?: string | undefined;
-  tokenExpiresAt?: Date | undefined;
-  readonly refreshExpiresAt?: Date | undefined;
+  readonly keycloakSessionId?: string;
+  readonly accessToken?: string;
+  readonly refreshToken?: string;
+  readonly idToken?: string;
+  readonly tokenExpiresAt?: Date;
+  readonly refreshExpiresAt?: Date;
   readonly createdAt: Date;
   readonly lastAccessedAt: Date;
   readonly expiresAt: Date;
@@ -66,11 +29,11 @@ export interface KeycloakSessionData {
   readonly userAgent: string;
   readonly isActive: boolean;
   readonly fingerprint: string;
-  readonly metadata?: Record<string, any> | undefined;
+  readonly metadata?: Record<string, any>;
 }
 
 /**
- * Token validation result interface
+ * Token validation result
  */
 export interface TokenValidationResult {
   readonly isValid: boolean;
@@ -78,16 +41,16 @@ export interface TokenValidationResult {
   readonly shouldRefresh: boolean;
   readonly expiresAt?: Date;
   readonly payload?: {
-    userId: string;
-    username?: string;
-    email?: string;
-    roles: string[];
-    scopes: string[];
+    readonly userId: string;
+    readonly username?: string;
+    readonly email?: string;
+    readonly roles: string[];
+    readonly scopes: string[];
   };
 }
 
 /**
- * Session validation result interface
+ * Session validation result
  */
 export interface SessionValidationResult {
   readonly isValid: boolean;
@@ -106,18 +69,7 @@ export interface SessionValidationResult {
 }
 
 /**
- * Authentication result interface
- */
-export interface AuthResult {
-  readonly success: boolean;
-  readonly sessionId?: string | undefined;
-  readonly reason?: string | undefined;
-  readonly expiresAt?: Date | undefined;
-  readonly userInfo?: UserInfo | undefined;
-}
-
-/**
- * Session statistics interface (readonly for external use)
+ * Session statistics
  */
 export interface SessionStats {
   readonly activeSessions: number;
@@ -133,7 +85,7 @@ export interface SessionStats {
 }
 
 /**
- * Mutable session statistics interface (for internal component use)
+ * Mutable session statistics (for internal use)
  */
 export interface MutableSessionStats {
   activeSessions: number;
@@ -149,7 +101,7 @@ export interface MutableSessionStats {
 }
 
 /**
- * Security check result interface
+ * Security check result
  */
 export interface SecurityCheckResult {
   readonly isValid: boolean;
@@ -159,12 +111,7 @@ export interface SecurityCheckResult {
 }
 
 /**
- * Import and re-export standardized health check interface from common types
- */
-export type { HealthCheckResult } from "../../types/common";
-
-/**
- * Session fingerprint interface
+ * Session fingerprint
  */
 export interface SessionFingerprint {
   readonly userAgent: string;
@@ -176,11 +123,11 @@ export interface SessionFingerprint {
 }
 
 /**
- * Session creation options interface
+ * Session creation options
  */
 export interface SessionCreationOptions {
   readonly userId: string;
-  readonly tokens: KeycloakTokenResponse;
+  readonly tokens: any; // KeycloakTokenResponse
   readonly requestContext: {
     readonly ipAddress: string;
     readonly userAgent: string;
@@ -189,7 +136,7 @@ export interface SessionCreationOptions {
 }
 
 /**
- * Session cleanup result interface
+ * Session cleanup result
  */
 export interface SessionCleanupResult {
   readonly operation: string;
@@ -199,24 +146,58 @@ export interface SessionCleanupResult {
 }
 
 /**
- * Type guards for runtime type checking
+ * Session configuration interfaces
  */
+export interface SessionConfig {
+  readonly maxIdleTime: number;
+  readonly maxSessionTime: number;
+  readonly enableFingerprinting: boolean;
+  readonly enableSecurityChecks: boolean;
+  readonly cleanupInterval: number;
+  readonly extendOnActivity: boolean;
+}
 
 /**
- * Type guard to check if object is KeycloakSessionData
+ * Validation schemas for session types
+ */
+export const SessionSchemas = {
+  userId: z.string().uuid("User ID must be a valid UUID"),
+  sessionId: z.string().min(1, "Session ID cannot be empty").max(255),
+  token: z.string().min(10, "Token too short"),
+
+  sessionData: z.object({
+    id: z.string().min(1).max(255),
+    userId: z.string().uuid(),
+    userInfo: z.record(z.any()),
+    keycloakSessionId: z.string().optional(),
+    accessToken: z.string().optional(),
+    refreshToken: z.string().optional(),
+    idToken: z.string().optional(),
+    tokenExpiresAt: z.date().optional(),
+    refreshExpiresAt: z.date().optional(),
+    createdAt: z.date(),
+    lastAccessedAt: z.date(),
+    expiresAt: z.date(),
+    ipAddress: z.string(),
+    userAgent: z.string(),
+    isActive: z.boolean(),
+    fingerprint: z.string(),
+    metadata: z.record(z.any()).optional().default({}),
+  }),
+};
+
+/**
+ * Type guards for runtime type checking
  */
 export function isKeycloakSessionData(obj: any): obj is KeycloakSessionData {
   try {
-    KeycloakSessionDataSchema.parse(obj);
+    SessionSchemas.sessionData.parse(obj);
     return true;
   } catch {
     return false;
   }
 }
 
-/**
- * Type guard to check if object is valid session validation result
- */
 export function isSessionValidationResult(
   obj: any
 ): obj is SessionValidationResult {
@@ -228,18 +209,12 @@ export function isSessionValidationResult(
   );
 }
 
-/**
- * Type guard to check if object is valid auth result
- */
 export function isAuthResult(obj: any): obj is AuthResult {
   return (
     typeof obj === "object" && obj !== null && typeof obj.success === "boolean"
   );
 }
 
-/**
- * Type guard to check if object is valid security check result
- */
 export function isSecurityCheckResult(obj: any): obj is SecurityCheckResult {
   return (
     typeof obj === "object" &&
@@ -248,3 +223,8 @@ export function isSecurityCheckResult(obj: any): obj is SecurityCheckResult {
     typeof obj.shouldTerminate === "boolean"
   );
 }
+
+// Re-export commonly used types
+export type { HealthCheckResult };
+export type { AuthResult, UserInfo };
+export type { ValidationResult };

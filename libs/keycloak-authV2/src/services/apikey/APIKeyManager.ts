@@ -24,14 +24,10 @@ import type { IMetricsCollector } from "@libs/monitoring";
 import type { PostgreSQLClient } from "@libs/database";
 import type { CacheService } from "@libs/database";
 
-// Import all components
-import { APIKeyGenerator } from "./APIKeyGenerator";
-import { APIKeyRepository } from "./APIKeyRepository";
-import { APIKeyCacheManager } from "./APIKeyCacheManager";
-import { APIKeyValidator } from "./APIKeyValidator";
-import { APIKeyUsageTracker } from "./APIKeyUsageTracker";
-import { APIKeySecurityManager } from "./APIKeySecurityManager";
-import { APIKeyHealthMonitor, type SystemHealth } from "./APIKeyHealthMonitor";
+// Import consolidated components
+import { APIKeyOperations } from "./APIKeyOperations";
+import { APIKeyStorage } from "./APIKeyStorage";
+import { APIKeyMonitoring, type SystemHealth } from "./APIKeyMonitoring";
 
 // Import shared types
 import type {
@@ -70,14 +66,10 @@ const DEFAULT_CONFIG: Required<APIKeyManagerConfig> = {
 export class APIKeyManager {
   private readonly config: Required<APIKeyManagerConfig>;
 
-  // Core components
-  private readonly generator: APIKeyGenerator;
-  private readonly repository: APIKeyRepository;
-  private readonly cacheManager?: APIKeyCacheManager;
-  private readonly validator: APIKeyValidator;
-  private readonly usageTracker?: APIKeyUsageTracker;
-  private readonly securityManager?: APIKeySecurityManager;
-  private readonly healthMonitor?: APIKeyHealthMonitor;
+  // Consolidated components
+  private readonly operations: APIKeyOperations;
+  private readonly storage: APIKeyStorage;
+  private readonly monitoring?: APIKeyMonitoring;
 
   constructor(
     private readonly logger: ILogger,
@@ -94,86 +86,92 @@ export class APIKeyManager {
     });
 
     try {
-      // Initialize core components (always required)
-      this.generator = new APIKeyGenerator(this.logger, this.metrics);
-
-      this.repository = new APIKeyRepository(this.logger, this.metrics);
-
-      // Initialize optional components based on configuration
-      if (this.config.features.enableCaching && this.cacheService) {
-        this.cacheManager = new APIKeyCacheManager(
-          this.cacheService,
-          this.logger,
-          this.metrics
-        );
-      }
-
-      this.validator = new APIKeyValidator(
-        this.logger,
-        this.metrics,
+      // Initialize consolidated components
+      this.operations = new APIKeyOperations(
         this.dbClient,
-        this.cacheManager
+        undefined, // cacheManager - will be integrated with APIKeyStorage
+        this.metrics,
+        {
+          defaultKeyLength: 32,
+          enableFallback: true,
+          enableCache: this.config.features.enableCaching ?? true,
+          constantTimeSecurity: true,
+          cacheTtl: 300,
+          maxValidationTime: 5000,
+          maxRotationFrequency: 90,
+          suspiciousActivityThreshold: 100,
+          enableThreatDetection:
+            this.config.features.enableSecurityMonitoring ?? true,
+          auditRetentionDays: 365,
+        }
       );
 
-      if (this.config.features.enableUsageTracking) {
-        this.usageTracker = new APIKeyUsageTracker(
-          this.logger,
-          this.metrics,
-          this.dbClient
-        );
-      }
+      this.storage = new APIKeyStorage(
+        this.dbClient,
+        this.cacheService,
+        this.metrics,
+        this.logger,
+        {
+          enableCache: this.config.features.enableCaching ?? true,
+          cacheTtl: 300,
+          retryAttempts: 3,
+          retryDelay: 1000,
+          enableTransactions: true,
+          queryTimeout: 5000,
+          maxCacheEntries: 1000,
+          cleanupThreshold: 80,
+          cleanupBatchSize: 100,
+          enableCacheIntegrity: true,
+          maxKeyLength: 256,
+          enableAuditLogging: true,
+        }
+      );
 
-      if (this.config.features.enableSecurityMonitoring) {
-        this.securityManager = new APIKeySecurityManager(
-          this.logger,
-          this.metrics,
+      // Initialize monitoring if any monitoring features are enabled
+      if (
+        this.config.features.enableUsageTracking ||
+        this.config.features.enableHealthMonitoring
+      ) {
+        this.monitoring = new APIKeyMonitoring(
           this.dbClient,
-          this.cacheManager
-        );
-      }
-
-      if (this.config.features.enableHealthMonitoring) {
-        // Build components object with only defined components
-        const components: {
-          generator?: APIKeyGenerator;
-          repository?: APIKeyRepository;
-          cacheManager?: APIKeyCacheManager;
-          validator?: APIKeyValidator;
-          usageTracker?: APIKeyUsageTracker;
-          securityManager?: APIKeySecurityManager;
-        } = {
-          generator: this.generator,
-          repository: this.repository,
-          validator: this.validator,
-        };
-
-        if (this.cacheManager) {
-          components.cacheManager = this.cacheManager;
-        }
-        if (this.usageTracker) {
-          components.usageTracker = this.usageTracker;
-        }
-        if (this.securityManager) {
-          components.securityManager = this.securityManager;
-        }
-
-        this.healthMonitor = new APIKeyHealthMonitor(
-          this.logger,
           this.metrics,
-          this.dbClient,
-          components
+          this.logger,
+          {
+            usage: {
+              enableAsyncUpdates: true,
+              batchUpdateInterval: 5000,
+              maxBatchSize: 100,
+              enableAnalytics: this.config.features.enableUsageTracking ?? true,
+              analyticsRetentionDays: 90,
+            },
+            health: {
+              healthCheckInterval: 30000,
+              enableContinuousMonitoring:
+                this.config.features.enableHealthMonitoring ?? true,
+              performanceThresholds: {
+                maxResponseTime: 1000,
+                minSuccessRate: 95,
+                maxErrorRate: 5,
+                minCacheHitRate: 80,
+              },
+              entropyTestConfig: {
+                testCount: 5,
+                minQualityThreshold: 80,
+                maxGenerationTime: 100,
+              },
+            },
+            enableMetrics: true,
+            maxRetries: 3,
+            retryDelay: 1000,
+          }
         );
       }
 
       this.logger.info("APIKeyManager initialized successfully", {
         componentsEnabled: {
-          generator: true,
-          repository: true,
-          cache: !!this.cacheManager,
-          validator: true,
-          usageTracker: !!this.usageTracker,
-          security: !!this.securityManager,
-          healthMonitor: !!this.healthMonitor,
+          operations: !!this.operations,
+          storage: !!this.storage,
+          monitoring: !!this.monitoring,
         },
       });
 
@@ -200,14 +198,13 @@ export class APIKeyManager {
       });
 
       // Generate secure API key
-      const keyData = await this.generator.generateSecureKey(request.prefix);
-      const keyIdentifier = this.generator.extractKeyIdentifier(keyData);
+      const keyData = await this.operations.generateSecureKey(request.prefix);
 
       // Create API key object
       const apiKey: APIKey = {
         id: crypto.randomUUID(),
         name: request.name || "Generated API Key",
-        keyHash: this.generator.hashKey(keyData),
+        keyHash: crypto.createHash("sha256").update(keyData).digest("hex"),
         keyPreview: keyData.substring(0, 8) + "...",
         userId: request.userId,
         ...(request.storeId && { storeId: request.storeId }),
@@ -222,18 +219,15 @@ export class APIKeyManager {
       };
 
       // Store in database
-      const createdKey = await this.repository.createAPIKey(
-        apiKey,
-        keyIdentifier
-      );
+      const result = await this.storage.createAPIKey(apiKey);
 
-      // Cache the new key for faster validation
-      if (this.cacheManager) {
-        await this.cacheManager.cacheValidation(keyData, {
-          success: true,
-          keyData: createdKey,
-        });
+      if (!result.success || !result.data) {
+        throw new Error(`Failed to create API key: ${result.error}`);
       }
+
+      const createdKey = result.data;
+
+      // Caching is handled internally by storage component
 
       // Record metrics
       this.metrics.recordTimer(
@@ -267,29 +261,12 @@ export class APIKeyManager {
     const startTime = performance.now();
 
     try {
-      // Check cache first if available
-      if (this.cacheManager) {
-        const cached = await this.cacheManager.getCachedValidation(apiKey);
-        if (cached) {
-          this.metrics.recordCounter("apikey.validation.cache_hit", 1);
-          return cached;
-        }
-      }
+      // Validate using operations component (includes caching internally)
+      const result = await this.operations.validateAPIKey(apiKey);
 
-      // Validate using the validator component
-      const result = await this.validator.validateAPIKey(apiKey);
-
-      // Cache the validation result if successful
-      if (this.cacheManager && result.success) {
-        await this.cacheManager.cacheValidation(apiKey, result);
-      }
-
-      // Track usage if enabled and validation successful
-      if (this.usageTracker && result.success && result.keyData) {
-        await this.usageTracker.trackUsage(
-          result.keyData.id,
-          result.keyData.userId
-        );
+      // Track usage if validation succeeded
+      if (this.monitoring && result.success && result.keyData) {
+        await this.monitoring.trackUsage(result.keyData.id);
       }
 
       // Record metrics
@@ -332,29 +309,12 @@ export class APIKeyManager {
     try {
       this.logger.info("Revoking API key", { operationId, keyId, reason });
 
-      if (this.securityManager) {
-        // Use security manager for revocation (includes proper audit trail)
-        await this.securityManager.revokeAPIKey({
-          keyId,
-          reason,
-          revokedBy: revokedBy || "system",
-        });
-      } else {
-        // Fallback to direct database operations
-        await this.dbClient.executeRaw(
-          `UPDATE api_keys SET 
-           "isActive" = false, 
-           "revokedAt" = NOW(), 
-           "revokedBy" = $1
-           WHERE id = $2`,
-          [revokedBy || "system", keyId]
-        );
-
-        // Clear from cache
-        if (this.cacheManager) {
-          await this.cacheManager.invalidateKey(keyId);
-        }
-      }
+      // Use operations component for revocation (includes proper audit trail)
+      await this.operations.revokeKey({
+        keyId,
+        reason,
+        revokedBy: revokedBy || "system",
+      });
 
       // Record metrics
       this.metrics.recordTimer(
@@ -440,7 +400,11 @@ export class APIKeyManager {
     const startTime = performance.now();
 
     try {
-      const apiKeys = await this.repository.findByUserId(userId);
+      const result = await this.storage.getAPIKeysByUserId(userId);
+      if (!result.success || !result.data) {
+        throw new Error(`Failed to get API keys: ${result.error}`);
+      }
+      const apiKeys = result.data;
 
       this.metrics.recordTimer(
         "apikey.list_duration",
@@ -460,13 +424,14 @@ export class APIKeyManager {
    * Get system health status
    */
   async getHealthStatus(): Promise<SystemHealth | null> {
-    if (!this.healthMonitor) {
+    if (!this.monitoring) {
       this.logger.warn("Health monitoring not enabled");
       return null;
     }
 
     try {
-      return await this.healthMonitor.performHealthCheck();
+      const result = await this.monitoring.performHealthCheck();
+      return result.success ? result.data || null : null;
     } catch (error) {
       this.logger.error("Failed to get health status", { error });
       this.metrics.recordCounter("apikey.health_check_error", 1);
@@ -510,9 +475,7 @@ export class APIKeyManager {
       };
 
       // Invalidate cache to force refresh
-      if (this.cacheManager) {
-        await this.cacheManager.invalidateKey(keyId);
-      }
+      // Cache invalidation is handled internally by storage component
 
       // Record metrics
       this.metrics.recordTimer(
@@ -543,15 +506,19 @@ export class APIKeyManager {
    * Get usage statistics for an API key
    */
   async getUsageStats(keyId: string): Promise<any | null> {
-    if (!this.usageTracker) {
-      this.logger.warn("Usage tracking not enabled");
+    if (!this.monitoring) {
+      this.logger.warn("Monitoring not enabled");
       return null;
     }
 
     const startTime = performance.now();
 
     try {
-      const stats = await this.usageTracker.getUsageStats(keyId);
+      const result = await this.monitoring.getUsageStats(keyId);
+      if (!result.success) {
+        throw new Error(`Failed to get usage stats: ${result.error}`);
+      }
+      const stats = result.data;
 
       this.metrics.recordTimer(
         "apikey.usage_stats_duration",
@@ -574,18 +541,9 @@ export class APIKeyManager {
     this.logger.info("Starting APIKeyManager cleanup");
 
     try {
-      // Cleanup all components that support cleanup
-      if (
-        this.healthMonitor &&
-        typeof this.healthMonitor.cleanup === "function"
-      ) {
-        await this.healthMonitor.cleanup();
-      }
-      if (
-        this.usageTracker &&
-        typeof this.usageTracker.cleanup === "function"
-      ) {
-        await this.usageTracker.cleanup();
+      // Cleanup consolidated components that support cleanup
+      if (this.monitoring && typeof this.monitoring.cleanup === "function") {
+        await this.monitoring.cleanup();
       }
 
       this.logger.info("All available components cleaned up successfully");

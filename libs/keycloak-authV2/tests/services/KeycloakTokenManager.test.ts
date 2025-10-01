@@ -35,8 +35,8 @@ jest.mock("@libs/messaging", () => ({
 }));
 
 // Import after mocks
-import { TokenManager as KeycloakTokenManager } from "../../src/services/KeycloakTokenManager.ts.old";
-import type { AuthV2Config } from "../../src/services/config";
+import { TokenManager as KeycloakTokenManager } from "../../src/services/token/TokenManager";
+import type { AuthV2Config } from "../../src/services/token/config";
 import { KeycloakClient } from "../../src/client/KeycloakClient";
 import type { AuthResult } from "../../src/types";
 
@@ -104,7 +104,7 @@ describe("KeycloakTokenManager", () => {
   let mockMetrics: jest.Mocked<IMetricsCollector>;
   let tokenManager: KeycloakTokenManager;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Reset all mocks
     jest.clearAllMocks();
 
@@ -115,7 +115,11 @@ describe("KeycloakTokenManager", () => {
     } as any;
 
     mockConfig = {
-      jwt: {},
+      jwt: {
+        issuer: "https://test-keycloak.example.com/auth/realms/test",
+        audience: "test-client",
+        clockTolerance: 60,
+      },
       cache: {
         enabled: true,
         ttl: { jwt: 300, apiKey: 600, session: 3600, userInfo: 1800 },
@@ -131,7 +135,7 @@ describe("KeycloakTokenManager", () => {
         enforceUserAgentConsistency: false,
         tokenEncryption: true,
       },
-      encryption: { key: "test-key" },
+      encryption: { key: "test-key-that-is-at-least-32-chars-long" },
     } as AuthV2Config;
 
     mockMetrics = {
@@ -155,6 +159,9 @@ describe("KeycloakTokenManager", () => {
       mockConfig,
       mockMetrics
     );
+
+    // Initialize the token manager
+    await tokenManager.initialize();
   });
 
   describe("constructor", () => {

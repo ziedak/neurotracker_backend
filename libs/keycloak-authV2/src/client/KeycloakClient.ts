@@ -191,8 +191,55 @@ export interface KeycloakClientOptions {
     clockSkew?: number; // seconds
   };
 }
+export interface IKeycloakClient {
+  initialize(): Promise<void>;
+  authenticateClientCredentials(
+    scopes?: string[]
+  ): Promise<KeycloakTokenResponse>;
+  exchangeAuthorizationCode(
+    code: string,
+    codeVerifier?: string // For PKCE
+  ): Promise<KeycloakTokenResponse>;
+  validateToken(token: string): Promise<AuthResult>;
+  introspectToken(token: string): Promise<AuthResult>;
+  getUserInfo(accessToken: string): Promise<KeycloakUserInfo>;
+  refreshToken(refreshToken: string): Promise<KeycloakTokenResponse>;
+  getAuthorizationUrl(
+    state: string,
+    nonce: string,
+    codeChallenge?: string, // For PKCE
+    additionalScopes?: string[]
+  ): string;
+  getLogoutUrl(postLogoutRedirectUri?: string, idTokenHint?: string): string;
+  authenticateWithPassword(
+    username: string,
+    password: string,
+    clientId?: string
+  ): Promise<DirectGrantAuthResult>;
+  exchangeCodeForTokens(
+    code: string,
+    redirectUri: string,
+    codeVerifier?: string
+  ): Promise<CodeExchangeResult>;
+  logout(refreshToken: string): Promise<void>;
+  getDiscoveryDocument(): KeycloakDiscoveryDocument | undefined;
+  getStats(): {
+    discoveryLoaded: boolean;
+    jwksLoaded: boolean;
+    cacheEnabled: boolean;
+    requestCount: number;
+    successfulRequests: number;
+    failedRequests: number;
+    successRate: number;
+    lastRequestTime: Date | null;
+    initializationState: "pending" | "initialized" | "failed";
+  };
+  healthCheck(): Promise<boolean>;
+  dispose(): Promise<void>;
+  isReady(): boolean;
+}
 
-export class KeycloakClient {
+export class KeycloakClient implements IKeycloakClient {
   private readonly logger = createLogger("KeycloakClient");
   private readonly httpClient: HttpClient;
   private cacheService?: CacheService | undefined;
@@ -1687,10 +1734,22 @@ export class KeycloakClient {
     try {
       this.logger.info("Disposing KeycloakClient resources");
 
-      // Clear cache if available
+      const startTime = performance.now();
+
+      // Clear cache entries related to this client
       if (this.cacheService) {
-        // Note: CacheService doesn't have a dispose method, so we just remove the reference
-        this.cacheService = undefined;
+        try {
+          // Clear cached discovery document
+          const discoveryCacheKey = `keycloak_discovery:${this.options.realm.realm}`;
+          await this.cacheService.invalidate(discoveryCacheKey);
+
+          // Note: Individual token cache entries will expire naturally
+          // Clearing all would require cache pattern matching which isn't available
+
+          this.cacheService = undefined;
+        } catch (error) {
+          this.logger.warn("Failed to clear cache during disposal", { error });
+        }
       }
 
       // Clear discovery document and JWKS
@@ -1708,9 +1767,15 @@ export class KeycloakClient {
         lastRequestTime: 0,
       };
 
+      this.metrics?.recordTimer(
+        "keycloak.client.disposal_duration",
+        performance.now() - startTime
+      );
+
       this.logger.info("KeycloakClient disposed successfully");
     } catch (error) {
       this.logger.error("Error during KeycloakClient disposal", { error });
+      this.metrics?.recordCounter("keycloak.client.disposal_error", 1);
       throw error;
     }
   }

@@ -23,10 +23,7 @@ import type { PostgreSQLClient, CacheService } from "@libs/database";
 
 // Component imports
 import { SessionStore, type SessionStoreConfig } from "./SessionStore";
-import {
-  SessionTokenManager as TokenManager,
-  type SessionTokenManagerConfig as TokenManagerConfig,
-} from "./SessionTokenManager";
+
 import {
   SessionValidator,
   type SessionValidatorConfig,
@@ -44,13 +41,15 @@ import type {
   HealthCheckResult,
   SessionFingerprint,
 } from "./sessionTypes";
+import { createTokenManagerWithRefresh, type TokenManager } from "../token";
+import type { ITokenManager } from "../token/TokenManager";
 
 /**
  * Unified session manager configuration
  */
 export interface KeycloakSessionManagerConfig {
   readonly sessionStore?: Partial<SessionStoreConfig>;
-  readonly tokenManager?: Partial<TokenManagerConfig>;
+  // readonly tokenManager?: Partial<TokenManagerConfig>;
   readonly sessionValidator?: Partial<SessionValidatorConfig>;
   readonly sessionSecurity?: Partial<SessionSecurityConfig>;
   readonly sessionMetrics?: Partial<SessionMetricsConfig>;
@@ -71,7 +70,7 @@ export interface KeycloakSessionManagerConfig {
 
 const DEFAULT_SESSION_CONFIG: Required<KeycloakSessionManagerConfig> = {
   sessionStore: {},
-  tokenManager: {},
+  // tokenManager: {},
   sessionValidator: {},
   sessionSecurity: {},
   sessionMetrics: {},
@@ -113,7 +112,7 @@ export class KeycloakSessionManager {
 
   // Core components
   private readonly sessionStore: SessionStore;
-  private readonly tokenManager: TokenManager;
+
   private readonly sessionValidator?: SessionValidator;
   private readonly sessionSecurity?: SessionSecurity;
   private readonly sessionMetrics?: SessionMetrics;
@@ -124,6 +123,7 @@ export class KeycloakSessionManager {
   private isShuttingDown = false;
 
   constructor(
+    private readonly tokenManager: ITokenManager,
     private readonly dbClient: PostgreSQLClient,
     private readonly cacheService?: CacheService,
     private readonly metrics?: IMetricsCollector,
@@ -144,11 +144,11 @@ export class KeycloakSessionManager {
       this.config.sessionStore
     );
 
-    this.tokenManager = new TokenManager(
-      this.logger.child({ component: "TokenManager" }),
-      this.metrics,
-      this.config.tokenManager
-    );
+    // this.tokenManager = new TokenManager(
+    //   this.logger.child({ component: "TokenManager" }),
+    //   this.metrics,
+    //   this.config.tokenManager
+    // );
 
     // Initialize optional components based on configuration
     if (this.config.enableComponents.validation) {
@@ -582,7 +582,7 @@ export class KeycloakSessionManager {
       );
 
       // Refresh tokens via Keycloak
-      const refreshResult = await this.tokenManager.refreshAccessToken(
+      const refreshResult = await this.tokenManager. refreshAccessToken(
         decryptedRefreshToken,
         this.config.keycloak.serverUrl +
           "/realms/" +
@@ -775,10 +775,6 @@ export class KeycloakSessionManager {
 
       const healthResults: Record<string, any> = {};
 
-      // Core component health checks
-      healthResults["sessionStore"] = await this.sessionStore.healthCheck();
-      healthResults["tokenManager"] = await this.tokenManager.healthCheck();
-
       // Optional component health checks
       if (this.sessionValidator) {
         healthResults["sessionValidator"] =
@@ -866,7 +862,7 @@ export class KeycloakSessionManager {
         await this.sessionValidator.cleanup();
       }
 
-      await this.tokenManager.cleanup();
+      await this.tokenManager.dispose();
       await this.sessionStore.cleanup();
 
       this.logger.info("Session manager shutdown completed");

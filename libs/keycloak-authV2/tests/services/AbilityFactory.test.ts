@@ -4,7 +4,7 @@
  * Comprehensive tests for the CASL AbilityFactory service
  */
 
-import { AbilityFactory } from "../../src/services/AbilityFactoryRefactored";
+import { AbilityFactory } from "../../src/services/ability/AbilityFactory";
 import type {
   AuthorizationContext,
   Role,
