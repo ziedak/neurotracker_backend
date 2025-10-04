@@ -1,7 +1,7 @@
 import { UserStatus } from "./types";
 import type { Store, RecoveryEvent, SessionActivity } from "./store";
 import type { Cart, Order } from "./commerce";
-import type { ApiKey } from "./api";
+import type { ApiKey } from "./ApiKey";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 
@@ -73,6 +73,8 @@ export interface User {
   username: string;
   firstName?: string | null;
   lastName?: string | null;
+  name?: string | null; // Better-Auth: full name field
+  image?: string | null; // Better-Auth: profile image URL
   phone?: string | null;
   status: UserStatus;
   emailVerified: boolean;
@@ -96,6 +98,7 @@ export interface User {
   roleExpiresAt?: Date | null;
   metadata?: unknown | null;
   sessions?: UserSession[];
+  accounts?: unknown[]; // Better-Auth: OAuth accounts (import from auth.ts to avoid circular)
   events?: UserEvent[];
   carts?: Cart[];
   notifications?: Notification[];
@@ -112,6 +115,7 @@ export interface UserSession {
   userId: string;
   storeId: string;
   sessionId: string;
+  token: string; // Better-Auth: session token (required, unique)
   keycloakSessionId?: string | null;
   accessToken?: string | null;
   refreshToken?: string | null;
@@ -217,6 +221,8 @@ export const UserCreateInputSchema = z.object({
   username: z.string().min(3).max(50),
   firstName: z.string().min(1).max(50).optional().nullable(),
   lastName: z.string().min(1).max(50).optional().nullable(),
+  name: z.string().min(1).max(255).optional().nullable(), // Better-Auth: full name
+  image: z.string().url().optional().nullable(), // Better-Auth: profile image
   phone: z
     .string()
     .regex(/^\+?[1-9]\d{1,14}$/)
@@ -252,6 +258,8 @@ export const UserUpdateInputSchema = z.object({
   username: z.string().min(3).max(50).optional(),
   firstName: z.string().min(1).max(50).nullable().optional(),
   lastName: z.string().min(1).max(50).nullable().optional(),
+  name: z.string().min(1).max(255).nullable().optional(), // Better-Auth: full name
+  image: z.string().url().nullable().optional(), // Better-Auth: profile image
   phone: z
     .string()
     .regex(/^\+?[1-9]\d{1,14}$/)
@@ -333,6 +341,7 @@ export const UserSessionCreateInputSchema = z.object({
   userId: z.string().uuid(),
   storeId: z.string().uuid(),
   sessionId: z.string().min(1).max(255),
+  token: z.string().min(1).max(255), // Better-Auth: session token (required)
   keycloakSessionId: z.string().max(255).nullable().optional(),
   accessToken: z.string().nullable().optional(),
   refreshToken: z.string().nullable().optional(),
@@ -354,6 +363,7 @@ export const UserSessionCreateInputSchema = z.object({
 
 export const UserSessionUpdateInputSchema = z.object({
   sessionId: z.string().min(1).max(255).optional(),
+  token: z.string().min(1).max(255).optional(), // Better-Auth: session token
   keycloakSessionId: z.string().max(255).nullable().optional(),
   accessToken: z.string().nullable().optional(),
   refreshToken: z.string().nullable().optional(),

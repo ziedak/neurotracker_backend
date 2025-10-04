@@ -53,6 +53,37 @@ export class ResilientKeycloakClient implements IKeycloakClient {
       ...fallbackConfig,
     };
   }
+  async validateClientCredentials(
+    clientId: string,
+    clientSecret: string
+  ): Promise<boolean> {
+    if (!this.isKeycloakAvailable) {
+      throw new Error(
+        "Client credentials validation requires Keycloak availability"
+      );
+    }
+    return this.client.validateClientCredentials(clientId, clientSecret);
+  }
+
+  async logout(userId: string, sessionId?: string): Promise<void> {
+    if (this.isKeycloakAvailable) {
+      try {
+        await this.client.logout(userId, sessionId);
+      } catch (error) {
+        this.logger.warn("Logout failed, clearing local cache", { error });
+      }
+    } else {
+      this.logger.warn(
+        "Logout called while Keycloak unavailable, clearing local cache",
+        { userId }
+      );
+    }
+
+    // Always clear local cache if sessionId provided
+    if (sessionId) {
+      this.clearTokenFromCache(sessionId);
+    }
+  }
 
   /**
    * Initialize with enhanced error handling
@@ -313,10 +344,10 @@ export class ResilientKeycloakClient implements IKeycloakClient {
     return this.client.exchangeCodeForTokens(code, redirectUri, codeVerifier);
   }
 
-  async logout(refreshToken: string): Promise<void> {
+  async revokingRefreshToken(refreshToken: string): Promise<void> {
     if (this.isKeycloakAvailable) {
       try {
-        await this.client.logout(refreshToken);
+        await this.client.revokingRefreshToken(refreshToken);
       } catch (error) {
         this.logger.warn("Logout failed, clearing local cache", { error });
       }

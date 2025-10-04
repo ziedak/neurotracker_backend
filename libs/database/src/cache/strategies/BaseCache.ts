@@ -89,6 +89,99 @@ export abstract class BaseCache<TConfig extends CacheConfig = CacheConfig>
     }
   }
 
+  async exists(key: string): Promise<boolean> {
+    if (!this.isEnabled()) return false;
+    try {
+      return await this.doExists(key);
+    } catch (error) {
+      this.logger.error(`Exists error for key: ${key}`, error as Error);
+      return false;
+    }
+  }
+
+  async increment(key: string, delta: number = 1): Promise<number> {
+    if (!this.isEnabled()) return 0;
+    try {
+      return await this.doIncrement(key, delta);
+    } catch (error) {
+      this.logger.error(`Increment error for key: ${key}`, error as Error);
+      return 0;
+    }
+  }
+
+  async expire(key: string, ttl: number): Promise<boolean> {
+    if (!this.isEnabled()) return false;
+    try {
+      return await this.doExpire(key, ttl);
+    } catch (error) {
+      this.logger.error(`Expire error for key: ${key}`, error as Error);
+      return false;
+    }
+  }
+
+  async getTTL(key: string): Promise<number> {
+    if (!this.isEnabled()) return -2;
+    try {
+      return await this.doGetTTL(key);
+    } catch (error) {
+      this.logger.error(`GetTTL error for key: ${key}`, error as Error);
+      return -2;
+    }
+  }
+
+  async mGet<T>(keys: string[]): Promise<(T | null)[]> {
+    if (!this.isEnabled()) return keys.map(() => null);
+    try {
+      return await this.doMGet<T>(keys);
+    } catch (error) {
+      this.logger.error(`MGet error for keys`, error as Error);
+      return keys.map(() => null);
+    }
+  }
+
+  async mSet<T>(entries: Record<string, T>, ttl?: number): Promise<void> {
+    if (!this.isEnabled()) return;
+    try {
+      await this.doMSet(entries, ttl ?? this.config.defaultTtl);
+    } catch (error) {
+      this.logger.error(`MSet error`, error as Error);
+    }
+  }
+
+  async getOrCompute<T>(
+    key: string,
+    computeFn: () => Promise<T>,
+    ttl?: number
+  ): Promise<T> {
+    // Try to get from cache first
+    const result = await this.get<T>(key);
+    if (result.data !== null) {
+      return result.data;
+    }
+
+    // Not in cache, compute the value
+    try {
+      const computedValue = await computeFn();
+
+      // Store in cache
+      await this.set(key, computedValue, ttl ?? this.config.defaultTtl);
+
+      return computedValue;
+    } catch (error) {
+      this.logger.error(`GetOrCompute error for key: ${key}`, error as Error);
+      throw error;
+    }
+  }
+
+  async mInvalidate(tags: string[]): Promise<void> {
+    if (!this.isEnabled()) return;
+    try {
+      await this.doMInvalidate(tags);
+    } catch (error) {
+      this.logger.error(`MInvalidate error for tags`, error as Error);
+    }
+  }
+
   // Abstract methods for subclasses
   protected abstract doGet<T>(
     key: string
@@ -96,5 +189,15 @@ export abstract class BaseCache<TConfig extends CacheConfig = CacheConfig>
   protected abstract doSet<T>(key: string, data: T, ttl: number): Promise<void>;
   protected abstract doInvalidate(key: string): Promise<void>;
   protected abstract doInvalidatePattern(pattern: string): Promise<number>;
+  protected abstract doExists(key: string): Promise<boolean>;
+  protected abstract doIncrement(key: string, delta: number): Promise<number>;
+  protected abstract doExpire(key: string, ttl: number): Promise<boolean>;
+  protected abstract doGetTTL(key: string): Promise<number>;
+  protected abstract doMGet<T>(keys: string[]): Promise<(T | null)[]>;
+  protected abstract doMSet<T>(
+    entries: Record<string, T>,
+    ttl: number
+  ): Promise<void>;
+  protected abstract doMInvalidate(tags: string[]): Promise<void>;
   abstract healthCheck(): Promise<CacheHealth>;
 }

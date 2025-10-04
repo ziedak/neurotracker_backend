@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../../dist/libs/keycloak-authV2",
+    "tsBuildInfoFile": "../../dist/libs/keycloak-authV2/tsconfig.tsbuildinfo",
+    "composite": true,
+    "rootDir": "src"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["tests/**/*"],
+  "references": [
+    { "path": "../../libs/database" },
+    { "path": "../../libs/config" },
+    { "path": "../../libs/utils" },
+    { "path": "../../libs/messaging" },
+    { "path": "../../libs/monitoring" }
+  ]
+}

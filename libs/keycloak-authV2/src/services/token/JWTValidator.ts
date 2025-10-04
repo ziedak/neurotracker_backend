@@ -8,8 +8,8 @@ import type { IMetricsCollector } from "@libs/monitoring";
 import type { AuthResult } from "../../types";
 import { jwtVerify, createRemoteJWKSet } from "jose";
 import { z } from "zod";
+import { ClaimsExtractor } from "./ClaimsExtractor";
 import type { SecureCacheManager } from "./SecureCacheManager";
-import { RolePermissionExtractor } from "./RolePermissionExtractor";
 
 // Token validation schema
 const TokenSchema = z
@@ -114,16 +114,20 @@ export class JWTValidator {
     }
 
     // If cache is not available, skip replay protection
-    if (!this.cacheManager?.isEnabled) {
+    if (!this.cacheManager) {
       this.logger.debug("Cache disabled - replay protection skipped");
       return true;
     }
 
     const tokenId = `${jti}:${iat}`;
+    const cachePrefix = "jwt:replay";
 
     // Check if token was already processed
-    const cachedResult = await this.cacheManager.get("jwt_replay", tokenId);
-    if (cachedResult.hit) {
+    const cachedResult = await this.cacheManager.get<AuthResult>(
+      cachePrefix,
+      tokenId
+    );
+    if (cachedResult.data && cachedResult.source !== "miss") {
       this.logger.error("Token replay detected", { jti, iat });
       return false;
     }
@@ -143,7 +147,7 @@ export class JWTValidator {
         permissions: [],
       },
     };
-    await this.cacheManager.set("jwt_replay", tokenId, replayMarker, ttl);
+    await this.cacheManager.set(cachePrefix, tokenId, replayMarker, ttl);
 
     this.logger.debug("Token marked as processed for replay protection", {
       jti,
@@ -207,9 +211,8 @@ export class JWTValidator {
           username: claims["preferred_username"] as string,
           email: claims["email"] as string,
           name: claims["name"] as string,
-          roles: RolePermissionExtractor.extractRolesFromJWT(claims),
-          permissions:
-            RolePermissionExtractor.extractPermissionsFromJWT(claims),
+          roles: ClaimsExtractor.extractRolesFromJWT(claims),
+          permissions: ClaimsExtractor.extractPermissionsFromJWT(claims),
         },
         expiresAt: claims["exp"]
           ? new Date((claims["exp"] as number) * 1000)

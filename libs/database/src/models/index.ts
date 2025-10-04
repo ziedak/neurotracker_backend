@@ -5,4 +5,5 @@ export * from "./user";
 export * from "./commerce";
 export * from "./analytics";
 export * from "./system";
-export * from "./api";
+export * from "./ApiKey";
+export * from "./auth"; // Better-Auth models (Account, Verification)

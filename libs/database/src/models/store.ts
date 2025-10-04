@@ -1,7 +1,7 @@
 import { StoreStatus, RecoveryStatus, ReportStatus } from "./types";
 import type { User, UserSession } from "./user";
 import type { Cart, Product } from "./commerce";
-import type { ApiKey } from "./api";
+import type { ApiKey } from "./ApiKey";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 

@@ -331,6 +331,124 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
     return invalidatedCount;
   }
 
+  protected async doExists(key: string): Promise<boolean> {
+    return Promise.resolve(this.memoryCache.has(key));
+  }
+
+  protected async doIncrement(key: string, delta: number): Promise<number> {
+    const entry = this.memoryCache.get(key) as CacheEntry<number> | undefined;
+
+    if (entry && typeof entry.data === "number") {
+      // Update existing counter
+      const newValue = entry.data + delta;
+      entry.data = newValue;
+      entry.timestamp = Date.now();
+      entry.hits++;
+      this.memoryCache.set(key, entry);
+      return Promise.resolve(newValue);
+    }
+
+    // Create new counter
+    const newValue = delta;
+    const newEntry: CacheEntry<number> = {
+      data: newValue,
+      timestamp: Date.now(),
+      ttl: this.config.defaultTtl,
+      hits: 0,
+      compressed: false,
+    };
+
+    this.memoryTracker.trackEntry(key, newValue, {
+      timestamp: newEntry.timestamp,
+      ttl: newEntry.ttl,
+      hits: newEntry.hits,
+      compressed: newEntry.compressed,
+    });
+
+    this.memoryCache.set(key, newEntry);
+    this.updateMemoryStats();
+
+    return Promise.resolve(newValue);
+  }
+
+  protected async doExpire(key: string, ttl: number): Promise<boolean> {
+    const entry = this.memoryCache.get(key);
+    if (!entry) {
+      return Promise.resolve(false);
+    }
+
+    // Update TTL by recreating the entry with new TTL
+    entry.ttl = ttl;
+    this.memoryCache.set(key, entry, { ttl: ttl * 1000 }); // Convert to milliseconds
+
+    return Promise.resolve(true);
+  }
+
+  protected async doGetTTL(key: string): Promise<number> {
+    const entry = this.memoryCache.get(key);
+    if (!entry) {
+      return Promise.resolve(-2); // Key does not exist
+    }
+
+    const remainingTime = this.memoryCache.getRemainingTTL(key);
+    if (remainingTime === 0) {
+      return Promise.resolve(-1); // No expiry set
+    }
+
+    return Promise.resolve(Math.ceil(remainingTime / 1000)); // Convert milliseconds to seconds
+  }
+
+  protected async doMGet<T>(keys: string[]): Promise<(T | null)[]> {
+    const results: (T | null)[] = [];
+
+    for (const key of keys) {
+      const entry = this.memoryCache.get(key) as CacheEntry<T> | undefined;
+
+      if (!entry) {
+        results.push(null);
+        continue;
+      }
+
+      // Handle decompression if needed
+      const { data, compressed } = entry;
+      let finalData = data;
+      if (compressed) {
+        try {
+          const { data: decompressedData } = await decompress(
+            data,
+            DEFAULT_DECOMPRESSION_CONFIG
+          );
+          finalData = decompressedData as T;
+        } catch (error) {
+          this.logger.warn("Failed to decompress cache entry in mGet", {
+            key,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      results.push(finalData);
+    }
+
+    return results;
+  }
+
+  protected async doMSet<T>(
+    entries: Record<string, T>,
+    ttl: number
+  ): Promise<void> {
+    for (const [key, data] of Object.entries(entries)) {
+      await this.doSet(key, data, ttl);
+    }
+  }
+
+  protected async doMInvalidate(tags: string[]): Promise<void> {
+    // For memory cache, treat tags as key patterns
+    for (const tag of tags) {
+      await this.doInvalidatePattern(`*${tag}*`);
+    }
+  }
+
   /**
    * Dispose of memory cache resources
    */

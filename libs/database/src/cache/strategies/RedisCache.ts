@@ -223,6 +223,149 @@ export class RedisCache extends BaseCache<RedisCacheConfig> {
     return invalidatedCount;
   }
 
+  protected async doExists(key: string): Promise<boolean> {
+    const redisKey = this.getRedisKey(key);
+    const exists = await this.redisClient.exists(redisKey);
+    return exists > 0;
+  }
+
+  protected async doIncrement(key: string, delta: number): Promise<number> {
+    const redisKey = this.getRedisKey(key);
+    const redis = this.redisClient.getRedis();
+
+    if (delta === 1) {
+      // Use INCR for simple increment
+      return redis.incr(redisKey);
+    }
+
+    // Use INCRBY for custom delta
+    return redis.incrby(redisKey, delta);
+  }
+
+  protected async doExpire(key: string, ttl: number): Promise<boolean> {
+    const redisKey = this.getRedisKey(key);
+    const redis = this.redisClient.getRedis();
+    const result = await redis.expire(redisKey, ttl);
+    return result === 1;
+  }
+
+  protected async doGetTTL(key: string): Promise<number> {
+    const redisKey = this.getRedisKey(key);
+    const redis = this.redisClient.getRedis();
+    return redis.ttl(redisKey);
+  }
+
+  protected async doMGet<T>(keys: string[]): Promise<(T | null)[]> {
+    if (keys.length === 0) {
+      return [];
+    }
+
+    const redisKeys = keys.map((k) => this.getRedisKey(k));
+    const rawResults = await this.redisClient.safeMget(...redisKeys);
+
+    const results: (T | null)[] = [];
+
+    for (const rawData of rawResults) {
+      if (!rawData) {
+        results.push(null);
+        continue;
+      }
+
+      try {
+        const entry: CacheEntry<T> = JSON.parse(rawData);
+
+        // Decompress data if it was compressed
+        let { data } = entry;
+        if (entry.compressed && entry.compressionAlgorithm) {
+          try {
+            const decompressResult = await decompress(
+              data,
+              DEFAULT_COMPRESSION_CONFIG
+            );
+            data = decompressResult.data as T;
+          } catch (error) {
+            this.logger.warn("Failed to decompress Redis cache entry in mGet", {
+              algorithm: entry.compressionAlgorithm,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            // Use raw data as fallback
+          }
+        }
+
+        results.push(data);
+      } catch (error) {
+        this.logger.error(
+          `Redis cache deserialization error in mGet`,
+          error as Error
+        );
+        results.push(null);
+      }
+    }
+
+    return results;
+  }
+
+  protected async doMSet<T>(
+    entries: Record<string, T>,
+    ttl: number
+  ): Promise<void> {
+    const redis = this.redisClient.getRedis();
+    const pipeline = redis.pipeline();
+
+    for (const [key, data] of Object.entries(entries)) {
+      // Compress data if enabled and meets threshold
+      let finalData: T | unknown = data;
+      let compressed = false;
+      let compressionAlgorithm: string | undefined;
+
+      if (this.config.compressionConfig?.enableCompression) {
+        try {
+          const compressionResult = await compress(
+            data,
+            DEFAULT_COMPRESSION_CONFIG
+          );
+          if (compressionResult.compressed) {
+            finalData = compressionResult.data;
+            compressed = true;
+            compressionAlgorithm = compressionResult.algorithm;
+            this.stats.compressions++;
+          }
+        } catch (error) {
+          this.logger.warn(
+            "Redis compression failed in mSet, storing uncompressed data",
+            {
+              key,
+              error: error instanceof Error ? error.message : String(error),
+            }
+          );
+        }
+      }
+
+      const entry: CacheEntry<T> = {
+        data: finalData as T,
+        timestamp: Date.now(),
+        ttl,
+        hits: 0,
+        compressed,
+        ...(compressionAlgorithm && { compressionAlgorithm }),
+      };
+
+      const serializedData = JSON.stringify(entry);
+      const redisKey = this.getRedisKey(key);
+
+      pipeline.setex(redisKey, ttl, serializedData);
+    }
+
+    await pipeline.exec();
+  }
+
+  protected async doMInvalidate(tags: string[]): Promise<void> {
+    // For Redis cache, treat tags as key patterns
+    for (const tag of tags) {
+      await this.doInvalidatePattern(`*${tag}*`);
+    }
+  }
+
   /**
    * Dispose of Redis cache resources
    */

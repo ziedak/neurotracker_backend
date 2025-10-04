@@ -90,11 +90,239 @@ export class CacheService implements ICache {
     }
   }
 
+  /**
+   * General factory method - creates a cache service with custom configuration
+   * @param metrics - Optional metrics collector for monitoring
+   * @param caches - Optional custom cache implementations
+   * @param config - Partial cache configuration
+   * @returns CacheService instance
+   */
   static create(
     metrics?: IMetricsCollector,
     caches?: ICache[],
     config: Partial<CacheConfig> = {}
   ): CacheService {
+    return new CacheService(metrics, caches, config);
+  }
+
+  /**
+   * Factory: Memory-only cache (no Redis)
+   * Ideal for: Testing, single-instance apps, or when Redis is unavailable
+   * @param config - Optional cache configuration
+   * @returns CacheService with only memory cache
+   */
+  static createMemoryOnly(config: Partial<CacheConfig> = {}): CacheService {
+    const memoryCache = new MemoryCache({
+      enable: true,
+      defaultTtl: config.defaultTtl ?? 300,
+      maxTtl: config.maxTtl ?? 3600,
+      minTtl: config.minTtl ?? 60,
+      maxMemoryCacheSize: 10000, // 10k entries
+    });
+
+    return new CacheService(undefined, [memoryCache], config);
+  }
+
+  /**
+   * Factory: Redis-only cache (no memory layer)
+   * Ideal for: Multi-instance deployments, shared cache requirements
+   * @param metrics - Metrics collector for monitoring
+   * @param config - Optional cache configuration
+   * @returns CacheService with only Redis cache
+   */
+  static createRedisOnly(
+    metrics: IMetricsCollector,
+    config: Partial<CacheConfig> = {}
+  ): CacheService {
+    const redisCache = new RedisCache(RedisClient.create({}, metrics), {
+      enable: true,
+      defaultTtl: config.defaultTtl ?? 300,
+      maxTtl: config.maxTtl ?? 3600,
+      minTtl: config.minTtl ?? 60,
+    });
+
+    return new CacheService(metrics, [redisCache], config);
+  }
+
+  /**
+   * Factory: Multi-level cache (Memory + Redis)
+   * Ideal for: Production deployments with high performance requirements
+   * @param metrics - Metrics collector for monitoring
+   * @param config - Optional cache configuration
+   * @returns CacheService with memory and Redis cache levels
+   */
+  static createMultiLevel(
+    metrics: IMetricsCollector,
+    config: Partial<CacheConfig> = {}
+  ): CacheService {
+    const memoryCache = new MemoryCache({
+      enable: true,
+      defaultTtl: config.defaultTtl ?? 300,
+      maxTtl: config.maxTtl ?? 3600,
+      minTtl: config.minTtl ?? 60,
+      maxMemoryCacheSize: 10000,
+    });
+
+    const redisCache = new RedisCache(RedisClient.create({}, metrics), {
+      enable: true,
+      defaultTtl: config.defaultTtl ?? 300,
+      maxTtl: config.maxTtl ?? 3600,
+      minTtl: config.minTtl ?? 60,
+    });
+
+    return new CacheService(metrics, [memoryCache, redisCache], config);
+  }
+
+  /**
+   * Factory: Development mode cache with warmup
+   * Ideal for: Development environment with pre-populated cache
+   * @param metrics - Optional metrics collector
+   * @param config - Optional cache configuration
+   * @returns CacheService with warmup enabled
+   */
+  static createForDevelopment(
+    metrics?: IMetricsCollector,
+    config: Partial<CacheConfig> = {}
+  ): CacheService {
+    const devConfig: Partial<CacheConfig> = {
+      ...config,
+      enable: true,
+      warmupOnStart: true,
+      warmingConfig: {
+        enableBackgroundWarming: true,
+        backgroundWarmingInterval: 600, // 10 minutes
+        adaptiveWarming: true,
+        maxWarmupKeys: 50, // Lower for dev
+        warmupBatchSize: 10,
+        enablePatternLearning: true,
+      },
+    };
+
+    return new CacheService(metrics, undefined, devConfig);
+  }
+
+  /**
+   * Factory: Production mode cache with optimizations
+   * Ideal for: Production environment with full monitoring
+   * @param metrics - Metrics collector (required for production)
+   * @param config - Optional cache configuration
+   * @returns CacheService optimized for production
+   */
+  static createForProduction(
+    metrics: IMetricsCollector,
+    config: Partial<CacheConfig> = {}
+  ): CacheService {
+    const prodConfig: Partial<CacheConfig> = {
+      ...config,
+      enable: true,
+      defaultTtl: config.defaultTtl ?? 600, // 10 minutes
+      maxTtl: config.maxTtl ?? 7200, // 2 hours
+      minTtl: config.minTtl ?? 60, // 1 minute
+      warmupOnStart: false, // Don't block startup
+      warmingConfig: {
+        enableBackgroundWarming: true,
+        backgroundWarmingInterval: 300, // 5 minutes
+        adaptiveWarming: true,
+        maxWarmupKeys: 1000, // Higher for production
+        warmupBatchSize: 50,
+        enablePatternLearning: true,
+      },
+    };
+
+    return CacheService.createMultiLevel(metrics, prodConfig);
+  }
+
+  /**
+   * Factory: Testing mode cache
+   * Ideal for: Unit tests and integration tests
+   * @param config - Optional cache configuration
+   * @returns CacheService optimized for testing (memory-only, no warmup)
+   */
+  static createForTesting(config: Partial<CacheConfig> = {}): CacheService {
+    const testConfig: Partial<CacheConfig> = {
+      ...config,
+      enable: true,
+      defaultTtl: 300,
+      maxTtl: 600,
+      minTtl: 60,
+      warmupOnStart: false,
+      warmingConfig: {
+        enableBackgroundWarming: false,
+        adaptiveWarming: false,
+      },
+    };
+
+    return CacheService.createMemoryOnly(testConfig);
+  }
+
+  /**
+   * Factory: High-throughput cache configuration
+   * Ideal for: High-traffic applications with aggressive caching
+   * @param metrics - Metrics collector for monitoring
+   * @param config - Optional cache configuration
+   * @returns CacheService optimized for high throughput
+   */
+  static createHighThroughput(
+    metrics: IMetricsCollector,
+    config: Partial<CacheConfig> = {}
+  ): CacheService {
+    const highThroughputConfig: Partial<CacheConfig> = {
+      ...config,
+      enable: true,
+      defaultTtl: config.defaultTtl ?? 1800, // 30 minutes
+      maxTtl: config.maxTtl ?? 14400, // 4 hours
+      minTtl: config.minTtl ?? 300, // 5 minutes
+      warmupOnStart: true,
+      warmingConfig: {
+        enableBackgroundWarming: true,
+        backgroundWarmingInterval: 180, // 3 minutes
+        adaptiveWarming: true,
+        maxWarmupKeys: 2000,
+        warmupBatchSize: 100,
+        enablePatternLearning: true,
+      },
+    };
+
+    // Create cache with larger memory buffer
+    const memoryCache = new MemoryCache({
+      enable: true,
+      defaultTtl: highThroughputConfig.defaultTtl ?? 1800,
+      maxTtl: highThroughputConfig.maxTtl ?? 14400,
+      minTtl: highThroughputConfig.minTtl ?? 300,
+      maxMemoryCacheSize: 50000, // 50k entries for high throughput
+    });
+
+    const redisCache = new RedisCache(RedisClient.create({}, metrics), {
+      enable: true,
+      defaultTtl: highThroughputConfig.defaultTtl ?? 1800,
+      maxTtl: highThroughputConfig.maxTtl ?? 14400,
+      minTtl: highThroughputConfig.minTtl ?? 300,
+    });
+
+    return new CacheService(
+      metrics,
+      [memoryCache, redisCache],
+      highThroughputConfig
+    );
+  }
+
+  /**
+   * Factory: Custom cache with specific strategies
+   * Ideal for: Custom cache implementations or specific use cases
+   * @param caches - Array of custom cache implementations
+   * @param metrics - Optional metrics collector
+   * @param config - Optional cache configuration
+   * @returns CacheService with custom cache strategies
+   */
+  static createWithCustomCaches(
+    caches: ICache[],
+    metrics?: IMetricsCollector,
+    config: Partial<CacheConfig> = {}
+  ): CacheService {
+    if (!caches.length) {
+      throw new Error("At least one cache implementation must be provided");
+    }
+
     return new CacheService(metrics, caches, config);
   }
 
@@ -176,17 +404,351 @@ export class CacheService implements ICache {
   /**
    * Check if key exists in cache
    */
-  public async exists(key: string): Promise<boolean> {
-    try {
-      if (!this.isValidKey(key)) {
-        this.logger.warn("Invalid cache key provided to exists", { key });
-        return false;
-      }
-      const result = await this.get(key);
-      return result.data !== null;
-    } catch (error) {
+  async exists(key: string): Promise<boolean> {
+    if (!this.isValidKey(key)) {
       return false;
     }
+
+    // Check across all cache levels
+    for (let idx = 0; idx < this.caches.length; idx++) {
+      const cache = this.caches[idx];
+      if (!cache) continue;
+
+      const isEnabled = await cache.isEnabled();
+      if (!isEnabled) continue;
+
+      try {
+        const exists = await cache.exists(key);
+        if (exists) {
+          return true;
+        }
+      } catch (error) {
+        this.logger.error(`Cache exists check failed for level ${idx + 1}`, {
+          key,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Continue to next cache level on error
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Atomically increment a counter across all cache levels
+   */
+  async increment(key: string, delta: number = 1): Promise<number> {
+    if (!this.isValidKey(key)) {
+      return 0;
+    }
+
+    let finalValue = 0;
+
+    // Increment across all cache levels to keep them in sync
+    for (let idx = 0; idx < this.caches.length; idx++) {
+      const cache = this.caches[idx];
+      if (!cache) continue;
+
+      const isEnabled = await cache.isEnabled();
+      if (!isEnabled) continue;
+
+      try {
+        const value = await cache.increment(key, delta);
+        // Use the value from the first successful cache level
+        if (idx === 0) {
+          finalValue = value;
+        }
+      } catch (error) {
+        this.logger.error(`Cache increment failed for level ${idx + 1}`, {
+          key,
+          delta,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Continue to next cache level even if one fails
+      }
+    }
+
+    return finalValue;
+  }
+
+  /**
+   * Set or update TTL for a key across all cache levels
+   */
+  async expire(key: string, ttl: number): Promise<boolean> {
+    if (!this.isValidKey(key)) {
+      return false;
+    }
+
+    // Enforce TTL boundaries
+    const effectiveTtl = Math.max(
+      this.config.minTtl,
+      Math.min(ttl, this.config.maxTtl)
+    );
+
+    let success = false;
+
+    for (let idx = 0; idx < this.caches.length; idx++) {
+      const cache = this.caches[idx];
+      if (!cache) continue;
+
+      const isEnabled = await cache.isEnabled();
+      if (!isEnabled) continue;
+
+      try {
+        const result = await cache.expire(key, effectiveTtl);
+        if (result) {
+          success = true;
+        }
+      } catch (error) {
+        this.logger.error(`Cache expire failed for level ${idx + 1}`, {
+          key,
+          ttl: effectiveTtl,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Continue to next cache level even if one fails
+      }
+    }
+
+    return success;
+  }
+
+  /**
+   * Get remaining TTL for a key (checks first available cache level)
+   */
+  async getTTL(key: string): Promise<number> {
+    if (!this.isValidKey(key)) {
+      return -2;
+    }
+
+    // Check across cache levels, return from first available
+    for (let idx = 0; idx < this.caches.length; idx++) {
+      const cache = this.caches[idx];
+      if (!cache) continue;
+
+      const isEnabled = await cache.isEnabled();
+      if (!isEnabled) continue;
+
+      try {
+        const ttl = await cache.getTTL(key);
+        // Return if we find the key (ttl >= -1)
+        if (ttl !== -2) {
+          return ttl;
+        }
+      } catch (error) {
+        this.logger.error(`Cache getTTL failed for level ${idx + 1}`, {
+          key,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Continue to next cache level on error
+      }
+    }
+
+    return -2; // Key not found in any cache level
+  }
+
+  /**
+   * Batch get multiple keys with multi-level fallback
+   */
+  async mGet<T>(keys: string[]): Promise<(T | null)[]> {
+    if (!keys.length) {
+      return [];
+    }
+
+    // Validate all keys
+    const validKeys = keys.filter((key) => this.isValidKey(key));
+    if (validKeys.length !== keys.length) {
+      this.logger.warn("Some invalid keys filtered out in mGet", {
+        totalKeys: keys.length,
+        validKeys: validKeys.length,
+      });
+    }
+
+    // Initialize results array with nulls
+    const results: (T | null)[] = new Array(validKeys.length).fill(null);
+    const missingIndices: number[] = validKeys.map((_, idx) => idx);
+
+    // Try each cache level
+    for (
+      let cacheIdx = 0;
+      cacheIdx < this.caches.length && missingIndices.length > 0;
+      cacheIdx++
+    ) {
+      const cache = this.caches[cacheIdx];
+      if (!cache) continue;
+
+      const isEnabled = await cache.isEnabled();
+      if (!isEnabled) continue;
+
+      try {
+        // Get only missing keys
+        const keysToFetch = missingIndices
+          .map((idx) => validKeys[idx])
+          .filter((k): k is string => k !== undefined);
+        const cacheResults = await cache.mGet<T>(keysToFetch);
+
+        // Update results and track which keys are still missing
+        const stillMissing: number[] = [];
+        for (let i = 0; i < cacheResults.length; i++) {
+          const resultIdx = missingIndices[i];
+          const cacheResult = cacheResults[i];
+          if (resultIdx !== undefined && cacheResult != null) {
+            results[resultIdx] = cacheResult;
+            this.stats.Hits++;
+          } else if (resultIdx !== undefined) {
+            stillMissing.push(resultIdx);
+          }
+        }
+
+        missingIndices.length = 0;
+        missingIndices.push(...stillMissing);
+      } catch (error) {
+        this.logger.error(`Cache mGet failed for level ${cacheIdx + 1}`, {
+          keyCount: missingIndices.length,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Continue to next cache level on error
+      }
+    }
+
+    // Update stats
+    this.stats.Misses += missingIndices.length;
+    this.stats.totalRequests += validKeys.length;
+    this.updateHitRate();
+
+    return results;
+  }
+
+  /**
+   * Batch set multiple keys across all cache levels
+   */
+  async mSet<T>(entries: Record<string, T>, ttl?: number): Promise<void> {
+    const entriesArray = Object.entries(entries);
+    if (!entriesArray.length) {
+      return;
+    }
+
+    // Validate and filter entries
+    const validEntries: Record<string, T> = {};
+    for (const [key, data] of entriesArray) {
+      if (this.isValidKey(key) && data !== undefined) {
+        validEntries[key] = data;
+      }
+    }
+
+    if (Object.keys(validEntries).length === 0) {
+      this.logger.warn("No valid entries to set in mSet");
+      return;
+    }
+
+    // Enforce TTL boundaries
+    const effectiveTtl = Math.max(
+      this.config.minTtl,
+      Math.min(ttl ?? this.config.defaultTtl, this.config.maxTtl)
+    );
+
+    // Set across all cache levels
+    for (let idx = 0; idx < this.caches.length; idx++) {
+      const cache = this.caches[idx];
+      if (!cache) continue;
+
+      const isEnabled = await cache.isEnabled();
+      if (!isEnabled) continue;
+
+      try {
+        await cache.mSet<T>(validEntries, effectiveTtl);
+      } catch (error) {
+        this.logger.error(`Cache mSet failed for level ${idx + 1}`, {
+          entryCount: Object.keys(validEntries).length,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Continue to next cache level even if one fails
+      }
+    }
+  }
+
+  /**
+   * Get value from cache or compute it, preventing cache stampede
+   */
+  async getOrCompute<T>(
+    key: string,
+    computeFn: () => Promise<T>,
+    ttl?: number
+  ): Promise<T> {
+    if (!this.isValidKey(key)) {
+      throw new Error(`Invalid cache key: ${key}`);
+    }
+
+    // Try to get from cache first
+    const cachedResult = await this.get<T>(key);
+    if (cachedResult.data !== null) {
+      return cachedResult.data;
+    }
+
+    // Not in cache, compute the value
+    try {
+      const computedValue = await computeFn();
+
+      // Store in all cache levels
+      const effectiveTtl = ttl ?? this.config.defaultTtl;
+      await this.set(key, computedValue, effectiveTtl);
+
+      return computedValue;
+    } catch (error) {
+      this.logger.error(`GetOrCompute failed for key: ${key}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Invalidate multiple cache entries by tags (treated as patterns)
+   */
+  async mInvalidate(tags: string[]): Promise<void> {
+    if (!tags.length) {
+      return;
+    }
+
+    // Validate tags
+    const validTags = tags.filter((tag) => this.isValidKey(tag));
+    if (validTags.length !== tags.length) {
+      this.logger.warn("Some invalid tags filtered out in mInvalidate", {
+        totalTags: tags.length,
+        validTags: validTags.length,
+      });
+    }
+
+    let totalInvalidated = 0;
+
+    // Invalidate across all cache levels
+    for (let idx = 0; idx < this.caches.length; idx++) {
+      const cache = this.caches[idx];
+      if (!cache) continue;
+
+      const isEnabled = await cache.isEnabled();
+      if (!isEnabled) continue;
+
+      try {
+        await cache.mInvalidate(validTags);
+        // Also try pattern-based invalidation for each tag
+        for (const tag of validTags) {
+          const count = await cache.invalidatePattern(`*${tag}*`);
+          totalInvalidated += count;
+        }
+      } catch (error) {
+        this.logger.error(`Cache mInvalidate failed for level ${idx + 1}`, {
+          tags: validTags,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Continue to next cache level even if one fails
+      }
+    }
+
+    this.stats.invalidations += totalInvalidated;
+    this.logger.info("Multi-tag invalidation completed", {
+      tags: validTags,
+      totalInvalidated,
+    });
   }
 
   /**

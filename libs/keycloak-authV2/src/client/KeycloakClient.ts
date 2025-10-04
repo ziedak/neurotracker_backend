@@ -191,38 +191,151 @@ export interface KeycloakClientOptions {
     clockSkew?: number; // seconds
   };
 }
+/**
+ * Interface for a Keycloak client that handles authentication, token management, and related operations
+ * using the OpenID Connect and OAuth 2.0 protocols.
+ */
 export interface IKeycloakClient {
+  /**
+   * Initializes the Keycloak client, typically by loading the discovery document and JWKS.
+   * @returns A promise that resolves when initialization is complete.
+   */
   initialize(): Promise<void>;
+
+  /**
+   * Authenticates the client using the client credentials grant flow.
+   * @param scopes - Optional array of scopes to request.
+   * @returns A promise that resolves to the token response.
+   */
   authenticateClientCredentials(
     scopes?: string[]
   ): Promise<KeycloakTokenResponse>;
+
+  /**
+   * Exchanges an authorization code for tokens.
+   * @param code - The authorization code received from the authorization server.
+   * @param codeVerifier - Optional code verifier for PKCE (Proof Key for Code Exchange).
+   * @returns A promise that resolves to the token response.
+   */
   exchangeAuthorizationCode(
     code: string,
     codeVerifier?: string // For PKCE
   ): Promise<KeycloakTokenResponse>;
+
+  /**
+   * Validates a JWT token.
+   * @param token - The JWT token to validate.
+   * @returns A promise that resolves to the authentication result.
+   */
   validateToken(token: string): Promise<AuthResult>;
+
+  /**
+   * Introspects a token to retrieve its metadata.
+   * @param token - The token to introspect.
+   * @returns A promise that resolves to the authentication result.
+   */
   introspectToken(token: string): Promise<AuthResult>;
+
+  /**
+   * Retrieves user information using an access token.
+   * @param accessToken - The access token to use for the request.
+   * @returns A promise that resolves to the user info.
+   */
   getUserInfo(accessToken: string): Promise<KeycloakUserInfo>;
+
+  /**
+   * Refreshes an access token using a refresh token.
+   * @param refreshToken - The refresh token to use.
+   * @returns A promise that resolves to the new token response.
+   */
   refreshToken(refreshToken: string): Promise<KeycloakTokenResponse>;
+
+  /**
+   * Generates the authorization URL for initiating an OAuth 2.0 authorization flow.
+   * @param state - A unique state parameter for CSRF protection.
+   * @param nonce - A nonce parameter for replay attack protection.
+   * @param codeChallenge - Optional code challenge for PKCE.
+   * @param additionalScopes - Optional additional scopes to request.
+   * @returns The authorization URL as a string.
+   */
   getAuthorizationUrl(
     state: string,
     nonce: string,
     codeChallenge?: string, // For PKCE
     additionalScopes?: string[]
   ): string;
+
+  /**
+   * Generates the logout URL for ending a user session.
+   * @param postLogoutRedirectUri - Optional URI to redirect to after logout.
+   * @param idTokenHint - Optional ID token hint for the logout request.
+   * @returns The logout URL as a string.
+   */
   getLogoutUrl(postLogoutRedirectUri?: string, idTokenHint?: string): string;
+
+  /**
+   * Authenticates a user using the resource owner password credentials grant.
+   * @param username - The user's username.
+   * @param password - The user's password.
+   * @param clientId - Optional client ID to use for the request.
+   * @returns A promise that resolves to the direct grant authentication result.
+   */
   authenticateWithPassword(
     username: string,
     password: string,
     clientId?: string
   ): Promise<DirectGrantAuthResult>;
+
+  /**
+   * Exchanges an authorization code for tokens, typically after redirection.
+   * @param code - The authorization code.
+   * @param redirectUri - The redirect URI used in the authorization request.
+   * @param codeVerifier - Optional code verifier for PKCE.
+   * @returns A promise that resolves to the code exchange result.
+   */
   exchangeCodeForTokens(
     code: string,
     redirectUri: string,
     codeVerifier?: string
   ): Promise<CodeExchangeResult>;
-  logout(refreshToken: string): Promise<void>;
+
+  /**
+   * Logs out a user by revoking the refresh token.
+   * @param refreshToken - The refresh token to revoke.
+   * @returns A promise that resolves when logout is complete.
+   */
+  revokingRefreshToken(refreshToken: string): Promise<void>;
+
+  /* Retrieve JWT signing keys
+  
+  - **Returns:** `{ keys: [{ kid, kty, alg, use, n, e }] }`
+  - Cache keys with TTL */
+  // getPublicKeys(): Promise<PublicKeySet>;
+
+  /* Validate service-to-service credentials
+  
+  - **Parameters:** `clientId`, `clientSecret`
+  - **Returns:** `boolean` */
+  validateClientCredentials(
+    clientId: string,
+    clientSecret: string
+  ): Promise<boolean>;
+
+  /* Notify provider of logout (SSO scenarios)
+
+- **Parameters:** `userId`, optional `sessionId` */
+  logout(userId: string, sessionId?: string): Promise<void>;
+
+  /**
+   * Retrieves the OpenID Connect discovery document.
+   * @returns The discovery document if loaded, otherwise undefined.
+   */
   getDiscoveryDocument(): KeycloakDiscoveryDocument | undefined;
+
+  /**
+   * Retrieves statistics about the client's operations and state.
+   * @returns An object containing various stats like request counts, success rates, and initialization state.
+   */
   getStats(): {
     discoveryLoaded: boolean;
     jwksLoaded: boolean;
@@ -234,8 +347,23 @@ export interface IKeycloakClient {
     lastRequestTime: Date | null;
     initializationState: "pending" | "initialized" | "failed";
   };
+
+  /**
+   * Performs a health check on the Keycloak client.
+   * @returns A promise that resolves to true if healthy, false otherwise.
+   */
   healthCheck(): Promise<boolean>;
+
+  /**
+   * Disposes of the client, cleaning up resources.
+   * @returns A promise that resolves when disposal is complete.
+   */
   dispose(): Promise<void>;
+
+  /**
+   * Checks if the client is ready for use (e.g., initialized).
+   * @returns True if ready, false otherwise.
+   */
   isReady(): boolean;
 }
 
@@ -287,6 +415,62 @@ export class KeycloakClient implements IKeycloakClient {
     // Initialize cache if enabled and metrics are available
     if (metrics) {
       this.cacheService = CacheService.create(metrics);
+    }
+  }
+  /**
+   * Validate service-to-service credentials by attempting client credentials authentication
+   * @param clientId - Client ID to validate
+   * @param clientSecret - Client secret to validate
+   * @returns Promise resolving to true if credentials are valid, false otherwise
+   */
+  async validateClientCredentials(
+    clientId: string,
+    clientSecret: string
+  ): Promise<boolean> {
+    try {
+      if (!this.discoveryDocument?.token_endpoint) {
+        throw new Error("Token endpoint not available");
+      }
+
+      const params = new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: clientId,
+        client_secret: clientSecret,
+        scope: "openid", // Minimal scope for validation
+      });
+
+      const response = await this.httpClient.post<KeycloakTokenResponse>(
+        this.discoveryDocument.token_endpoint,
+        params.toString(),
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+          },
+        }
+      );
+
+      return HttpStatus.isSuccess(response.status);
+    } catch (error) {
+      this.logger.debug("Client credentials validation failed", { clientId, error });
+      return false;
+    }
+  }
+
+  /**
+   * Notify provider of logout by revoking the refresh token (assumes sessionId is the refresh token)
+   * @param userId - User ID being logged out
+   * @param sessionId - Optional session ID (used as refresh token for revocation)
+   * @returns Promise that resolves when logout notification is complete
+   */
+  //TODO review this function 
+  async logout(userId: string, sessionId?: string): Promise<void> {
+    if (sessionId) {
+      await this.revokingRefreshToken(sessionId);
+      this.logger.info("User logged out via token revocation", { userId });
+    } else {
+      this.logger.warn("Logout called without sessionId, cannot revoke token", { userId });
+      // In SSO scenarios, additional logout notifications could be implemented here if needed
     }
   }
 
@@ -1117,7 +1301,7 @@ export class KeycloakClient implements IKeycloakClient {
    * console.log('User logged out successfully');
    * ```
    */
-  async logout(refreshToken: string): Promise<void> {
+  async revokingRefreshToken(refreshToken: string): Promise<void> {
     const startTime = performance.now();
 
     try {

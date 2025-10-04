@@ -1,0 +1,455 @@
+/**
+ * @fileoverview Repository Generator Script
+ * @module database/scripts/generate-repositories
+ * @version 1.0.0
+ * @author Enterprise Development Team
+ */
+
+import * as fs from "fs";
+import * as path from "path";
+// import { models } from "../models/index"; // TODO: Fix models export
+
+/**
+ * Model metadata for repository generation
+ */
+interface ModelMetadata {
+  name: string;
+  hasSoftDelete: boolean;
+  hasStatus: boolean;
+  hasTimestamps: boolean;
+  primaryKey: string;
+  relations: string[];
+  uniqueFields: string[];
+}
+
+/**
+ * Repository generator class
+ */
+export class RepositoryGenerator {
+  private readonly repositoriesDir = path.join(__dirname, "../repositories");
+  // private readonly modelsDir = path.join(__dirname, "../../models"); // Unused
+  // private readonly templateDir = path.join(__dirname, "templates"); // Unused
+
+  /**
+   * Generate all repositories
+   */
+  generateAll(): Promise<void> {
+    throw new Error(
+      "Repository generation is currently disabled - models export needs to be fixed"
+    );
+  }
+
+  /**
+   * Extract model names from the models index
+   */
+  private extractModelNames(): string[] {
+    // TODO: Fix models export and uncomment
+    // const modelKeys = Object.keys(models);
+    // return modelKeys.filter((key) => {
+    //   // Filter out enums and other non-model exports
+    //   const model = (models as any)[key];
+    //   return (
+    //     typeof model === "function" ||
+    //     (typeof model === "object" && model !== null)
+    //   );
+    // });
+    return []; // Return empty array until models export is fixed
+  }
+
+  /**
+   * Generate repository for a specific model
+   */
+  private generateRepository(modelName: string): void {
+    const metadata = this.getModelMetadata(modelName);
+    const template = this.getRepositoryTemplate(metadata);
+
+    const fileName = `${this.toCamelCase(modelName)}.ts`;
+    const filePath = path.join(this.repositoriesDir, fileName);
+
+    fs.writeFileSync(filePath, template, "utf-8");
+  }
+
+  /**
+   * Get metadata for a model
+   */
+  private getModelMetadata(modelName: string): ModelMetadata {
+    // TODO: Fix models export and uncomment
+    // const model = (models as any)[modelName];
+    // if (!model) {
+    //   throw new Error(`Model ${modelName} not found`);
+    // }
+    // return {
+    //   name: modelName,
+    //   hasSoftDelete: this.hasField(model, "isDeleted"),
+    //   hasStatus: this.hasField(model, "status"),
+    //   hasTimestamps: this.hasField(model, "createdAt") && this.hasField(model, "updatedAt"),
+    //   primaryKey: "id", // Assuming all models use 'id' as primary key
+    //   relations: [], // Would need schema parsing to extract
+    //   uniqueFields: this.getUniqueFields(modelName),
+    // };
+    return {
+      name: modelName,
+      hasSoftDelete: false,
+      hasStatus: false,
+      hasTimestamps: true,
+      primaryKey: "id",
+      relations: [],
+      uniqueFields: [],
+    };
+  }
+
+  /**
+   * Check if model has a specific field
+   */
+  private hasField(model: unknown, fieldName: string): boolean {
+    return (
+      model !== undefined &&
+      model !== null &&
+      typeof model === "object" &&
+      fieldName in model
+    );
+  }
+
+  /**
+   * Get unique fields for a model
+   */
+  private getUniqueFields(modelName: string): string[] {
+    // Simplified unique field detection
+    const uniqueFields: Record<string, string[]> = {
+      Store: ["url"],
+      User: ["email", "username"],
+      Role: ["name"],
+      Product: ["sku"],
+      Cart: [],
+      Order: [],
+      ApiKey: ["keyHash", "keyIdentifier"],
+    };
+
+    return uniqueFields[modelName] ?? [];
+  }
+
+  /**
+   * Convert PascalCase to camelCase
+   */
+  private toCamelCase(str: string): string {
+    return str.charAt(0).toLowerCase() + str.slice(1);
+  }
+
+  /**
+   * Get repository template
+   */
+  private getRepositoryTemplate(metadata: ModelMetadata): string {
+    const { name, hasSoftDelete, hasTimestamps, uniqueFields } = metadata;
+    const camelName = this.toCamelCase(name);
+
+    return `/**
+ * @fileoverview ${name} Repository Implementation
+ * @module database/repositories/${camelName}
+ * @version 1.0.0
+ * @author Enterprise Development Team
+ */
+
+import type { DatabaseClient } from "../../types/DatabaseClient";
+import type { IMetricsCollector } from "@libs/monitoring";
+import type { ICache } from "../../cache";
+import { BaseRepository, type QueryOptions } from "./base";
+import type { ${name}, Prisma } from "../../models";
+
+/**
+ * ${name} creation input type
+ */
+export type ${name}CreateInput = Omit<
+  Prisma.${name}CreateInput,
+  "id"${hasTimestamps ? ' | "createdAt" | "updatedAt"' : ""}${hasSoftDelete ? ' | "isDeleted"' : ""}
+> & {
+  id?: string;
+};
+
+/**
+ * ${name} update input type
+ */
+export type ${name}UpdateInput = Prisma.${name}UpdateInput;
+
+/**
+ * ${name} repository interface
+ */
+export interface I${name}Repository extends BaseRepository<
+  ${name},
+  ${name}CreateInput,
+  ${name}UpdateInput,
+  string
+> {
+${uniqueFields
+  .map(
+    (field) => `  /**
+   * Find ${name.toLowerCase()} by ${field}
+   */
+  findBy${field.charAt(0).toUpperCase() + field.slice(1)}(${field}: ${this.getFieldType(name, field)}): Promise<${name} | null>;
+`
+  )
+  .join("\n")}
+${
+  hasSoftDelete
+    ? `  /**
+   * Soft delete ${name.toLowerCase()}
+   */
+  softDelete(id: string): Promise<${name}>;
+
+  /**
+   * Restore soft deleted ${name.toLowerCase()}
+   */
+  restore(id: string): Promise<${name}>;
+`
+    : ""
+}
+}
+
+/**
+ * ${name} repository implementation
+ */
+export class ${name}Repository
+  extends BaseRepository<${name}, ${name}CreateInput, ${name}UpdateInput, string>
+  implements I${name}Repository {
+
+  constructor(
+    protected override readonly db: DatabaseClient,
+    protected override readonly metricsCollector?: IMetricsCollector,
+    protected readonly cacheService?: ICache
+  ) {
+    super(db, metricsCollector, "${name}");
+  }
+
+  /**
+   * Find ${name.toLowerCase()} by ID
+   */
+  async findById(id: string, options?: QueryOptions): Promise<${name} | null> {
+    return this.executeOperation("findById", async () => {
+      const result = await this.db.${camelName}.findUnique({
+        where: { id${hasSoftDelete ? ", isDeleted: false" : ""} },
+        ...options,
+      });
+
+      return result;
+    });
+  }
+
+  /**
+   * Find multiple ${name.toLowerCase()}s
+   */
+  async findMany(options?: QueryOptions): Promise<${name}[]> {
+    return this.executeOperation("findMany", async () => {
+      return this.db.${camelName}.findMany({
+        where: {${hasSoftDelete ? "isDeleted: false, " : ""}...options?.where },
+        ...options,
+      });
+    });
+  }
+
+  /**
+   * Find first ${name.toLowerCase()} matching criteria
+   */
+  async findFirst(options?: QueryOptions): Promise<${name} | null> {
+    return this.executeOperation("findFirst", async () => {
+      return this.db.${camelName}.findFirst({
+        where: {${hasSoftDelete ? "isDeleted: false, " : ""}...options?.where },
+        ...options,
+      });
+    });
+  }
+
+  /**
+   * Count ${name.toLowerCase()}s
+   */
+  async count(options?: QueryOptions): Promise<number> {
+    return this.executeOperation("count", async () => {
+      return this.db.${camelName}.count({
+        where: {${hasSoftDelete ? "isDeleted: false, " : ""}...options?.where },
+      });
+    });
+  }
+
+  /**
+   * Create new ${name.toLowerCase()}
+   */
+  async create(data: ${name}CreateInput): Promise<${name}> {
+    return this.executeOperation("create", async () => {
+      return this.db.${camelName}.create({
+        data: {
+          ...data,
+        },
+      });
+    });
+  }
+
+  /**
+   * Create multiple ${name.toLowerCase()}s
+   */
+  async createMany(data: ${name}CreateInput[]): Promise<${name}[]> {
+    return this.executeOperation("createMany", async () => {
+      const results = await Promise.all(
+        data.map(item =>
+          this.db.${camelName}.create({
+            data: item,
+          })
+        )
+      );
+      return results;
+    });
+  }
+
+  /**
+   * Update ${name.toLowerCase()} by ID
+   */
+  async updateById(id: string, data: ${name}UpdateInput): Promise<${name}> {
+    return this.executeOperation("updateById", async () => {
+      return this.db.${camelName}.update({
+        where: { id },
+        data: {
+          ...data,
+          ${hasTimestamps ? "updatedAt: new Date()," : ""}
+        },
+      });
+    });
+  }
+
+  /**
+   * Update multiple ${name.toLowerCase()}s
+   */
+  async updateMany(
+    where: Record<string, unknown>,
+    data: ${name}UpdateInput
+  ): Promise<{ count: number }> {
+    return this.executeOperation("updateMany", async () => {
+      return this.db.${camelName}.updateMany({
+        where: {${hasSoftDelete ? "isDeleted: false, " : ""}...where },
+        data: {
+          ...data,
+          ${hasTimestamps ? "updatedAt: new Date()," : ""}
+        },
+      });
+    });
+  }
+
+  /**
+   * Delete ${name.toLowerCase()} by ID
+   */
+  async deleteById(id: string): Promise<${name}> {
+    return this.executeOperation("deleteById", async () => {
+      return this.db.${camelName}.delete({
+        where: { id },
+      });
+    });
+  }
+
+  /**
+   * Delete multiple ${name.toLowerCase()}s
+   */
+  async deleteMany(where: Record<string, unknown>): Promise<{ count: number }> {
+    return this.executeOperation("deleteMany", async () => {
+      return this.db.${camelName}.deleteMany({
+        where: {${hasSoftDelete ? "isDeleted: false, " : ""}...where },
+      });
+    });
+  }
+
+  /**
+   * Check if ${name.toLowerCase()} exists
+   */
+  async exists(where: Record<string, unknown>): Promise<boolean> {
+    return this.executeOperation("exists", async () => {
+      const count = await this.db.${camelName}.count({
+        where: {${hasSoftDelete ? "isDeleted: false, " : ""}...where },
+      });
+      return count > 0;
+    });
+  }
+
+  /**
+   * Execute operation within transaction
+   */
+  async transaction<R>(callback: (repo: this) => Promise<R>): Promise<R> {
+    return this.db.$transaction(async (tx) => {
+      const txRepo = new ${name}Repository(
+        tx as DatabaseClient,
+        this.metricsCollector,
+        this.cacheService
+      );
+      return callback(txRepo);
+    });
+  }
+
+${uniqueFields
+  .map(
+    (field) => `  /**
+   * Find ${name.toLowerCase()} by ${field}
+   */
+  async findBy${field.charAt(0).toUpperCase() + field.slice(1)}(${field}: ${this.getFieldType(name, field)}): Promise<${name} | null> {
+    return this.executeOperation("findBy${field.charAt(0).toUpperCase() + field.slice(1)}", async () => {
+      return this.db.${camelName}.findUnique({
+        where: { ${field}${hasSoftDelete ? ", isDeleted: false" : ""} },
+      });
+    });
+  }
+`
+  )
+  .join("\n")}
+${
+  hasSoftDelete
+    ? `
+  /**
+   * Soft delete ${name.toLowerCase()}
+   */
+  async softDelete(id: string): Promise<${name}> {
+    return this.executeOperation("softDelete", async () => {
+      return this.db.${camelName}.update({
+        where: { id },
+        data: {
+          isDeleted: true,
+          ${hasTimestamps ? "updatedAt: new Date()," : ""}
+        },
+      });
+    });
+  }
+
+  /**
+   * Restore soft deleted ${name.toLowerCase()}
+   */
+  async restore(id: string): Promise<${name}> {
+    return this.executeOperation("restore", async () => {
+      return this.db.${camelName}.update({
+        where: { id },
+        data: {
+          isDeleted: false,
+          ${hasTimestamps ? "updatedAt: new Date()," : ""}
+        },
+      });
+    });
+  }
+`
+    : ""
+}
+}`;
+  }
+
+  /**
+   * Get field type for unique fields
+   */
+  private getFieldType(modelName: string, fieldName: string): string {
+    // Simplified type mapping - would need proper schema parsing
+    const typeMappings: Record<string, Record<string, string>> = {
+      Store: { url: "string" },
+      User: { email: "string", username: "string" },
+      Role: { name: "string" },
+      Product: { sku: "string" },
+      ApiKey: { keyHash: "string", keyIdentifier: "string" },
+    };
+
+    return typeMappings[modelName]?.[fieldName] ?? "string";
+  }
+}
+
+// CLI execution
+if (require.main === module) {
+  const generator = new RepositoryGenerator();
+  generator.generateAll().catch(console.error);
+}

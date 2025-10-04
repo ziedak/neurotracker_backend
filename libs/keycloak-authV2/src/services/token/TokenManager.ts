@@ -36,46 +36,54 @@ const TokenSchema = z
   .min(10, "Token must be at least 10 characters")
   .max(8192, "Token too large (max 8192 characters)");
 
-
-  export interface ITokenManager {
-    initialize(
-      refreshConfig?: Partial<RefreshTokenConfig>,
-      refreshEventHandlers?: RefreshTokenEventHandlers
-    ): Promise<void>;
-    validateJwt(token: string): Promise<AuthResult>;
-    introspectToken(token: string): Promise<AuthResult>;
-    validateToken(token: string, useIntrospection?: boolean): Promise<AuthResult>;
-    extractBearerToken(authorizationHeader?: string): string | null;
-    clearTokenFromMemory(token: string): void;
-    hasRole(authResult: AuthResult, role: string): boolean;
-    hasAnyRole(authResult: AuthResult, requiredRoles: string[]): boolean;
-    hasAllRoles(authResult: AuthResult, requiredRoles: string[]): boolean;
-    hasPermission(authResult: AuthResult, permission: string): boolean;
-    hasAnyPermission(authResult: AuthResult, requiredPermissions: string[]): boolean;
-    hasAllPermissions(authResult: AuthResult, requiredPermissions: string[]): boolean;
-    isTokenExpired(authResult: AuthResult): boolean;
-    getTokenLifetime(authResult: AuthResult): number;
-    willExpireSoon(authResult: AuthResult, withinSeconds: number): boolean;
-    getStoredTokens(userId: string, sessionId: string): Promise<StoredTokenInfo | null>;
-    refreshUserTokens(userId: string, sessionId: string): Promise<RefreshResult>;
-    storeTokensWithRefresh(
-      userId: string,
-      sessionId: string,
-      accessToken: string,
-      refreshToken: string,
-      expiresIn: number,
-      refreshExpiresIn?: number
-    ): Promise<void>;
-    removeStoredTokens(userId: string, sessionId: string): Promise<void>;
-    hasValidStoredTokens(userId: string, sessionId: string): Promise<boolean>;
-    hasRefreshTokenSupport(): boolean;
-    configureRefreshTokens(
-      config: Partial<RefreshTokenConfig>,
-      eventHandlers?: RefreshTokenEventHandlers
-    ): void;
-    getRefreshTokenStats(): any;
-    dispose(): Promise<void>;
-  }
+export interface ITokenManager {
+  initialize(
+    refreshConfig?: Partial<RefreshTokenConfig>,
+    refreshEventHandlers?: RefreshTokenEventHandlers
+  ): Promise<void>;
+  validateJwt(token: string): Promise<AuthResult>;
+  introspectToken(token: string): Promise<AuthResult>;
+  validateToken(token: string, useIntrospection?: boolean): Promise<AuthResult>;
+  extractBearerToken(authorizationHeader?: string): string | null;
+  clearTokenFromMemory(token: string): void;
+  hasRole(authResult: AuthResult, role: string): boolean;
+  hasAnyRole(authResult: AuthResult, requiredRoles: string[]): boolean;
+  hasAllRoles(authResult: AuthResult, requiredRoles: string[]): boolean;
+  hasPermission(authResult: AuthResult, permission: string): boolean;
+  hasAnyPermission(
+    authResult: AuthResult,
+    requiredPermissions: string[]
+  ): boolean;
+  hasAllPermissions(
+    authResult: AuthResult,
+    requiredPermissions: string[]
+  ): boolean;
+  isTokenExpired(authResult: AuthResult): boolean;
+  getTokenLifetime(authResult: AuthResult): number;
+  willExpireSoon(authResult: AuthResult, withinSeconds: number): boolean;
+  getStoredTokens(
+    userId: string,
+    sessionId: string
+  ): Promise<StoredTokenInfo | null>;
+  refreshUserTokens(userId: string, sessionId: string): Promise<RefreshResult>;
+  storeTokensWithRefresh(
+    userId: string,
+    sessionId: string,
+    accessToken: string,
+    refreshToken: string,
+    expiresIn: number,
+    refreshExpiresIn?: number
+  ): Promise<void>;
+  removeStoredTokens(userId: string, sessionId: string): Promise<void>;
+  hasValidStoredTokens(userId: string, sessionId: string): Promise<boolean>;
+  hasRefreshTokenSupport(): boolean;
+  configureRefreshTokens(
+    config: Partial<RefreshTokenConfig>,
+    eventHandlers?: RefreshTokenEventHandlers
+  ): void;
+  getRefreshTokenStats(): any;
+  dispose(): Promise<void>;
+}
 
 export class TokenManager implements ITokenManager {
   private readonly logger = createLogger("TokenManager");
@@ -403,7 +411,7 @@ export class TokenManager implements ITokenManager {
       return null;
     }
   }
-/**
+  /**
    * Securely clear token from memory
    */
   clearTokenFromMemory(token: string): void {

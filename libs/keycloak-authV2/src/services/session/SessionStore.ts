@@ -335,6 +335,73 @@ export class SessionStore {
   }
 
   /**
+   * Update session tokens after refresh
+   * Used by SessionTokenCoordinator after calling KeycloakClient.refreshToken()
+   */
+  async updateSessionTokens(
+    sessionId: string,
+    newTokens: {
+      accessToken: string;
+      refreshToken?: string;
+      expiresAt: Date;
+      refreshExpiresAt?: Date;
+    }
+  ): Promise<void> {
+    const startTime = performance.now();
+    const operationId = crypto.randomUUID();
+
+    try {
+      this.logger.debug("Updating session tokens", {
+        operationId,
+        sessionId: this.hashSessionId(sessionId),
+      });
+
+      // Validate input
+      SessionIdSchema.parse(sessionId);
+
+      // Retrieve current session
+      const session = await this.retrieveSession(sessionId);
+      if (!session) {
+        throw new Error(`Session not found: ${sessionId}`);
+      }
+
+      // Create updated session data (properties are readonly)
+      const updatedSession: KeycloakSessionData = {
+        ...session,
+        accessToken: newTokens.accessToken,
+        refreshToken: newTokens.refreshToken || session.refreshToken,
+        expiresAt: newTokens.expiresAt,
+        refreshExpiresAt:
+          newTokens.refreshExpiresAt || session.refreshExpiresAt,
+        lastAccessedAt: new Date(),
+      };
+
+      // Store updated session
+      await this.storeSession(updatedSession);
+
+      this.logger.info("Session tokens updated successfully", {
+        operationId,
+        sessionId: this.hashSessionId(sessionId),
+        expiresAt: newTokens.expiresAt.toISOString(),
+      });
+
+      this.metrics?.recordCounter("session.tokens_updated", 1);
+      this.metrics?.recordTimer(
+        "session.update_tokens.duration",
+        performance.now() - startTime
+      );
+    } catch (error) {
+      this.logger.error("Failed to update session tokens", {
+        operationId,
+        error,
+        sessionId: this.hashSessionId(sessionId),
+      });
+      this.metrics?.recordCounter("session.update_tokens.error", 1);
+      throw error; // Critical operation - throw to caller
+    }
+  }
+
+  /**
    * Get all active sessions for a user
    */
   async getUserSessions(userId: string): Promise<KeycloakSessionData[]> {

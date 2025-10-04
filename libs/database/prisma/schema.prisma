@@ -260,6 +260,8 @@ model User {
   username       String     @unique @db.VarChar(255)
   firstName      String?    @db.VarChar(255)
   lastName       String?    @db.VarChar(255)
+  name           String?    @db.VarChar(255) // Better-Auth: full name field
+  image          String?    @db.Text // Better-Auth: profile image URL
   phone          String?    @db.VarChar(32)
   status         UserStatus @default(ACTIVE)
   emailVerified  Boolean    @default(false)
@@ -289,6 +291,7 @@ model User {
 
   // Relations
   sessions       UserSession[]
+  accounts       Account[] // Better-Auth: OAuth accounts
   events         UserEvent[]
   carts          Cart[]
   notifications  Notification[]
@@ -318,6 +321,7 @@ model UserSession {
   userId            String
   storeId           String
   sessionId         String    @unique @db.VarChar(128)
+  token             String    @unique @db.VarChar(255) // Better-Auth: session token (required)
   keycloakSessionId String?   @db.VarChar(255) // Keycloak session ID
   accessToken       String?   @db.Text // Encrypted access token
   refreshToken      String?   @db.Text // Encrypted refresh token
@@ -328,7 +332,7 @@ model UserSession {
   lastAccessedAt    DateTime  @default(now()) // Last access timestamp
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
-  expiresAt         DateTime?
+  expiresAt         DateTime? // Better-Auth: session expiration (required)
   ipAddress         String?
   userAgent         String?
   metadata          Json?
@@ -349,7 +353,48 @@ model UserSession {
   @@index([expiresAt])
   @@index([lastAccessedAt])
   @@index([isActive, expiresAt])
+  @@index([token])
   @@map("user_sessions")
+}
+
+// Better-Auth: Account model for OAuth providers
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String    @db.VarChar(255) // Provider account ID
+  providerId            String    @db.VarChar(255) // Provider name (google, github, etc.)
+  userId                String
+  accessToken           String?   @db.Text
+  refreshToken          String?   @db.Text
+  idToken               String?   @db.Text
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?   @db.Text
+  password              String?   @db.VarChar(255) // For email/password provider
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@index([providerId])
+  @@map("accounts")
+}
+
+// Better-Auth: Verification model for email verification and password reset
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String   @db.VarChar(255) // Email or other identifier
+  value      String   @db.VarChar(255) // Verification token
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([identifier, value])
+  @@index([identifier])
+  @@index([expiresAt])
+  @@map("verifications")
 }
 
 model SessionLog {
