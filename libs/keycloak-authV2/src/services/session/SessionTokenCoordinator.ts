@@ -15,8 +15,8 @@ import type { ILogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { KeycloakClient } from "../../client/KeycloakClient";
 import type { SessionStore } from "./SessionStore";
-import type { KeycloakSessionData } from "./sessionTypes";
-import type { AuthResult, UserInfo } from "../../types";
+import type { UserSession } from "@libs/database";
+import type { AuthResult } from "../../types";
 import { TokenRefreshScheduler } from "../token/TokenRefreshScheduler";
 import type { SchedulerConfig } from "../token/TokenRefreshScheduler";
 
@@ -31,10 +31,9 @@ export class SessionTokenCoordinator {
     private readonly keycloakClient: KeycloakClient,
     private readonly sessionStore: SessionStore,
     schedulerConfig: SchedulerConfig = { refreshBuffer: 300 }, // Default: 5 minutes before expiry
-    logger?: ILogger,
     private readonly metrics?: IMetricsCollector
   ) {
-    this.logger = logger || createLogger("SessionTokenCoordinator");
+    this.logger = createLogger("SessionTokenCoordinator");
     this.scheduler = new TokenRefreshScheduler(schedulerConfig, metrics);
 
     this.logger.info(
@@ -49,14 +48,12 @@ export class SessionTokenCoordinator {
    * Validate session token
    * Delegates to: KeycloakClient.validateToken()
    */
-  async validateSessionToken(
-    sessionData: KeycloakSessionData
-  ): Promise<AuthResult> {
+  async validateSessionToken(sessionData: UserSession): Promise<AuthResult> {
     const startTime = performance.now();
 
     try {
       this.logger.debug("Validating session token", {
-        sessionId: sessionData.id,
+        sessionId: sessionData.sessionId,
       });
 
       if (!sessionData.accessToken) {
@@ -83,7 +80,7 @@ export class SessionTokenCoordinator {
     } catch (error) {
       this.logger.error("Token validation failed", {
         error,
-        sessionId: sessionData.id,
+        sessionId: sessionData.sessionId,
       });
 
       this.metrics?.recordCounter("session.token_validation.error", 1);
@@ -101,12 +98,12 @@ export class SessionTokenCoordinator {
    * Delegates to: KeycloakClient.refreshToken() + SessionStore.updateSessionTokens()
    * Also schedules automatic refresh for the new token
    */
-  async refreshSessionTokens(sessionData: KeycloakSessionData): Promise<void> {
+  async refreshSessionTokens(sessionData: UserSession): Promise<void> {
     const startTime = performance.now();
 
     try {
       this.logger.debug("Refreshing session tokens", {
-        sessionId: sessionData.id,
+        sessionId: sessionData.sessionId,
       });
 
       if (!sessionData.refreshToken) {
@@ -125,7 +122,7 @@ export class SessionTokenCoordinator {
         : undefined;
 
       // Delegate to SessionStore (just implemented)
-      await this.sessionStore.updateSessionTokens(sessionData.id, {
+      await this.sessionStore.updateSessionTokens(sessionData.sessionId, {
         accessToken: newTokens.access_token,
         ...(newTokens.refresh_token && {
           refreshToken: newTokens.refresh_token,
@@ -135,10 +132,10 @@ export class SessionTokenCoordinator {
       });
 
       // Schedule automatic refresh for the new token
-      await this.scheduleAutomaticRefresh(sessionData.id, expiresAt);
+      await this.scheduleAutomaticRefresh(sessionData.sessionId, expiresAt);
 
       this.logger.info("Session tokens refreshed successfully", {
-        sessionId: sessionData.id,
+        sessionId: sessionData.sessionId,
         expiresAt: expiresAt.toISOString(),
       });
 
@@ -150,7 +147,7 @@ export class SessionTokenCoordinator {
     } catch (error) {
       this.logger.error("Token refresh failed", {
         error,
-        sessionId: sessionData.id,
+        sessionId: sessionData.sessionId,
       });
 
       this.metrics?.recordCounter("session.token_refresh.error", 1);
@@ -203,15 +200,15 @@ export class SessionTokenCoordinator {
    * Pure logic - no external calls
    */
   checkTokenRefreshNeeded(
-    sessionData: KeycloakSessionData,
+    sessionData: UserSession,
     thresholdSeconds: number = 300 // Default: 5 minutes
   ): boolean {
-    if (!sessionData.expiresAt) {
+    if (!sessionData.tokenExpiresAt) {
       return false;
     }
 
     const now = new Date();
-    const expiresAt = sessionData.expiresAt;
+    const expiresAt = sessionData.tokenExpiresAt;
     const timeUntilExpiry = expiresAt.getTime() - now.getTime();
     const thresholdMs = thresholdSeconds * 1000;
 
@@ -219,7 +216,7 @@ export class SessionTokenCoordinator {
 
     if (needsRefresh) {
       this.logger.debug("Token refresh needed", {
-        sessionId: sessionData.id,
+        sessionId: sessionData.sessionId,
         timeUntilExpiry: Math.floor(timeUntilExpiry / 1000) + "s",
         threshold: thresholdSeconds + "s",
       });
@@ -232,7 +229,7 @@ export class SessionTokenCoordinator {
    * Validate and refresh if needed (convenience method)
    */
   async validateAndRefreshIfNeeded(
-    sessionData: KeycloakSessionData
+    sessionData: UserSession
   ): Promise<AuthResult> {
     // Check if refresh is needed
     if (this.checkTokenRefreshNeeded(sessionData)) {
@@ -241,7 +238,7 @@ export class SessionTokenCoordinator {
 
         // Get updated session data
         const updatedSession = await this.sessionStore.retrieveSession(
-          sessionData.id
+          sessionData.sessionId
         );
 
         if (!updatedSession) {
@@ -258,7 +255,7 @@ export class SessionTokenCoordinator {
           "Token refresh failed, attempting validation anyway",
           {
             error,
-            sessionId: sessionData.id,
+            sessionId: sessionData.sessionId,
           }
         );
         // Fall through to validation with existing token
@@ -272,9 +269,6 @@ export class SessionTokenCoordinator {
   /**
    * Create session with automatic refresh
    * Helper method to initialize a session with automatic token refresh
-   *
-   * Note: This is a simplified helper. For full session creation with all fields,
-   * use SessionStore.storeSession() directly with a complete KeycloakSessionData object.
    */
   async createSessionWithAutoRefresh(
     userId: string,
@@ -288,40 +282,56 @@ export class SessionTokenCoordinator {
       ipAddress: string;
       userAgent: string;
       fingerprint: string;
-      userInfo: UserInfo;
     }
-  ): Promise<KeycloakSessionData> {
-    // Create complete session data with required fields
-    const sessionData: KeycloakSessionData = {
-      id: `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+  ): Promise<UserSession> {
+    // Generate unique session ID
+    const sessionId = `session_${Date.now()}_${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
+
+    // Build session options conditionally to avoid undefined
+    const sessionOptions: any = {
       userId,
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      expiresAt: tokens.expiresAt,
-      refreshExpiresAt: tokens.refreshExpiresAt,
-      lastAccessedAt: new Date(),
-      createdAt: new Date(),
+      sessionId,
       ipAddress: sessionMetadata.ipAddress,
       userAgent: sessionMetadata.userAgent,
       fingerprint: sessionMetadata.fingerprint,
-      isActive: true,
-      userInfo: sessionMetadata.userInfo,
-      metadata: {},
+      expiresAt: tokens.expiresAt,
     };
 
+    // Only add defined token fields
+    if (tokens.accessToken) {
+      sessionOptions.accessToken = tokens.accessToken;
+    }
+    if (tokens.refreshToken) {
+      sessionOptions.refreshToken = tokens.refreshToken;
+    }
+    if (tokens.expiresAt) {
+      sessionOptions.tokenExpiresAt = tokens.expiresAt;
+    }
+    if (tokens.refreshExpiresAt) {
+      sessionOptions.refreshExpiresAt = tokens.refreshExpiresAt;
+    }
+
     // Delegate session storage to SessionStore
-    await this.sessionStore.storeSession(sessionData);
+    await this.sessionStore.storeSession(sessionOptions);
+
+    // Retrieve the created session
+    const createdSession = await this.sessionStore.retrieveSession(sessionId);
+    if (!createdSession) {
+      throw new Error("Failed to retrieve created session");
+    }
 
     // Schedule automatic refresh
-    await this.scheduleAutomaticRefresh(sessionData.id, tokens.expiresAt);
+    await this.scheduleAutomaticRefresh(sessionId, tokens.expiresAt);
 
     this.logger.info("Session created with automatic refresh", {
-      sessionId: sessionData.id,
+      sessionId,
       userId,
       expiresAt: tokens.expiresAt.toISOString(),
     });
 
-    return sessionData;
+    return createdSession;
   }
 
   /**

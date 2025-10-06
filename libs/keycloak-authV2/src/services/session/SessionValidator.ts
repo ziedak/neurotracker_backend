@@ -19,8 +19,8 @@ import crypto from "crypto";
 import { createLogger } from "@libs/utils";
 import type { ILogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
+import type { UserSession } from "@libs/database";
 import type {
-  KeycloakSessionData,
   SessionValidationResult,
   SecurityCheckResult,
   HealthCheckResult,
@@ -120,7 +120,7 @@ export class SessionValidator {
    * Comprehensive session validation
    */
   async validateSession(
-    sessionData: KeycloakSessionData,
+    sessionData: UserSession,
     currentRequest?: {
       ipAddress: string;
       userAgent: string;
@@ -133,7 +133,7 @@ export class SessionValidator {
     try {
       this.logger.debug("Validating session", {
         operationId,
-        sessionId: this.hashSessionId(sessionData.id),
+        sessionId: this.hashSessionId(sessionData.sessionId),
         userId: sessionData.userId,
       });
 
@@ -195,7 +195,7 @@ export class SessionValidator {
 
       this.logger.debug("Session validation successful", {
         operationId,
-        sessionId: this.hashSessionId(sessionData.id),
+        sessionId: this.hashSessionId(sessionData.sessionId),
         duration: performance.now() - startTime,
       });
 
@@ -207,7 +207,7 @@ export class SessionValidator {
       this.logger.error("Session validation failed", {
         operationId,
         error,
-        sessionId: this.hashSessionId(sessionData.id),
+        sessionId: this.hashSessionId(sessionData.sessionId),
       });
       this.metrics?.recordCounter("session.validation.error", 1);
       return this.createValidationResult(
@@ -225,7 +225,7 @@ export class SessionValidator {
    * Validate session expiration
    */
   private validateExpiration(
-    sessionData: KeycloakSessionData
+    sessionData: UserSession
   ): SessionValidationResult {
     const now = new Date();
 
@@ -253,7 +253,7 @@ export class SessionValidator {
    * Validate idle timeout
    */
   private validateIdleTimeout(
-    sessionData: KeycloakSessionData
+    sessionData: UserSession
   ): SessionValidationResult {
     const now = new Date();
     const idleTime = now.getTime() - sessionData.lastAccessedAt.getTime();
@@ -277,7 +277,7 @@ export class SessionValidator {
    * Perform comprehensive security checks
    */
   private async performSecurityChecks(
-    sessionData: KeycloakSessionData,
+    sessionData: UserSession,
     currentRequest: {
       ipAddress: string;
       userAgent: string;
@@ -324,7 +324,7 @@ export class SessionValidator {
    * Validate session fingerprint
    */
   private async validateFingerprint(
-    sessionData: KeycloakSessionData,
+    sessionData: UserSession,
     currentRequest: { fingerprint?: SessionFingerprint }
   ): Promise<SecurityCheckResult> {
     if (!sessionData.fingerprint || !currentRequest.fingerprint) {
@@ -345,7 +345,10 @@ export class SessionValidator {
       storedFingerprint.platform !== currentFingerprint.platform;
 
     if (criticalMismatch) {
-      this.trackSuspiciousActivity(sessionData.id, "fingerprint_mismatch");
+      this.trackSuspiciousActivity(
+        sessionData.sessionId,
+        "fingerprint_mismatch"
+      );
       return {
         isValid: false,
         reason: SecurityCheckReason.FINGERPRINT_MISMATCH,
@@ -362,7 +365,7 @@ export class SessionValidator {
 
     if (minorChanges && !this.config.allowFingerprintRotation) {
       this.logger.warn("Minor fingerprint changes detected", {
-        sessionId: this.hashSessionId(sessionData.id),
+        sessionId: this.hashSessionId(sessionData.sessionId),
         changes: "non-critical components",
       });
     }
@@ -378,7 +381,7 @@ export class SessionValidator {
    * Validate IP address consistency
    */
   private async validateIpAddress(
-    sessionData: KeycloakSessionData,
+    sessionData: UserSession,
     currentIpAddress: string
   ): Promise<SecurityCheckResult> {
     if (!sessionData.ipAddress) {
@@ -391,19 +394,22 @@ export class SessionValidator {
     }
 
     if (sessionData.ipAddress !== currentIpAddress) {
-      const tracker = this.getActivityTracker(sessionData.id);
+      const tracker = this.getActivityTracker(sessionData.sessionId);
       tracker.ipChanges++;
       tracker.lastIpChange = new Date();
 
       this.logger.info("IP address change detected", {
-        sessionId: this.hashSessionId(sessionData.id),
+        sessionId: this.hashSessionId(sessionData.sessionId),
         previousIp: this.hashIp(sessionData.ipAddress),
         currentIp: this.hashIp(currentIpAddress),
         totalChanges: tracker.ipChanges,
       });
 
       if (tracker.ipChanges > this.config.allowedIpChanges) {
-        this.trackSuspiciousActivity(sessionData.id, "excessive_ip_changes");
+        this.trackSuspiciousActivity(
+          sessionData.sessionId,
+          "excessive_ip_changes"
+        );
         return {
           isValid: false,
           reason: SecurityCheckReason.IP_VIOLATION,
@@ -424,7 +430,7 @@ export class SessionValidator {
    * Validate user agent consistency
    */
   private async validateUserAgent(
-    sessionData: KeycloakSessionData,
+    sessionData: UserSession,
     currentUserAgent: string
   ): Promise<SecurityCheckResult> {
     if (!sessionData.userAgent || !currentUserAgent) {
@@ -441,9 +447,9 @@ export class SessionValidator {
 
     // Allow minor version changes but detect major changes
     if (storedBrowser.name !== currentBrowser.name) {
-      this.trackSuspiciousActivity(sessionData.id, "browser_change");
+      this.trackSuspiciousActivity(sessionData.sessionId, "browser_change");
       this.logger.warn("Browser change detected", {
-        sessionId: this.hashSessionId(sessionData.id),
+        sessionId: this.hashSessionId(sessionData.sessionId),
         previousBrowser: storedBrowser.name,
         currentBrowser: currentBrowser.name,
       });
@@ -460,10 +466,10 @@ export class SessionValidator {
    * Detect suspicious activity patterns
    */
   private async detectSuspiciousActivity(
-    sessionData: KeycloakSessionData,
+    sessionData: UserSession,
     _currentRequest: { ipAddress: string; userAgent: string }
   ): Promise<SecurityCheckResult> {
-    const tracker = this.getActivityTracker(sessionData.id);
+    const tracker = this.getActivityTracker(sessionData.sessionId);
     const now = new Date();
     const recentThreshold = 5 * 60 * 1000; // 5 minutes
 
@@ -498,7 +504,7 @@ export class SessionValidator {
    * Check if session needs rotation
    */
   private checkSessionRotation(
-    sessionData: KeycloakSessionData
+    sessionData: UserSession
   ): SessionValidationResult {
     const now = new Date();
     const sessionAge = now.getTime() - sessionData.createdAt.getTime();
@@ -650,7 +656,7 @@ export class SessionValidator {
     };
   }
 
-  private calculateNextValidation(_sessionData: KeycloakSessionData): Date {
+  private calculateNextValidation(_sessionData: UserSession): Date {
     const now = new Date();
     const validationInterval = Math.min(
       this.config.maxIdleTime / 4, // Check 4 times during idle period

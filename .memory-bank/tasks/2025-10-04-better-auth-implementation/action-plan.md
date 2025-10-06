@@ -5,51 +5,329 @@
 **Priority**: High  
 **Risk Level**: Low-Medium
 
-## Objective
+---
 
-Implement production-ready Better-Auth authentication library in `libs/better-auth` following the comprehensive functional specification. Integrate with existing enterprise infrastructure (@libs/elysia-server, @libs/ratelimit, @libs/database, @libs/monitoring) using industry-standard patterns.
+## 🔴 CRITICAL ACTION PLAN CORRECTION
 
-## Success Criteria
+**Date**: 2025-10-05  
+**Issue**: Skipped core service layer - went directly to middleware implementation
 
-- [ ] Better-Auth core installed and configured with Prisma adapter
-- [ ] All essential plugins integrated (Bearer, JWT, API Key, Organization)
-- [ ] Elysia middleware fully functional with all auth methods
-- [ ] Integration with existing @libs/\* infrastructure complete
-- [ ] 90%+ test coverage across all authentication methods
-- [ ] Production-ready error handling and monitoring
-- [ ] WebSocket authentication handler implemented
-- [ ] Documentation matches implementation
-- [ ] Zero critical security vulnerabilities
-- [ ] Performance targets met (session validation <50ms P95)
+### The Correct Architecture (From Functional Spec)
 
-## Strategy: Integration Over Implementation
+```
+Request → Middleware → Services → Better-Auth APIs → Database
+         (extract)    (business   (framework)
+                      logic)
+```
 
-**Key Insight**: This is NOT a build-from-scratch project. We're orchestrating Better-Auth framework with existing enterprise infrastructure.
+**NOT** the incomplete architecture I was building:
 
-**What We Use (Don't Build):**
+```
+Request → Middleware → Better-Auth APIs → Database
+         (extract +   (framework)
+          business
+          logic)
+```
 
-- ✅ Better-Auth core framework (battle-tested)
-- ✅ Better-Auth plugins (Bearer, JWT, API Key, Organization, 2FA, Multi-Session)
-- ✅ @libs/ratelimit (enterprise-grade rate limiting)
-- ✅ @libs/elysia-server (production middleware)
-- ✅ @libs/database (Prisma client, repositories, cache)
-- ✅ @libs/monitoring (metrics, logging)
-- ✅ @libs/utils (retry patterns, circuit breaker)
+### What I Got Wrong
 
-**What We Build (Integration Layer):**
+1. **❌ WRONG**: Services are "optional wrappers"
+   **✅ CORRECT**: Services are **core business logic layer** providing authentication operations
 
-- Configuration builder for Better-Auth
-- Service wrappers for authentication methods
-- Elysia middleware adapters
-- WebSocket authentication handler
-- Production monitoring integration
-- Custom error handling
+2. **❌ WRONG**: Middleware call `auth.api.getSession()` directly
+   **✅ CORRECT**: Middleware call **services**, services call Better-Auth APIs
+
+3. **❌ WRONG**: Phase 2 is implementing middleware
+   **✅ CORRECT**: Phase 2 is implementing **services** (sign-up, sign-in, sign-out, refresh, revoke, sessions)
+
+4. **❌ WRONG**: Start with middleware (Session ✅, Bearer ✅)
+   **✅ CORRECT**: Start with services, THEN build middleware on top
+
+### Current Gap - Missing Core Services
+
+**What's Missing** (From Functional Spec Section 3-7):
+
+- ❌ `PasswordAuthService`: sign-up, sign-in, sign-out, password reset, email verification
+- ❌ `BearerTokenService`: validate, revoke bearer tokens, token refresh
+- ❌ `JWTService`: get JWT, verify, validate claims, JWKS management
+- ❌ `ApiKeyService`: create, verify, update, delete, list API keys
+- ❌ `SessionService`: get, list, **revoke**, update activity, enforce limits
+- ❌ `OrganizationService`: manage organizations, members, teams
+
+**What I Built** (Incomplete - middleware without service layer):
+
+- ✅ Session middleware (but calls Better-Auth directly - missing service layer)
+- ✅ Bearer middleware (but calls Better-Auth directly - missing service layer)
+
+### Corrected Phase Structure
+
+**Phase 1** (COMPLETE ✅): Foundation - AuthLibrary + Plugin Configuration  
+**Phase 2** (NOT STARTED ❌): **Core Services** - Authentication operations
+
+- ⏳ PasswordAuthService (sign-up, sign-in, sign-out, password management)
+- ⏳ SessionService (get, list, **revoke**, **refresh**, activity tracking)
+- ⏳ BearerTokenService (validate, **revoke**, extract)
+- ⏳ JWTService (generate, verify, JWKS, **refresh**)
+- ⏳ ApiKeyService (create, verify, update, delete, permissions)
+
+**Phase 3** (NOT STARTED ❌): **Middleware** - Extract credentials, call services
+
+- ⏳ Session middleware → calls SessionService
+- ⏳ Bearer middleware → calls BearerTokenService
+- ⏳ JWT middleware → calls JWTService
+- ⏳ API Key middleware → calls ApiKeyService
+
+**Phase 4** (PENDING): WebSocket, optimization, @libs integration  
+**Phase 5** (PENDING): Elysia plugin, testing, documentation
 
 ---
 
-## Phases
+## Objective
 
-### Phase 1: Foundation & Core Setup (Day 1)
+Implement production-ready Better-Auth authentication library in `libs/better-auth` following the comprehensive functional specification. The library provides **thin wrappers** around Better-Auth native APIs, NOT custom authentication implementations.
+
+**CRITICAL ARCHITECTURAL PRINCIPLE**:
+
+> This is an **INTEGRATION project**, not a custom authentication system. We use Better-Auth plugins (Bearer, JWT, API Key, Organization) directly through their native APIs. Middleware extract credentials and call `auth.api.getSession({ headers })`. Services wrap Better-Auth plugin methods. We do NOT implement custom authentication logic.
+
+## Success Criteria
+
+- [ ] Better-Auth core installed with Prisma adapter
+- [ ] All plugins configured (Bearer, JWT, API Key, Organization, 2FA, Multi-Session)
+- [ ] **4 middleware components** calling Better-Auth APIs directly (Session ✅, Bearer ✅, JWT ⏳, API Key ⏳)
+- [ ] WebSocket authentication handler using Better-Auth validation
+- [ ] Integration with @libs/\* infrastructure (ratelimit, database, monitoring, utils)
+- [ ] Elysia plugin for easy integration
+- [ ] > 90% test coverage (~160+ tests)
+- [ ] Production-ready error handling and monitoring
+- [ ] Complete documentation (README, ARCHITECTURE, API)
+- [ ] Performance targets met (session validation <50ms P95)
+- [ ] Zero critical security vulnerabilities
+
+## Strategy: Integration Over Implementation
+
+**Key Insight**: This is an **INTEGRATION project**, not a custom authentication build. We orchestrate Better-Auth framework with existing infrastructure.
+
+**What Better-Auth Provides (Use Directly)**:
+
+- ✅ Complete user/session/password management
+- ✅ Bearer token authentication via `bearer()` plugin
+- ✅ JWT with JWKS via `jwt()` plugin
+- ✅ API key management via `apiKey()` plugin (rate limiting, permissions, expiration)
+- ✅ Organization/team/role management via `organization()` plugin
+- ✅ Two-factor authentication via `twoFactor()` plugin
+- ✅ Multi-session support via `multiSession()` plugin
+
+**What We Build (Thin Integration Layer)**:
+
+- Configuration builder (`BetterAuthConfigBuilder`) ✅ DONE
+- Middleware that call `auth.api.getSession({ headers })`:
+  - Session middleware ✅ DONE (18 tests)
+  - Bearer middleware ✅ DONE (25 tests)
+  - JWT middleware ⏳ NEXT (targeting ~25 tests)
+  - API Key middleware ⏳ AFTER JWT (targeting ~25 tests)
+- WebSocket handler using Better-Auth validation
+- Elysia plugin for easy integration
+- Route protection utilities
+
+**What Existing Infrastructure Provides**:
+
+- ✅ @libs/ratelimit - Enterprise-grade rate limiting (DO NOT DUPLICATE)
+- ✅ @libs/elysia-server - Production middleware (CORS, logging, errors)
+- ✅ @libs/database - Prisma client, repositories, CacheService
+- ✅ @libs/monitoring - MetricsCollector, structured logging
+- ✅ @libs/utils - executeWithRetry, circuit breaker patterns
+
+**Critical Architecture Rules**:
+
+1. **Middleware Pattern**: Extract credential → Call `auth.api.getSession()` → Attach response to context
+2. **NO Custom Auth Logic**: Use Better-Auth plugin methods exclusively
+3. **Services Are Optional**: Only needed for complex multi-step business logic
+4. **Use @libs Infrastructure**: Never duplicate rate limiting, caching, monitoring
+
+---
+
+### Phase 2: Core Authentication Services (Day 2) - **CURRENT PRIORITY**
+
+**Objective**: Implement core service layer providing authentication operations (sign-up, sign-in, **refresh**, **revoke**, session management)
+
+**Timeline**: 8-10 hours  
+**Complexity**: Medium
+
+**Dependencies**:
+
+- Phase 1 completed (AuthLibrary with Better-Auth configured)
+- Redis available for caching
+- @libs/monitoring available for metrics
+
+**CRITICAL**: These services are the **business logic layer** between middleware and Better-Auth. They:
+
+- Call Better-Auth APIs
+- Handle caching and performance optimization
+- Integrate monitoring and metrics
+- Provide token refresh and revocation
+- Manage session lifecycle
+
+**Sub-tasks**:
+
+1. **PasswordAuthService** (2h)
+
+   Create `services/password-auth.service.ts` with:
+
+   - `signUp(email, password, name, metadata)` → calls `auth.api.signUp.email()`
+   - `signIn(email, password)` → calls `auth.api.signIn.email()`
+   - `signOut(sessionToken)` → calls `auth.api.signOut()`
+   - `forgetPassword(email)` → calls Better-Auth password reset
+   - `resetPassword(token, newPassword)` → completes password reset
+   - `changePassword(userId, currentPassword, newPassword)` → password change
+   - `verifyEmail(token)` → email verification
+
+   **Integration**:
+
+   - Cache user lookup with @libs/database CacheService
+   - Record metrics with @libs/monitoring
+   - Use executeWithRetry for database operations
+
+2. **SessionService** (2h) - **CRITICAL FOR REVOKE/REFRESH**
+
+   Create `services/session.service.ts` with:
+
+   - `getSession(sessionToken)` → calls `auth.api.getSession()` with caching
+   - `listUserSessions(userId)` → gets all active sessions
+   - **`revokeSession(sessionId)`** → revokes specific session, invalidates cache
+   - **`revokeAllUserSessions(userId)`** → signs out all devices
+   - **`refreshSession(sessionToken)`** → extends session expiration
+   - `updateSessionActivity(sessionToken)` → updates last activity timestamp
+   - `enforceSessionLimit(userId, maxSessions)` → limits concurrent sessions
+   - `getSessionMetadata(sessionId)` → gets IP, user agent, etc.
+   - `isSessionActive(sessionId)` → checks validity
+
+   **Integration**:
+
+   - Multi-layer caching (L1: memory 5min, L2: Redis 30min)
+   - Invalidate cache on revoke/logout
+   - Record session metrics (active sessions, revocations)
+
+3. **BearerTokenService** (2h) - **CRITICAL FOR BEARER AUTH**
+
+   Create `services/bearer-token.service.ts` with:
+
+   - `extractBearerToken(request)` → extracts from Authorization header
+   - `validateBearerToken(token)` → calls `auth.api.getSession()` with Bearer token
+   - `getSessionFromBearer(token)` → retrieves session from Bearer token
+   - **`revokeBearerSession(token)`** → revokes session tied to Bearer token
+   - `handleBearerResponse(response)` → extracts `set-auth-token` header
+
+   **Integration**:
+
+   - Cache Bearer token validations (5min TTL)
+   - Integrate with SessionService for revocation
+   - Record Bearer auth metrics
+
+4. **JWTService** (2h) - **CRITICAL FOR JWT + REFRESH**
+
+   Create `services/jwt.service.ts` with:
+
+   - `getJWTFromSession(sessionToken)` → calls `/api/auth/token` endpoint
+   - `extractJWTFromHeaders(response)` → gets JWT from `set-auth-jwt` header
+   - **`verifyJWT(jwt)`** → verifies using JWKS public key (jose library)
+   - **`refreshJWT(refreshToken)`** → generates new JWT from refresh token
+   - `getJWKS()` → fetches from `/api/auth/jwks` endpoint
+   - `cacheJWKS()` → caches JWKS (24 hour TTL)
+   - `validateJWTClaims(jwt)` → checks issuer, audience, expiration
+   - `refreshJWKSIfNeeded(kid)` → refetches if key ID not found
+
+   **Integration**:
+
+   - Cache JWKS aggressively (1 hour L1, 24 hours L2)
+   - Cache JWT validations (until expiration)
+   - Record JWT metrics (verifications, cache hits)
+
+5. **ApiKeyService** (2h)
+
+   Create `services/api-key.service.ts` with:
+
+   - `createApiKey(name, expiresIn, prefix, metadata, permissions)` → creates via Better-Auth
+   - `verifyApiKey(key, requiredPermissions?)` → validates and checks permissions
+   - `getApiKey(keyId)` → retrieves details (without key value)
+   - `updateApiKey(keyId, updates)` → updates name/permissions
+   - `deleteApiKey(keyId)` → deletes key (checks ownership)
+   - `listApiKeys(userId)` → lists user's keys
+   - `revokeApiKey(keyId)` → revokes key, invalidates cache
+   - `checkApiKeyPermissions(key, permissions)` → validates permissions
+
+   **Integration**:
+
+   - Cache API key validations (5min TTL)
+   - Integrate @libs/ratelimit for per-key rate limiting
+   - Record API key usage metrics
+
+**Testing** (2h):
+
+- Unit tests for each service (~20 tests per service = ~100 tests)
+- Test caching behavior (hits, misses, invalidation)
+- Test error handling and retry logic
+- Test metrics integration
+- **Test revoke/refresh operations**
+
+**Deliverables**:
+
+- ⏳ PasswordAuthService complete with tests
+- ⏳ SessionService complete with **revoke** and **refresh** operations
+- ⏳ BearerTokenService complete with token management
+- ⏳ JWTService complete with JWKS and **refresh** support
+- ⏳ ApiKeyService complete with permissions
+- ⏳ ~100 service tests passing
+- ⏳ Caching integrated and tested
+- ⏳ Monitoring integrated
+
+**Validation**:
+
+```bash
+# Test services directly
+const sessionService = new SessionService(auth, cache, metrics);
+await sessionService.revokeSession(sessionId);  # Should invalidate cache
+
+const jwtService = new JWTService(auth, cache, metrics);
+const newJWT = await jwtService.refreshJWT(refreshToken);  # Should generate new JWT
+
+# All service tests passing
+pnpm test services/  # Should show ~100 tests passing
+```
+
+---
+
+### Phase 2.5: Refactor Existing Middleware to Use Services (Day 3)
+
+**Objective**: Refactor the middleware I already created to use the service layer
+
+**Timeline**: 2-3 hours  
+**Complexity**: Low
+
+**What Needs Refactoring**:
+
+1. **Session Middleware** (Currently: calls `auth.api.getSession()` directly)
+
+   - Refactor to call `SessionService.getSession()`
+   - Benefits: Gets caching, metrics, retry logic from service
+
+2. **Bearer Middleware** (Currently: calls `auth.api.getSession()` directly)
+   - Refactor to call `BearerTokenService.validateBearerToken()`
+   - Benefits: Gets caching, metrics from service
+
+**Correct Pattern**:
+
+```typescript
+// OLD (what I built):
+const session = await auth.api.getSession({ headers });
+
+// NEW (correct with service layer):
+const session = await sessionService.getSession(sessionToken);
+```
+
+---
+
+### Phase 3: Remaining Middleware Components (Day 3-4)
 
 **Objective**: Install Better-Auth, configure with Prisma, set up basic authentication flow
 
@@ -147,155 +425,218 @@ GET /api/auth/session
 
 ---
 
-### Phase 2: Token Authentication & Core Plugins (Day 2)
+### Phase 2: Middleware Components (Day 2)
 
-**Objective**: Integrate Bearer and JWT plugins, implement token-based authentication
+**Objective**: Implement middleware that call Better-Auth APIs directly for authentication validation
 
 **Timeline**: 6-8 hours  
-**Complexity**: Medium
+**Complexity**: Low-Medium
 
 **Dependencies**:
 
-- Phase 1 completed
+- Phase 1 completed (AuthLibrary with Better-Auth instance)
 - Redis available for token caching
+
+**CRITICAL ARCHITECTURAL PRINCIPLE**:
+
+> **Middleware are thin wrappers** that extract credentials and call Better-Auth native APIs. They do NOT implement custom authentication logic. They call `auth.api.getSession({ headers })` and attach the response unchanged to Elysia context.
 
 **Sub-tasks**:
 
-1. **Bearer Token Plugin Integration** (2h)
+1. **Session Middleware** (COMPLETED ✅)
 
-   - Configure Bearer plugin with secure token generation
-   - Implement `BearerTokenService` class
-   - Add token refresh mechanism
-   - Configure token expiration policies
-   - Integrate with @libs/database CacheService
+   - ✅ `createSessionMiddleware()` - Required authentication
+   - ✅ `createOptionalSessionMiddleware()` - Non-blocking authentication
+   - ✅ Uses `auth.api.getSession({ headers })` directly
+   - ✅ Type-safe with `UserWithPermissions` interface
+   - ✅ 18/18 tests passing
 
-2. **JWT Plugin Integration** (2h)
+2. **Bearer Middleware** (COMPLETED ✅)
 
-   - Configure JWT plugin with EdDSA algorithm
-   - Implement `JWTService` class with JWKS support
-   - Set up key rotation (90-day policy)
-   - Configure token claims and validation
-   - Add microservice integration patterns
+   - ✅ `createBearerMiddleware()` - Required Bearer token authentication
+   - ✅ `createOptionalBearerMiddleware()` - Non-blocking Bearer authentication
+   - ✅ `extractBearerToken()` - Token extraction helper
+   - ✅ Calls `auth.api.getSession({ headers })` for validation
+   - ✅ 25/25 tests passing
 
-3. **Token Middleware** (2h)
+3. **JWT Middleware** (NEXT - 2h)
 
-   - Create `bearer.middleware.ts` for Bearer token validation
-   - Create `jwt.middleware.ts` for JWT validation
-   - Implement token extraction from headers
-   - Add caching for performance
-   - Integrate with @libs/monitoring
+   - Create `jwt.middleware.ts` with:
+     - `createJWTMiddleware(auth, options)` - Required JWT authentication
+     - `createOptionalJWTMiddleware(auth, options)` - Non-blocking JWT authentication
+     - `extractJWT(request)` - Extract JWT from Authorization header
+   - **CRITICAL**: Use Better-Auth JWT plugin APIs directly
+   - Call `auth.api.getSession({ headers })` with JWT token
+   - Verify JWT signature using JWKS from Better-Auth
+   - Validate JWT claims (issuer, audience, expiration)
+   - Support custom header names
+   - Path bypass for health checks
+   - Optional logging
+   - **DO NOT implement custom JWT verification**
+   - **DO NOT write JWT decoding logic**
+   - **USE Better-Auth JWT plugin exclusively**
 
-4. **Testing & Validation** (2h)
-   - Write comprehensive tests for Bearer auth
-   - Write comprehensive tests for JWT auth
-   - Test token refresh flows
-   - Test JWKS endpoint functionality
+4. **API Key Middleware** (2h)
+
+   - Create `api-key.middleware.ts` with:
+     - `createApiKeyMiddleware(auth, options)` - Required API key authentication
+     - `createOptionalApiKeyMiddleware(auth, options)` - Non-blocking API key authentication
+     - `extractApiKey(request)` - Extract from x-api-key header
+   - **CRITICAL**: Use Better-Auth API Key plugin directly
+   - Call Better-Auth `verifyApiKey` API
+   - Check API key permissions/scopes
+   - Support custom header names
+   - Path bypass support
+   - Optional logging
+   - **DO NOT implement custom API key validation**
+   - **USE Better-Auth API Key plugin exclusively**
+
+5. **Testing & Validation** (2h)
+   - Write comprehensive tests for JWT middleware (~25 tests)
+   - Write comprehensive tests for API Key middleware (~25 tests)
+   - Test JWT validation (valid/expired/invalid signatures)
+   - Test JWKS integration
+   - Test API key validation (valid/revoked/expired)
+   - Test permission checking
    - Performance testing (target: <30ms JWT validation P95)
 
 **Deliverables**:
 
-- ✅ Bearer token authentication working
-- ✅ JWT authentication with JWKS working
-- ✅ Token refresh mechanisms functional
-- ✅ Middleware integrated with Elysia
-- ✅ Test coverage >90%
+- ✅ Session middleware working (COMPLETE)
+- ✅ Bearer middleware working (COMPLETE)
+- ⏳ JWT middleware working (NEXT)
+- ⏳ API Key middleware working (AFTER JWT)
+- ✅ All middleware call Better-Auth APIs directly
+- ⏳ Test coverage >90% (target: ~114 tests when complete)
 
 **Validation**:
 
 ```bash
-# Generate Bearer token
-POST /api/auth/token
-
-# Validate Bearer token
-GET /protected -H "Authorization: Bearer TOKEN"
-
-# Get JWT token
-GET /api/auth/token
-
-# Validate JWT
+# JWT authentication
 GET /protected -H "Authorization: Bearer JWT_TOKEN"
 
-# Get JWKS
-GET /.well-known/jwks.json
+# API Key authentication
+GET /protected -H "x-api-key: YOUR_API_KEY"
+
+# JWKS endpoint (provided by Better-Auth)
+GET /api/auth/jwks
+
+# All middleware tests passing
+pnpm test  # Should show ~114 tests passing
+```
+
+**Architecture Pattern** (ALL middleware follow this):
+
+```typescript
+// 1. Extract credential
+const token = extractCredential(context.request, options);
+
+// 2. Validate with Better-Auth (NO custom logic)
+const session = await auth.api.getSession({ headers });
+
+// 3. Attach unchanged to context
+context["session"] = session.session;
+context["user"] = session.user;
 ```
 
 ---
 
-### Phase 3: API Key & Organization Management (Day 3)
+### Phase 3: Plugin Configuration & Services (Day 3)
 
-**Objective**: Implement API Key plugin and Organization plugin for multi-tenancy
+**Objective**: Configure Better-Auth plugins (already done in Phase 1) and create optional service wrappers for complex operations
 
-**Timeline**: 6-8 hours  
+**Timeline**: 4-6 hours  
 **Complexity**: Medium
 
 **Dependencies**:
 
-- Phase 2 completed
-- @libs/ratelimit integrated
+- Phase 2 completed (all middleware working)
+- Better-Auth plugins already configured in `auth.config.ts`
+
+**ARCHITECTURAL CLARIFICATION**:
+
+> Better-Auth plugins (Bearer, JWT, API Key, Organization) are **already configured** in Phase 1's `BetterAuthConfigBuilder`. Phase 3 focuses on:
+>
+> 1. **Optional service wrappers** for complex multi-step operations
+> 2. **Integration with @libs/ratelimit** for rate limiting
+> 3. **Testing organization and API key management flows**
 
 **Sub-tasks**:
 
-1. **API Key Plugin Integration** (3h)
+1. **Service Wrappers for Complex Operations** (2h) **(OPTIONAL - NOT REQUIRED)**
 
-   - Configure API Key plugin with secure generation
-   - Implement `ApiKeyService` class
-   - Add key hashing (SHA-256) and storage
-   - Implement permissions and scopes system
-   - Integrate with @libs/ratelimit for per-key rate limiting
-   - Add usage tracking and expiration
+   - Create `services/organization.service.ts` (if needed for complex org operations)
+   - Create `services/api-key.service.ts` (if needed for custom key management logic)
+   - **IMPORTANT**: Services call Better-Auth plugin methods directly, NOT custom implementation
+   - Examples:
+     ```typescript
+     // Organization service wraps Better-Auth organization plugin
+     class OrganizationService {
+       async createOrganization(userId: string, name: string) {
+         // Call Better-Auth directly
+         return auth.api.organization.create({ userId, name });
+       }
+     }
+     ```
 
-2. **Organization Plugin Integration** (2h)
+2. **Rate Limiting Integration with @libs/ratelimit** (2h)
 
-   - Configure Organization plugin
-   - Implement `OrganizationService` class
-   - Set up roles and permissions (owner, admin, member)
-   - Configure invitation system
-   - Add organization context to sessions
+   - Integrate @libs/ratelimit with auth endpoints
+   - Configure per-method rate limits:
+     - Login: 5 requests/15min per IP
+     - API Key: 10,000 requests/min per key
+     - JWT: Stateless (no rate limit needed)
+     - Organization operations: 100 requests/min per user
+   - Add distributed rate limiting coordination
+   - Implement circuit breaker patterns from @libs/utils
+   - **USE @libs/ratelimit - DO NOT implement custom rate limiting**
 
-3. **API Key Middleware** (1h)
-
-   - Create `api-key.middleware.ts`
-   - Implement X-API-Key header extraction
-   - Add validation with caching
-   - Integrate rate limiting per key
-   - Add usage metrics
-
-4. **Testing & Validation** (2h)
-   - Test API key creation and validation
-   - Test organization management flows
-   - Test role-based access control
-   - Test invitation system
-   - Performance testing (target: <100ms API key validation P95)
+3. **Organization & API Key Testing** (2h)
+   - Test organization creation via Better-Auth plugin
+   - Test member invitation flow
+   - Test role assignment
+   - Test API key creation via Better-Auth plugin
+   - Test API key permissions validation
+   - Test API key expiration
+   - **Test Better-Auth native features, not custom implementations**
 
 **Deliverables**:
 
-- ✅ API key generation and validation working
-- ✅ Organization management functional
-- ✅ Role-based access control implemented
-- ✅ Rate limiting per API key working
-- ✅ Test coverage >90%
+- ⏳ Optional service wrappers (if needed for business logic)
+- ⏳ Rate limiting fully integrated with @libs/ratelimit
+- ⏳ Organization plugin tested end-to-end
+- ⏳ API Key plugin tested end-to-end
+- ⏳ All tests passing (~140+ tests total)
 
 **Validation**:
 
 ```bash
-# Create API key
-POST /api/auth/api-key
+# Organization operations (via Better-Auth)
+POST /api/auth/organization  # Create org
+POST /api/auth/organization/:id/invite  # Invite member
 
-# Validate API key
-GET /protected -H "x-api-key: KEY"
+# API Key operations (via Better-Auth)
+POST /api/auth/api-key  # Create key
+GET /api/auth/api-key  # List keys
 
-# Create organization
-POST /api/auth/organization
-
-# Invite member
-POST /api/auth/organization/invite
+# Rate limiting enforcement
+# Should block after 5 login attempts
+for i in {1..6}; do curl POST /api/auth/sign-in/email; done
 ```
+
+**Critical Principle**:
+
+- ✅ Better-Auth plugins provide all authentication functionality
+- ✅ Services are thin wrappers for business logic only
+- ✅ Middleware call Better-Auth APIs directly
+- ❌ NO custom authentication/validation logic
+- ❌ NO reinventing Better-Auth features
 
 ---
 
-### Phase 4: Advanced Features & Integration (Day 4)
+### Phase 4: WebSocket Authentication & Optimization (Day 4)
 
-**Objective**: Implement WebSocket authentication, integrate all infrastructure libs, optimize performance
+**Objective**: Implement WebSocket authentication handler, optimize caching, integrate monitoring
 
 **Timeline**: 6-8 hours  
 **Complexity**: Medium-High
@@ -309,64 +650,94 @@ POST /api/auth/organization/invite
 
 1. **WebSocket Authentication Handler** (3h)
 
-   - Create `WebSocketAuthHandler` class
-   - Implement token validation for WebSocket upgrade
-   - Add session synchronization for WebSocket connections
-   - Implement heartbeat and timeout mechanisms
+   - Create `websocket/ws-auth.handler.ts` with `WebSocketAuthHandler` class
+   - Implement authentication methods:
+     - `authenticateWithSessionCookie()` - Use Better-Auth session validation
+     - `authenticateWithBearerToken()` - Use Better-Auth bearer validation
+     - `authenticateWithJWT()` - Use Better-Auth JWT validation
+     - `authenticateWithApiKey()` - Use Better-Auth API key validation
+   - **CRITICAL**: Call `auth.api.getSession({ headers })` for all methods
+   - Implement connection management:
+     - `registerConnection(userId, sessionId, ws)`
+     - `deregisterConnection(ws)`
+     - `validateConnectionSession(ws, sessionId)`
+   - Add heartbeat/keepalive (30-second ping interval)
+   - Add authentication timeout (10 seconds)
    - Add connection limits per user
-   - Integrate with @libs/monitoring
+   - Integrate with @libs/monitoring for connection metrics
 
-2. **Rate Limiting Integration** (2h)
+2. **WebSocket Session Sync** (1h)
 
-   - Integrate @libs/ratelimit with all auth endpoints
-   - Configure per-method rate limits (login: 5/15min, API: 100/min)
-   - Add distributed rate limiting coordination
-   - Implement circuit breaker patterns
-   - Add monitoring for rate limit metrics
+   - Create `WebSocketSessionSync` class
+   - Monitor session validity during WebSocket connection
+   - Close WebSocket if session revoked
+   - Close WebSocket if API key revoked
+   - Sync session expiration with connection timeout
 
 3. **Multi-Layer Caching Optimization** (2h)
 
-   - Integrate @libs/database CacheService
-   - Configure L1 (memory) and L2 (Redis) caching
-   - Implement cache invalidation strategies
-   - Optimize cache TTLs per resource type
-   - Add cache hit rate monitoring
+   - Integrate @libs/database CacheService fully
+   - Configure L1 (memory) and L2 (Redis) caching:
+     - User sessions: 5min (L1), 30min (L2)
+     - JWKS: 1 hour (L1), 24 hours (L2)
+     - API keys: 5min (L1), 15min (L2)
+     - Org membership: 10min (L1), 1 hour (L2)
+   - Implement cache invalidation on:
+     - Password change → invalidate user sessions
+     - Logout → invalidate specific session
+     - API key revoke → invalidate key cache
+     - JWT rotation → invalidate JWKS cache
+   - Add cache hit rate monitoring (target: >85%)
 
-4. **Production Monitoring** (1h)
+4. **Production Monitoring Integration** (2h)
    - Integrate @libs/monitoring MetricsCollector
-   - Add metrics for all auth operations
-   - Implement health checks
+   - Add metrics for all operations:
+     - `auth.login.success` / `auth.login.failure`
+     - `auth.jwt.verify` / `auth.bearer.verify`
+     - `auth.apikey.validate`
+     - `auth.session.cache.hit` / `auth.session.cache.miss`
+     - `auth.websocket.connections` (gauge)
+   - Implement health checks:
+     - Database connectivity
+     - Redis connectivity
+     - Better-Auth API availability
+     - JWKS endpoint reachability
    - Add error tracking and alerting
    - Create performance dashboards
 
 **Deliverables**:
 
-- ✅ WebSocket authentication working
-- ✅ Rate limiting fully integrated
-- ✅ Multi-layer caching optimized
-- ✅ Comprehensive monitoring active
-- ✅ Performance targets met
+- ⏳ WebSocket authentication fully functional
+- ⏳ Session synchronization working
+- ⏳ Multi-layer caching optimized (>85% hit rate)
+- ⏳ Comprehensive monitoring active
+- ⏳ Health checks passing
+- ⏳ Performance targets met (<50ms P95 session validation)
 
 **Validation**:
 
 ```bash
-# WebSocket connection with auth
-ws://localhost:3000/ws -H "Authorization: Bearer TOKEN"
+# WebSocket connection with session cookie
+wscat -c ws://localhost:3000/ws --header "Cookie: better-auth.session-token=TOKEN"
 
-# Rate limit enforcement
-# Should block after 5 attempts
-for i in {1..6}; do curl POST /api/auth/sign-in/email; done
+# WebSocket with Bearer token
+wscat -c ws://localhost:3000/ws --header "Authorization: Bearer TOKEN"
+
+# WebSocket with API key
+wscat -c ws://localhost:3000/ws --header "x-api-key: YOUR_KEY"
 
 # Cache performance
-# Should see <50ms P95 for cached sessions
-hey -n 1000 GET /api/auth/session
+hey -n 1000 GET /api/auth/session  # Should show <50ms P95
+
+# Health check
+curl GET /health
 ```
 
 ---
 
-### Phase 5: Advanced Plugins & Polish (Day 5)
+### Phase 5: Elysia Integration, Testing & Documentation (Day 5)
 
-**Objective**: Add Two-Factor and Multi-Session plugins, comprehensive testing, documentation
+**Objective**: Complete Elysia plugin integration, comprehensive testing, production-ready documentation
 
 **Timeline**: 6-8 hours  
 **Complexity**: Medium
@@ -374,63 +745,110 @@ hey -n 1000 GET /api/auth/session
 **Dependencies**:
 
 - Phase 4 completed
-- All core functionality stable
+- All middleware and WebSocket handlers working
 
 **Sub-tasks**:
 
-1. **Two-Factor Authentication Plugin** (2h)
+1. **Elysia Plugin Integration** (2h)
 
-   - Configure Two-Factor plugin (TOTP)
-   - Add QR code generation for enrollment
-   - Implement backup codes
-   - Add verification flows
-   - Test with authenticator apps
+   - Create `ElysiaAuthPlugin` class for easy integration
+   - Implement `install(app, config)` method that:
+     - Mounts Better-Auth handler at `/api/auth/*`
+     - Registers all middleware (session, bearer, jwt, api-key)
+     - Sets up WebSocket handlers
+     - Configures CORS for auth endpoints
+   - Create `ElysiaContextDecorator` to add auth helpers:
+     - `context.user` - Current authenticated user
+     - `context.session` - Current session
+     - `context.organization` - Active organization
+     - `context.apiKey` - API key details (if using API key auth)
+     - `context.isAuthenticated` - Boolean flag
+   - Add convenience methods:
+     - `context.hasOrgPermission(action, resource)`
+     - `context.requireRole(roleName)`
+     - `context.getActiveOrganization()`
 
-2. **Multi-Session Plugin** (1h)
+2. **Route Protection Utilities** (1h)
 
-   - Configure Multi-Session plugin
-   - Enable concurrent sessions per user
-   - Add session management UI support
-   - Implement "sign out all devices" functionality
+   - Create `AuthGuard` class with declarative route protection:
+     - `requireBetterAuthSession()` - Require valid session
+     - `requireBearer()` - Require Bearer token
+     - `requireJWT()` - Require JWT token
+     - `requireApiKey(permissions?)` - Require API key
+     - `requireOrganizationMembership(organizationId)`
+     - `requireOrganizationRole(organizationId, role)`
+     - `either(...guards)` - Any auth method
+     - `all(...guards)` - All auth methods
+   - Example usage:
+     ```typescript
+     app.get("/protected", auth.guard.requireBetterAuthSession(), (context) => {
+       return { user: context.user };
+     });
+     ```
 
-3. **Comprehensive Testing** (2h)
+3. **Comprehensive Testing** (3h)
 
-   - Integration tests for all auth flows
-   - End-to-end tests for complete workflows
-   - Security testing (SQL injection, XSS, CSRF)
-   - Performance testing under load
-   - Edge case testing
+   - **Unit Tests**: Test each middleware in isolation (~25 tests each)
+   - **Integration Tests**: Test complete auth flows
+     - Email/password registration → login → protected route
+     - Bearer token generation → validation → refresh
+     - JWT generation → validation → microservice call
+     - API key creation → validation → permission check
+     - Organization creation → member invitation → role assignment
+   - **WebSocket Tests**: Test all WebSocket auth methods
+   - **End-to-End Tests**: Test real-world scenarios
+   - **Security Tests**: SQL injection, XSS, CSRF protection
+   - **Performance Tests**: Load testing under 10k concurrent users
+   - **Target**: >90% coverage (~160+ tests total)
 
-4. **Documentation & Examples** (2h)
+4. **Production-Ready Documentation** (2h)
 
-   - Create usage examples for each auth method
-   - Document configuration options
-   - Add troubleshooting guide
-   - Create migration guide from existing auth
-   - Update architectural documentation
-
-5. **Security Audit** (1h)
-   - Review all authentication flows
-   - Validate input sanitization
-   - Check for information leakage
-   - Verify rate limiting effectiveness
-   - Audit logging completeness
+   - Create `README.md` with:
+     - Quick start guide (5-minute setup)
+     - Installation instructions
+     - Basic configuration examples
+     - All authentication methods with examples
+     - Middleware usage patterns
+     - WebSocket authentication examples
+     - Troubleshooting guide
+   - Create `ARCHITECTURE.md` explaining:
+     - Component architecture
+     - Better-Auth integration approach
+     - Middleware pattern explanation
+     - Caching strategy
+     - Rate limiting strategy
+   - Create `API.md` documenting:
+     - All exported functions and classes
+     - Configuration options
+     - TypeScript types
+     - Error codes and handling
+   - Update `docs/fonctional.md` with implementation notes
 
 **Deliverables**:
 
-- ✅ Two-Factor authentication working
-- ✅ Multi-Session support implemented
-- ✅ Comprehensive test suite (>90% coverage)
-- ✅ Complete documentation
-- ✅ Security audit passed
+- ⏳ Elysia plugin complete and tested
+- ⏳ Route protection utilities functional
+- ⏳ Comprehensive test suite (>90% coverage)
+- ⏳ Production-ready documentation
+- ⏳ Migration guide from legacy auth
+- ⏳ All tests passing (~160+ total)
 
 **Validation**:
 
-- All tests passing (unit, integration, e2e)
-- Performance benchmarks met
-- Security checklist completed
-- Documentation comprehensive
-- Ready for production deployment
+```bash
+# Easy Elysia integration
+import { ElysiaAuthPlugin } from '@libs/better-auth';
+app.use(ElysiaAuthPlugin.install(app, config));
+
+# Route protection
+app.get('/protected', auth.guard.requireBetterAuthSession(), handler);
+
+# All tests passing
+pnpm test  # Should show 160+ tests passing
+
+# Documentation complete
+ls -la README.md ARCHITECTURE.md API.md
+```
 
 ---
 
@@ -482,21 +900,49 @@ hey -n 1000 GET /api/auth/session
 
 ## Technical Debt Prevention
 
-**Avoid**:
+**CRITICAL - Avoid These Common Mistakes**:
 
-- ❌ Custom authentication logic (use Better-Auth plugins)
-- ❌ Custom rate limiting (use @libs/ratelimit)
-- ❌ Custom caching (use @libs/database CacheService)
-- ❌ Custom monitoring (use @libs/monitoring)
-- ❌ Reinventing solved problems
+- ❌ **NO custom authentication logic** - Use Better-Auth plugin methods via `auth.api.*`
+- ❌ **NO custom token validation** - Call `auth.api.getSession({ headers })` for all auth types
+- ❌ **NO custom JWT verification** - Use Better-Auth JWT plugin's JWKS validation
+- ❌ **NO custom API key validation** - Use Better-Auth API Key plugin's `verifyApiKey`
+- ❌ **NO custom rate limiting** - Use @libs/ratelimit exclusively
+- ❌ **NO custom caching** - Use @libs/database CacheService
+- ❌ **NO custom monitoring** - Use @libs/monitoring MetricsCollector
+- ❌ **NO service classes unless needed** - Middleware call Better-Auth directly
 
-**Embrace**:
+**Correct Patterns to Embrace**:
 
-- ✅ Better-Auth framework and plugins
-- ✅ Existing infrastructure libraries
-- ✅ Industry-standard patterns
-- ✅ Comprehensive testing
-- ✅ Production monitoring
+- ✅ Middleware extract credentials and call `auth.api.getSession({ headers })`
+- ✅ Attach Better-Auth response unchanged to Elysia context
+- ✅ Use Better-Auth plugin methods directly (no wrappers unless complex multi-step)
+- ✅ Leverage @libs/\* infrastructure for cross-cutting concerns
+- ✅ Comprehensive testing of integration points
+- ✅ Production monitoring from the start
+
+**Middleware Architecture Pattern** (ALL middleware follow this):
+
+```typescript
+export function createAuthMiddleware(auth: BetterAuth, options: Options) {
+  return async (context: Context) => {
+    // 1. Extract credential from request
+    const token = extractCredential(context.request, options);
+
+    // 2. Validate with Better-Auth (NO custom logic)
+    const result = await auth.api.getSession({
+      headers: context.request.headers,
+    });
+
+    if (!result.session || !result.user) {
+      throw new InvalidTokenError("Authentication failed");
+    }
+
+    // 3. Attach Better-Auth response unchanged to context
+    context["session"] = result.session;
+    context["user"] = result.user;
+  };
+}
+```
 
 ---
 
@@ -504,34 +950,62 @@ hey -n 1000 GET /api/auth/session
 
 ### Technical Requirements
 
-- [ ] All authentication methods working (Session, Bearer, JWT, API Key)
-- [ ] All plugins integrated (Bearer, JWT, API Key, Organization, 2FA, Multi-Session)
-- [ ] Elysia middleware complete and tested
-- [ ] WebSocket authentication functional
-- [ ] Rate limiting integrated with @libs/ratelimit
-- [ ] Multi-layer caching optimized
-- [ ] Monitoring and metrics comprehensive
-- [ ] Error handling production-ready
-- [ ] Test coverage >90%
-- [ ] Performance targets met
+- [x] Better-Auth installed with Prisma adapter (Phase 1 ✅)
+- [x] AuthLibrary class created and tested (Phase 1 ✅)
+- [x] All plugins configured in `BetterAuthConfigBuilder` (Phase 1 ✅)
+- [x] Session middleware working (Phase 2 ✅ - 18 tests passing)
+- [x] Bearer middleware working (Phase 2 ✅ - 25 tests passing)
+- [ ] JWT middleware working (Phase 2 ⏳ - next)
+- [ ] API Key middleware working (Phase 2 ⏳ - after JWT)
+- [ ] WebSocket authentication handler (Phase 4 ⏳)
+- [ ] Rate limiting integrated with @libs/ratelimit (Phase 3 ⏳)
+- [ ] Multi-layer caching optimized (Phase 4 ⏳)
+- [ ] Monitoring and metrics comprehensive (Phase 4 ⏳)
+- [ ] Elysia plugin complete (Phase 5 ⏳)
+- [ ] Route protection utilities (Phase 5 ⏳)
+- [ ] Error handling production-ready (Phase 5 ⏳)
+- [ ] Test coverage >90% (Phase 5 ⏳ - targeting ~160+ tests)
+- [ ] Performance targets met (<50ms P95 session validation)
 
 ### Documentation Requirements
 
-- [ ] API documentation complete
-- [ ] Configuration guide written
-- [ ] Examples for each auth method
-- [ ] Troubleshooting guide created
-- [ ] Migration guide from legacy auth
-- [ ] Architecture diagrams updated
+- [ ] README.md with quick start (Phase 5 ⏳)
+- [ ] ARCHITECTURE.md explaining design (Phase 5 ⏳)
+- [ ] API.md documenting exports (Phase 5 ⏳)
+- [ ] Examples for each auth method (Phase 5 ⏳)
+- [ ] Troubleshooting guide (Phase 5 ⏳)
+- [ ] Migration guide from legacy auth (Phase 5 ⏳)
 
 ### Quality Requirements
 
-- [ ] Zero critical security vulnerabilities
-- [ ] All tests passing (unit, integration, e2e)
-- [ ] Performance benchmarks met
-- [ ] Code review completed
-- [ ] Security audit passed
-- [ ] Production readiness checklist completed
+- [x] Zero TypeScript errors (Current ✅)
+- [x] Phase 1 tests passing (46 tests ✅)
+- [x] Phase 2 session tests passing (18 tests ✅)
+- [x] Phase 2 bearer tests passing (25 tests ✅)
+- [ ] All middleware tests passing (targeting ~114 tests by end of Phase 2)
+- [ ] Integration tests passing (Phase 5 ⏳)
+- [ ] Security audit passed (Phase 5 ⏳)
+- [ ] Performance benchmarks met (Phase 5 ⏳)
+- [ ] Production readiness checklist completed (Phase 5 ⏳)
+
+### Current Progress: 50% Complete (2/4 middleware done)
+
+**Completed**:
+
+- ✅ Phase 1: Foundation & Core Setup (100%)
+- ✅ Phase 2 (Session): Session middleware (100%)
+- ✅ Phase 2 (Bearer): Bearer middleware (100%)
+
+**In Progress**:
+
+- ⏳ Phase 2 (JWT): JWT middleware (NEXT)
+- ⏳ Phase 2 (API Key): API Key middleware (AFTER JWT)
+
+**Pending**:
+
+- ⏳ Phase 3: Plugin testing & rate limiting
+- ⏳ Phase 4: WebSocket & optimization
+- ⏳ Phase 5: Elysia integration & documentation
 
 ---
 

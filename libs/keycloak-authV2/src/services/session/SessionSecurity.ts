@@ -19,12 +19,8 @@ import crypto from "crypto";
 import { createLogger } from "@libs/utils";
 import type { ILogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
-import type { CacheService } from "@libs/database";
-import type {
-  KeycloakSessionData,
-  SecurityCheckResult,
-  HealthCheckResult,
-} from "./sessionTypes";
+import type { CacheService, UserSession } from "@libs/database";
+import type { SecurityCheckResult, HealthCheckResult } from "./sessionTypes";
 
 /**
  * Security configuration
@@ -159,7 +155,7 @@ export class SessionSecurity {
   async enforceConcurrentSessionLimits(
     userId: string,
     newSessionId: string,
-    activeSessions: KeycloakSessionData[]
+    activeSessions: UserSession[]
   ): Promise<{
     allowed: boolean;
     sessionsToTerminate: string[];
@@ -291,7 +287,7 @@ export class SessionSecurity {
    * Generate and validate device fingerprint
    */
   async validateDeviceFingerprint(
-    sessionData: KeycloakSessionData,
+    sessionData: UserSession,
     requestContext: {
       ipAddress: string;
       userAgent: string;
@@ -314,7 +310,7 @@ export class SessionSecurity {
 
       this.logger.debug("Validating device fingerprint", {
         operationId,
-        sessionId: this.hashSessionId(sessionData.id),
+        sessionId: this.hashSessionId(sessionData.sessionId),
         userId: sessionData.userId,
       });
 
@@ -435,7 +431,7 @@ export class SessionSecurity {
    * Detect and handle suspicious activity
    */
   async detectSuspiciousActivity(
-    sessionData: KeycloakSessionData,
+    sessionData: UserSession,
     requestContext: {
       ipAddress: string;
       userAgent: string;
@@ -449,7 +445,7 @@ export class SessionSecurity {
     try {
       this.logger.debug("Detecting suspicious activity", {
         operationId,
-        sessionId: this.hashSessionId(sessionData.id),
+        sessionId: this.hashSessionId(sessionData.sessionId),
         userId: sessionData.userId,
       });
 
@@ -467,7 +463,7 @@ export class SessionSecurity {
 
         this.recordSecurityViolation({
           type: SecurityEventType.RATE_LIMIT_EXCEEDED,
-          sessionId: sessionData.id,
+          sessionId: sessionData.sessionId,
           userId: sessionData.userId,
           ipAddress: requestContext.ipAddress,
           userAgent: requestContext.userAgent,
@@ -734,14 +730,14 @@ export class SessionSecurity {
   /**
    * Private helper methods
    */
-  private selectSessionsToTerminate(sessions: KeycloakSessionData[]): string[] {
+  private selectSessionsToTerminate(sessions: UserSession[]): string[] {
     // Sort by last accessed time (oldest first) and select excess sessions
     const sorted = sessions.sort(
       (a, b) => a.lastAccessedAt.getTime() - b.lastAccessedAt.getTime()
     );
 
     const excessCount = sessions.length - this.config.maxConcurrentSessions + 1;
-    return sorted.slice(0, excessCount).map((s) => s.id);
+    return sorted.slice(0, excessCount).map((s) => s.sessionId);
   }
 
   private generateDeviceFingerprint(requestContext: {
@@ -857,7 +853,7 @@ export class SessionSecurity {
   }
 
   private analyzeAccessPattern(
-    sessionData: KeycloakSessionData,
+    sessionData: UserSession,
     requestContext: { ipAddress: string; userAgent: string }
   ): { suspicious: boolean; reasons: string[] } {
     const reasons: string[] = [];

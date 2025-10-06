@@ -1,5 +1,5 @@
 /**
- * KeycloakSessionManager - Single Responsibility: Orchestration
+ * SessionManager - Single Responsibility: Orchestration
  *
  * Orchestrates:
  * - All session management components
@@ -19,11 +19,15 @@ import crypto from "crypto";
 import { createLogger } from "@libs/utils";
 import type { ILogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
-import type { PostgreSQLClient, CacheService } from "@libs/database";
+import type {
+  CacheService,
+  UserSessionRepository,
+  SessionLogRepository,
+  SessionActivityRepository,
+} from "@libs/database";
 
 // Component imports
 import { SessionStore, type SessionStoreConfig } from "./SessionStore";
-
 import {
   SessionValidator,
   type SessionValidatorConfig,
@@ -31,35 +35,36 @@ import {
 import { SessionSecurity, type SessionSecurityConfig } from "./SessionSecurity";
 import { SessionMetrics, type SessionMetricsConfig } from "./SessionMetrics";
 import { SessionCleaner, type SessionCleanerConfig } from "./SessionCleaner";
+import { SessionTokenCoordinator } from "./SessionTokenCoordinator";
 
 // Type imports
+import type { UserSession } from "@libs/database";
 import type {
-  KeycloakSessionData,
   SessionValidationResult,
   SessionStats,
   AuthResult,
   HealthCheckResult,
   SessionFingerprint,
 } from "./sessionTypes";
-import { createTokenManagerWithRefresh, type TokenManager } from "../token";
 import type { ITokenManager } from "../token/TokenManager";
+import {
+  createEncryptionManager,
+  type EncryptionManager,
+} from "../EncryptionManager";
+import type { KeycloakClient } from "../../client";
 
 /**
  * Unified session manager configuration
  */
-export interface KeycloakSessionManagerConfig {
+export interface SessionManagerConfig {
+  encryptionKey: string; // 32+ char secret key for encryption
   readonly sessionStore?: Partial<SessionStoreConfig>;
-  // readonly tokenManager?: Partial<TokenManagerConfig>;
   readonly sessionValidator?: Partial<SessionValidatorConfig>;
   readonly sessionSecurity?: Partial<SessionSecurityConfig>;
   readonly sessionMetrics?: Partial<SessionMetricsConfig>;
   readonly sessionCleaner?: Partial<SessionCleanerConfig>;
-  readonly keycloak: {
-    serverUrl: string;
-    realm: string;
-    clientId: string;
-    clientSecret?: string;
-  };
+  readonly tokenRefreshBuffer?: number; // Seconds before expiry to refresh tokens (default: 300)
+
   readonly enableComponents: {
     metrics: boolean;
     security: boolean;
@@ -68,21 +73,15 @@ export interface KeycloakSessionManagerConfig {
   };
 }
 
-const DEFAULT_SESSION_CONFIG: Required<KeycloakSessionManagerConfig> = {
+const DEFAULT_SESSION_CONFIG: Required<SessionManagerConfig> = {
+  encryptionKey: crypto.randomBytes(32).toString("hex"), // Default random key (should be overridden)
   sessionStore: {},
-  // tokenManager: {},
   sessionValidator: {},
   sessionSecurity: {},
   sessionMetrics: {},
   sessionCleaner: {},
-  keycloak: {
-    serverUrl: process.env["KEYCLOAK_SERVER_URL"] || "http://localhost:8080",
-    realm: process.env["KEYCLOAK_REALM"] || "master",
-    clientId: process.env["KEYCLOAK_CLIENT_ID"] || "app",
-    ...(process.env["KEYCLOAK_CLIENT_SECRET"] && {
-      clientSecret: process.env["KEYCLOAK_CLIENT_SECRET"],
-    }),
-  },
+  tokenRefreshBuffer: 300, // 5 minutes
+
   enableComponents: {
     metrics: true,
     security: true,
@@ -106,13 +105,15 @@ interface SessionOperationContext {
 /**
  * Unified session management orchestrator
  */
-export class KeycloakSessionManager {
+export class SessionManager {
   private readonly logger: ILogger;
-  private readonly config: Required<KeycloakSessionManagerConfig>;
+  private readonly config: Required<SessionManagerConfig>;
 
   // Core components
   private readonly sessionStore: SessionStore;
+  private readonly tokenCoordinator: SessionTokenCoordinator;
 
+  // Optional components
   private readonly sessionValidator?: SessionValidator;
   private readonly sessionSecurity?: SessionSecurity;
   private readonly sessionMetrics?: SessionMetrics;
@@ -121,34 +122,44 @@ export class KeycloakSessionManager {
   // Component state
   private isInitialized = false;
   private isShuttingDown = false;
+  private readonly encryptionManager: EncryptionManager;
 
   constructor(
     private readonly tokenManager: ITokenManager,
-    private readonly dbClient: PostgreSQLClient,
+    private readonly userSessionRepo: UserSessionRepository,
+    private readonly sessionLogRepo: SessionLogRepository,
+    private readonly sessionActivityRepo: SessionActivityRepository,
+    private readonly keycloakClient: KeycloakClient,
     private readonly cacheService?: CacheService,
     private readonly metrics?: IMetricsCollector,
-    config: Partial<KeycloakSessionManagerConfig> = {}
+    config: Partial<SessionManagerConfig> = {}
   ) {
-    this.logger = createLogger("KeycloakSessionManager");
+    this.logger = createLogger("SessionManager");
     this.config = {
       ...DEFAULT_SESSION_CONFIG,
       ...config,
-    } as Required<KeycloakSessionManagerConfig>;
+    } as Required<SessionManagerConfig>;
+
+    // Initialize encryption manager
+    this.encryptionManager = createEncryptionManager(this.config.encryptionKey);
 
     // Initialize core components (always required)
+    // REFACTORED: Now uses repository pattern
     this.sessionStore = new SessionStore(
-      this.dbClient,
+      this.userSessionRepo,
       this.cacheService,
       this.logger.child({ component: "SessionStore" }),
       this.metrics,
       this.config.sessionStore
     );
 
-    // this.tokenManager = new TokenManager(
-    //   this.logger.child({ component: "TokenManager" }),
-    //   this.metrics,
-    //   this.config.tokenManager
-    // );
+    // Initialize token coordinator (delegates to KeycloakClient)
+    this.tokenCoordinator = new SessionTokenCoordinator(
+      this.keycloakClient,
+      this.sessionStore,
+      { refreshBuffer: this.config.tokenRefreshBuffer },
+      this.metrics
+    );
 
     // Initialize optional components based on configuration
     if (this.config.enableComponents.validation) {
@@ -176,9 +187,12 @@ export class KeycloakSessionManager {
       );
     }
 
+    // Initialize SessionCleaner with repository pattern (Phase 4 complete)
     if (this.config.enableComponents.cleanup) {
       this.sessionCleaner = new SessionCleaner(
-        this.dbClient,
+        this.userSessionRepo,
+        this.sessionLogRepo,
+        this.sessionActivityRepo,
         this.cacheService,
         this.logger.child({ component: "SessionCleaner" }),
         this.metrics,
@@ -186,10 +200,8 @@ export class KeycloakSessionManager {
       );
     }
 
-    this.logger.info("KeycloakSessionManager initialized", {
+    this.logger.info("SessionManager initialized with repository pattern", {
       enabledComponents: this.config.enableComponents,
-      keycloakRealm: this.config.keycloak.realm,
-      keycloakClientId: this.config.keycloak.clientId,
     });
 
     this.isInitialized = true;
@@ -197,6 +209,7 @@ export class KeycloakSessionManager {
 
   /**
    * Create a new session
+   * Delegates to: SessionSecurity, SessionValidator, SessionTokenCoordinator, SessionStore
    */
   async createSession(
     userId: string,
@@ -222,7 +235,7 @@ export class KeycloakSessionManager {
         ipAddress: this.hashIp(requestContext.ipAddress),
       });
 
-      // Check concurrent session limits if security is enabled
+      // Step 1: Security - Check concurrent session limits (delegate to SessionSecurity)
       if (this.sessionSecurity) {
         const activeSessions = await this.sessionStore.getUserSessions(userId);
         const sessionId = crypto.randomUUID();
@@ -247,7 +260,7 @@ export class KeycloakSessionManager {
           };
         }
 
-        // Terminate excess sessions if needed
+        // Terminate excess sessions if needed (delegate to SessionCleaner)
         if (concurrentResult.sessionsToTerminate.length > 0) {
           await this.terminateSessionsBatch(
             concurrentResult.sessionsToTerminate
@@ -255,9 +268,9 @@ export class KeycloakSessionManager {
         }
       }
 
-      // Generate session fingerprint if security is enabled
+      // Step 2: Generate fingerprint (delegate to SessionValidator)
       let fingerprint = "";
-      if (this.sessionSecurity && requestContext.fingerprint) {
+      if (this.sessionValidator && requestContext.fingerprint) {
         const sessionFingerprint: SessionFingerprint = {
           userAgent:
             requestContext.fingerprint["userAgent"] || requestContext.userAgent,
@@ -276,52 +289,61 @@ export class KeycloakSessionManager {
           }),
         };
         fingerprint =
-          this.sessionValidator?.generateFingerprint(sessionFingerprint) || "";
+          this.sessionValidator.generateFingerprint(sessionFingerprint) || "";
       }
 
-      // Encrypt tokens before storage
+      // Step 3: Encrypt tokens (delegate to EncryptionManager)
       const encryptedTokens = {
-        accessToken: await this.tokenManager.encryptToken(tokens.accessToken),
+        accessToken: await this.encryptionManager.encryptCompact(
+          tokens.accessToken
+        ),
         refreshToken: tokens.refreshToken
-          ? await this.tokenManager.encryptToken(tokens.refreshToken)
+          ? await this.encryptionManager.encryptCompact(tokens.refreshToken)
           : undefined,
         idToken: tokens.idToken
-          ? await this.tokenManager.encryptToken(tokens.idToken)
+          ? await this.encryptionManager.encryptCompact(tokens.idToken)
           : undefined,
       };
 
-      // Create session data
-      const sessionData: KeycloakSessionData = {
-        id: crypto.randomUUID(),
+      // Step 4: Create session data using SessionCreationOptions
+      const sessionOptions: any = {
         userId,
-        userInfo: {
-          id: userId,
-          username: "",
-          email: "",
-          name: "",
-          roles: [],
-          permissions: [],
-        },
-        keycloakSessionId: crypto.randomUUID(),
+        sessionId: crypto.randomUUID(),
         accessToken: encryptedTokens.accessToken,
-        refreshToken: encryptedTokens.refreshToken,
-        idToken: encryptedTokens.idToken,
         tokenExpiresAt: tokens.expiresAt,
-        refreshExpiresAt: tokens.refreshExpiresAt,
-        createdAt: new Date(),
-        lastAccessedAt: new Date(),
         expiresAt: tokens.expiresAt,
         ipAddress: requestContext.ipAddress,
         userAgent: requestContext.userAgent,
-        isActive: true,
         fingerprint,
         metadata: {},
       };
 
-      // Store session
-      await this.sessionStore.storeSession(sessionData);
+      // Only add optional fields if they are defined
+      if (encryptedTokens.refreshToken) {
+        sessionOptions.refreshToken = encryptedTokens.refreshToken;
+      }
+      if (encryptedTokens.idToken) {
+        sessionOptions.idToken = encryptedTokens.idToken;
+      }
+      if (tokens.refreshExpiresAt) {
+        sessionOptions.refreshExpiresAt = tokens.refreshExpiresAt;
+      }
 
-      // Validate device fingerprint if security is enabled
+      // Step 5: Store session (delegate to SessionStore)
+      await this.sessionStore.storeSession(sessionOptions);
+
+      // Retrieve the created session
+      const sessionData = await this.sessionStore.retrieveSession(
+        sessionOptions.sessionId
+      );
+      if (!sessionData) {
+        return {
+          success: false,
+          reason: "Failed to retrieve created session",
+        };
+      }
+
+      // Step 6: Validate device fingerprint (delegate to SessionSecurity)
       if (this.sessionSecurity) {
         const deviceResult =
           await this.sessionSecurity.validateDeviceFingerprint(
@@ -332,7 +354,7 @@ export class KeycloakSessionManager {
         if (!deviceResult.isValid) {
           // Clean up the session and fail
           await this.sessionStore.markSessionInactive(
-            sessionData.id,
+            sessionData.sessionId,
             "device_validation_failed"
           );
           await this.recordMetrics(
@@ -348,21 +370,20 @@ export class KeycloakSessionManager {
         }
       }
 
-      // Record successful creation metrics
+      // Step 7: Record metrics (delegate to SessionMetrics)
       await this.recordMetrics("session_creation", context, true);
 
       this.logger.info("Session created successfully", {
         operationId: context.operationId,
-        sessionId: this.hashSessionId(sessionData.id),
+        sessionId: this.hashSessionId(sessionData.sessionId),
         userId,
         duration: performance.now() - context.startTime,
       });
 
       return {
         success: true,
-        sessionId: sessionData.id,
-        expiresAt: sessionData.expiresAt,
-        userInfo: sessionData.userInfo,
+        sessionId: sessionData.sessionId,
+        expiresAt: sessionData.expiresAt || undefined,
       };
     } catch (error) {
       this.logger.error("Session creation failed", {
@@ -386,6 +407,7 @@ export class KeycloakSessionManager {
 
   /**
    * Validate an existing session
+   * Delegates to: SessionStore, SessionValidator, SessionSecurity, SessionTokenCoordinator
    */
   async validateSession(
     sessionId: string,
@@ -405,7 +427,7 @@ export class KeycloakSessionManager {
         sessionId: this.hashSessionId(sessionId),
       });
 
-      // Retrieve session from storage
+      // Step 1: Retrieve session (delegate to SessionStore)
       let sessionData = await this.sessionStore.retrieveSession(sessionId);
       if (!sessionData) {
         await this.recordMetrics(
@@ -421,7 +443,7 @@ export class KeycloakSessionManager {
         };
       }
 
-      // Basic session validation
+      // Step 2: Basic session validation (delegate to SessionValidator)
       if (this.sessionValidator) {
         // Transform requestContext to match expected interface
         const transformedContext = requestContext
@@ -468,19 +490,37 @@ export class KeycloakSessionManager {
           return validationResult;
         }
 
-        // Check if token refresh is needed
+        // Step 3: Check if token refresh is needed (delegate to SessionTokenCoordinator)
         if (validationResult.shouldRefreshToken && sessionData.refreshToken) {
-          const refreshResult = await this.refreshSessionTokens(sessionData);
-          if (refreshResult.success && refreshResult.sessionData) {
-            sessionData.accessToken = refreshResult.sessionData.accessToken;
-            sessionData.refreshToken = refreshResult.sessionData.refreshToken;
-            sessionData.tokenExpiresAt =
-              refreshResult.sessionData.tokenExpiresAt;
+          try {
+            // Decrypt refresh token before passing to coordinator
+            const decryptedRefreshToken =
+              await this.encryptionManager.decryptCompact(
+                sessionData.refreshToken
+              );
+            sessionData.refreshToken = decryptedRefreshToken;
+
+            // Delegate to SessionTokenCoordinator
+            await this.tokenCoordinator.refreshSessionTokens(sessionData);
+
+            // Retrieve updated session
+            const updatedSession = await this.sessionStore.retrieveSession(
+              sessionId
+            );
+            if (updatedSession) {
+              sessionData = updatedSession;
+            }
+          } catch (refreshError) {
+            this.logger.warn("Token refresh failed during validation", {
+              error: refreshError,
+              sessionId: this.hashSessionId(sessionId),
+            });
+            // Continue with validation using existing token
           }
         }
       }
 
-      // Security checks if enabled
+      // Step 4: Security checks (delegate to SessionSecurity)
       if (this.sessionSecurity && requestContext) {
         const securityResult =
           await this.sessionSecurity.detectSuspiciousActivity(
@@ -491,7 +531,7 @@ export class KeycloakSessionManager {
         if (!securityResult.isValid) {
           // Mark session as inactive for security violations
           await this.sessionStore.markSessionInactive(
-            sessionData.id,
+            sessionData.sessionId,
             "security_violation"
           );
           await this.recordMetrics(
@@ -511,10 +551,10 @@ export class KeycloakSessionManager {
         }
       }
 
-      // Update session access time
+      // Step 5: Update session access time (delegate to SessionStore)
       await this.sessionStore.updateSessionAccess(sessionId);
 
-      // Record successful validation
+      // Step 6: Record metrics (delegate to SessionMetrics)
       await this.recordMetrics("session_validation", context, true);
 
       this.logger.debug("Session validation successful", {
@@ -551,21 +591,22 @@ export class KeycloakSessionManager {
 
   /**
    * Refresh session tokens
+   * Delegates to: SessionTokenCoordinator (which handles KeycloakClient and SessionStore)
    */
-  async refreshSessionTokens(sessionData: KeycloakSessionData): Promise<{
+  async refreshSessionTokens(sessionData: UserSession): Promise<{
     success: boolean;
-    sessionData?: KeycloakSessionData;
+    sessionData?: UserSession;
     reason?: string;
   }> {
     const context = this.createOperationContext("refresh_tokens", {
-      sessionId: sessionData.id,
+      sessionId: sessionData.sessionId,
       userId: sessionData.userId,
     });
 
     try {
       this.logger.debug("Refreshing session tokens", {
         operationId: context.operationId,
-        sessionId: this.hashSessionId(sessionData.id),
+        sessionId: this.hashSessionId(sessionData.sessionId),
         userId: sessionData.userId,
       });
 
@@ -576,71 +617,40 @@ export class KeycloakSessionManager {
         };
       }
 
-      // Decrypt refresh token
-      const decryptedRefreshToken = await this.tokenManager.decryptToken(
+      // Decrypt refresh token before delegating
+      const decryptedRefreshToken = await this.encryptionManager.decryptCompact(
         sessionData.refreshToken
       );
+      sessionData.refreshToken = decryptedRefreshToken;
 
-      // Refresh tokens via Keycloak
-      const refreshResult = await this.tokenManager. refreshAccessToken(
-        decryptedRefreshToken,
-        this.config.keycloak.serverUrl +
-          "/realms/" +
-          this.config.keycloak.realm,
-        this.config.keycloak.clientId,
-        this.config.keycloak.clientSecret
+      // Delegate to SessionTokenCoordinator
+      // This handles: KeycloakClient.refreshToken() + SessionStore.updateSessionTokens()
+      await this.tokenCoordinator.refreshSessionTokens(sessionData);
+
+      // Retrieve updated session data
+      const updatedSessionData = await this.sessionStore.retrieveSession(
+        sessionData.sessionId
       );
 
-      if (!refreshResult.success || !refreshResult.tokens) {
+      if (!updatedSessionData) {
         await this.recordMetrics(
           "token_refresh",
           context,
           false,
-          refreshResult.error
+          "session_not_found_after_refresh"
         );
         return {
           success: false,
-          ...(refreshResult.error !== undefined && {
-            reason: refreshResult.error,
-          }),
+          reason: "Session not found after refresh",
         };
       }
-
-      // Encrypt new tokens
-      const encryptedTokens = {
-        accessToken: await this.tokenManager.encryptToken(
-          refreshResult.tokens.accessToken
-        ),
-        refreshToken: refreshResult.tokens.refreshToken
-          ? await this.tokenManager.encryptToken(
-              refreshResult.tokens.refreshToken
-            )
-          : sessionData.refreshToken,
-        idToken: refreshResult.tokens.idToken
-          ? await this.tokenManager.encryptToken(refreshResult.tokens.idToken)
-          : sessionData.idToken,
-      };
-
-      // Update session data
-      const updatedSessionData: KeycloakSessionData = {
-        ...sessionData,
-        accessToken: encryptedTokens.accessToken,
-        refreshToken: encryptedTokens.refreshToken,
-        idToken: encryptedTokens.idToken,
-        tokenExpiresAt: refreshResult.tokens.expiresAt,
-        refreshExpiresAt: refreshResult.tokens.refreshExpiresAt,
-        lastAccessedAt: new Date(),
-      };
-
-      // Store updated session
-      await this.sessionStore.storeSession(updatedSessionData);
 
       // Record successful refresh
       await this.recordMetrics("token_refresh", context, true);
 
       this.logger.info("Session tokens refreshed successfully", {
         operationId: context.operationId,
-        sessionId: this.hashSessionId(sessionData.id),
+        sessionId: this.hashSessionId(sessionData.sessionId),
         duration: performance.now() - context.startTime,
       });
 
@@ -670,6 +680,7 @@ export class KeycloakSessionManager {
 
   /**
    * Destroy a session
+   * Delegates to: SessionStore, SessionTokenCoordinator, SessionMetrics
    */
   async destroySession(
     sessionId: string,
@@ -686,15 +697,17 @@ export class KeycloakSessionManager {
         reason,
       });
 
-      // Mark session as inactive in storage
+      // Step 1: Cancel automatic token refresh (delegate to SessionTokenCoordinator)
+      this.tokenCoordinator.cancelAutomaticRefresh(sessionId);
+
+      // Step 2: Mark session as inactive (delegate to SessionStore)
       await this.sessionStore.markSessionInactive(sessionId, reason);
 
-      // Clear cache entries
+      // Step 3: Clear cache entries (delegate to SessionStore)
       await this.sessionStore.invalidateSessionCache(sessionId);
 
-      // Record session destruction
+      // Step 4: Update metrics (delegate to SessionMetrics)
       if (this.sessionMetrics) {
-        // Update session statistics
         const currentStats = this.sessionMetrics.getSessionStats();
         await this.sessionMetrics.updateSessionStats({
           activeSessions: Math.max(0, currentStats.activeSessions - 1),
@@ -726,14 +739,16 @@ export class KeycloakSessionManager {
 
   /**
    * Get session statistics
+   * Delegates to: SessionMetrics, SessionStore
    */
   async getSessionStats(): Promise<SessionStats> {
     try {
+      // Delegate to SessionMetrics if available
       if (this.sessionMetrics) {
         return this.sessionMetrics.getSessionStats();
       }
 
-      // Fallback: basic stats from storage
+      // Fallback: basic stats from SessionStore
       const storageStats = await this.sessionStore.getStorageStats();
       return {
         activeSessions: storageStats.activeSessions,
@@ -766,6 +781,7 @@ export class KeycloakSessionManager {
 
   /**
    * Perform comprehensive health check
+   * Delegates to all managed components
    */
   async healthCheck(): Promise<HealthCheckResult> {
     const startTime = performance.now();
@@ -774,6 +790,10 @@ export class KeycloakSessionManager {
       this.logger.debug("Performing session manager health check");
 
       const healthResults: Record<string, any> = {};
+
+      // Core component health checks
+      healthResults["tokenCoordinator"] =
+        await this.tokenCoordinator.healthCheck();
 
       // Optional component health checks
       if (this.sessionValidator) {
@@ -798,7 +818,7 @@ export class KeycloakSessionManager {
 
       // Determine overall status
       const componentStatuses = Object.values(healthResults).map(
-        (result: any) => result.status
+        (result: any) => result.status || result.coordinator
       );
 
       let overallStatus: "healthy" | "degraded" | "unhealthy" = "healthy";
@@ -834,6 +854,7 @@ export class KeycloakSessionManager {
 
   /**
    * Gracefully shutdown all components
+   * Delegates cleanup to all managed components
    */
   async shutdown(): Promise<void> {
     if (this.isShuttingDown) {
@@ -862,7 +883,13 @@ export class KeycloakSessionManager {
         await this.sessionValidator.cleanup();
       }
 
+      // Shutdown token coordinator
+      await this.tokenCoordinator.dispose();
+
+      // Shutdown token manager
       await this.tokenManager.dispose();
+
+      // Shutdown session store
       await this.sessionStore.cleanup();
 
       this.logger.info("Session manager shutdown completed");
@@ -902,7 +929,7 @@ export class KeycloakSessionManager {
           case "session_creation":
             // Session data would be passed in a real implementation
             await this.sessionMetrics.recordSessionCreation(
-              {} as KeycloakSessionData,
+              {} as UserSession,
               duration,
               success
             );
@@ -939,8 +966,13 @@ export class KeycloakSessionManager {
     }
   }
 
+  /**
+   * Terminate multiple sessions (batch operation)
+   * Delegates to: SessionStore
+   */
   private async terminateSessionsBatch(sessionIds: string[]): Promise<void> {
     try {
+      // Batch terminate sessions (delegate to SessionStore)
       await Promise.allSettled(
         sessionIds.map((sessionId) =>
           this.sessionStore.markSessionInactive(

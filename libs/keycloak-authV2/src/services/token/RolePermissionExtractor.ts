@@ -29,13 +29,28 @@ import { RoleChecker } from "../authorization/RoleChecker";
  * @deprecated Use ClaimsExtractor and RoleChecker instead
  * Role Permission Extractor Utility
  * Handles role and permission validation and extraction
+ *
+ * DEPRECATION NOTICE: This class will be removed in v3.0.0
  */
 export class RolePermissionExtractor {
+  private static deprecationWarned = false;
+
+  private static warnDeprecation(methodName: string): void {
+    if (!this.deprecationWarned) {
+      console.warn(
+        `[DEPRECATED] RolePermissionExtractor.${methodName}() is deprecated and will be removed in v3.0.0. ` +
+          `Use ClaimsExtractor for extraction or RoleChecker for authorization checks.`
+      );
+      this.deprecationWarned = true;
+    }
+  }
+
   /**
    * @deprecated Use RoleChecker.hasRole() instead
    * Check if a role is present in user roles
    */
   static hasRole(authResult: AuthResult, role: string): boolean {
+    this.warnDeprecation("hasRole");
     return RoleChecker.hasRole(authResult, role);
   }
 

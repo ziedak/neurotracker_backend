@@ -91,6 +91,7 @@ export class TokenManager implements ITokenManager {
   private readonly cacheManager: SecureCacheManager;
   private _refreshTokenManager: RefreshTokenManager | undefined;
   private initialized = false;
+  private initializationPromise: Promise<void> | null = null;
 
   constructor(
     private readonly keycloakClient: KeycloakClient,
@@ -112,6 +113,7 @@ export class TokenManager implements ITokenManager {
   /**
    * Initialize JWT validator and optional refresh token manager
    * Must be called before using the TokenManager
+   * Thread-safe: Multiple concurrent calls will wait for the first initialization
    */
   async initialize(
     refreshConfig: Partial<RefreshTokenConfig> = {},
@@ -121,6 +123,31 @@ export class TokenManager implements ITokenManager {
       return;
     }
 
+    // Wait for ongoing initialization
+    if (this.initializationPromise) {
+      return this.initializationPromise;
+    }
+
+    // Start initialization
+    this.initializationPromise = this.doInitialize(
+      refreshConfig,
+      refreshEventHandlers
+    );
+
+    try {
+      await this.initializationPromise;
+    } finally {
+      this.initializationPromise = null;
+    }
+  }
+
+  /**
+   * Internal initialization logic
+   */
+  private async doInitialize(
+    refreshConfig: Partial<RefreshTokenConfig>,
+    refreshEventHandlers: RefreshTokenEventHandlers
+  ): Promise<void> {
     try {
       // Initialize JWT validator with proper configuration
       const jwksEndpoint = this.getJWKSEndpoint();
@@ -174,11 +201,13 @@ export class TokenManager implements ITokenManager {
 
   /**
    * Get JWKS endpoint from configuration
+   * NOTE: Default JWKS path follows Keycloak's standard OpenID Connect discovery format
    */
   private getJWKSEndpoint(): string {
     if (this.config.jwt.jwksUrl) {
       return this.config.jwt.jwksUrl;
     } else if (this.config.jwt.issuer) {
+      // Standard Keycloak JWKS endpoint pattern
       return `${this.config.jwt.issuer}/protocol/openid_connect/certs`;
     }
     throw new Error(
@@ -413,18 +442,20 @@ export class TokenManager implements ITokenManager {
   }
   /**
    * Securely clear token from memory
+   * NOTE: JavaScript strings are immutable - this is a best-effort operation
+   * and cannot guarantee the original string is cleared from V8's heap.
+   * This method is provided for defense-in-depth but should not be relied upon
+   * for security-critical token disposal.
    */
   clearTokenFromMemory(token: string): void {
     try {
-      // Overwrite the token string in memory (if possible)
+      // Create a buffer copy and zero it (doesn't affect original string in V8 heap)
       if (typeof token === "string" && token.length > 0) {
-        // Note: This doesn't guarantee clearing from V8's heap
-        // but provides best-effort memory clearing
         const buffer = Buffer.from(token);
         buffer.fill(0);
       }
     } catch (error) {
-      // Silent failure for memory clearing
+      // Silent failure - this is best-effort only
       this.logger.debug("Token memory clearing attempted", { error });
     }
   }

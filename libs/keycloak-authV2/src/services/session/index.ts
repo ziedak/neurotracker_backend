@@ -3,21 +3,14 @@
  *
  * This module provides a complete session management system following SOLID principles.
  * Each component has a single responsibility and can be used independently or together
- * through the main KeycloakSessionManager orchestrator.
+ * through the main SessionManager orchestrator.
  */
 
 // Main orchestrator (recommended entry point)
-export {
-  KeycloakSessionManager,
-  type KeycloakSessionManagerConfig,
-} from "./KeycloakSessionManager";
+export { SessionManager, type SessionManagerConfig } from "./SessionManager";
 
 // Individual components (for advanced usage)
 export { SessionStore, type SessionStoreConfig } from "./SessionStore";
-export {
-  SessionTokenManager as TokenManager,
-  type SessionTokenManagerConfig as TokenManagerConfig,
-} from "./SessionTokenManager";
 export {
   SessionValidator,
   type SessionValidatorConfig,
@@ -30,6 +23,7 @@ export {
 } from "./SessionSecurity";
 export { SessionMetrics, type SessionMetricsConfig } from "./SessionMetrics";
 export { SessionCleaner, type SessionCleanerConfig } from "./SessionCleaner";
+export { SessionTokenCoordinator } from "./SessionTokenCoordinator";
 
 // Shared types and interfaces
 export * from "./sessionTypes";
@@ -39,9 +33,9 @@ export * from "./sessionTypes";
  *
  * 1. Complete session management (recommended):
  * ```typescript
- * import { KeycloakSessionManager } from "@libs/keycloak-auth/services/session";
+ * import { SessionManager } from "@libs/keycloak-auth/services/session";
  *
- * const sessionManager = new KeycloakSessionManager(
+ * const sessionManager = new SessionManager(
  *   dbClient,
  *   cacheService,
  *   logger,
@@ -83,9 +77,9 @@ export * from "./sessionTypes";
  *
  * 3. Component-specific configuration:
  * ```typescript
- * import { KeycloakSessionManager } from "@libs/keycloak-auth/services/session";
+ * import { SessionManager } from "@libs/keycloak-auth/services/session";
  *
- * const sessionManager = new KeycloakSessionManager(dbClient, cacheService, logger, metrics, {
+ * const sessionManager = new SessionManager(dbClient, cacheService, logger, metrics, {
  *   sessionStore: {
  *     cacheEnabled: true,
  *     defaultCacheTTL: 3600,
@@ -134,5 +128,5 @@ export * from "./sessionTypes";
  * - **SessionSecurity**: Concurrent limits, fingerprinting, threat detection
  * - **SessionMetrics**: Statistics, monitoring, and performance tracking
  * - **SessionCleaner**: Maintenance, cleanup, and optimization
- * - **KeycloakSessionManager**: Orchestrates all components with unified API
+ * - **SessionManager**: Orchestrates all components with unified API
  */

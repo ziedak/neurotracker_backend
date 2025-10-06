@@ -16,6 +16,7 @@ import {
   type KeycloakTokenResponse,
 } from "../../client/KeycloakClient";
 import type { SecureCacheManager } from "./SecureCacheManager";
+import { TokenRefreshScheduler } from "./TokenRefreshScheduler";
 
 /**
  * Zod schemas for validation
@@ -107,13 +108,11 @@ interface DeserializedTokenData
  * Constants for magic numbers and configuration
  */
 const MIN_CACHE_TTL = 300; // 5 minutes
-const SCHEDULING_LOCK_TTL = 30; // 30 seconds - timeout for stuck scheduling operations
 const ENCRYPTION_TIME_METRIC = "refresh_token_manager.encryption_time";
 const DECRYPTION_TIME_METRIC = "refresh_token_manager.decryption_time";
 const REFRESH_SUCCESS_METRIC = "refresh_token_manager.refresh_success";
 const REFRESH_ERROR_METRIC = "refresh_token_manager.refresh_error";
 const ACTIVE_TIMERS_METRIC = "refresh_token_manager.active_timers";
-const ACTIVE_LOCKS_METRIC = "refresh_token_manager.active_locks";
 
 /**
  * Type guard for encrypted token data
@@ -122,20 +121,6 @@ function isEncryptedTokenData(
   data: TokenStorageData
 ): data is EncryptedTokenData {
   return "__encrypted" in data && data.__encrypted === true;
-}
-
-/**
- * Deserialized token data from JSON (may have string dates)
- */
-interface DeserializedTokenData
-  extends Omit<
-    StoredTokenInfo,
-    "expiresAt" | "refreshExpiresAt" | "createdAt" | "lastRefreshedAt"
-  > {
-  expiresAt: string | Date;
-  refreshExpiresAt?: string | Date;
-  createdAt: string | Date;
-  lastRefreshedAt?: string | Date;
 }
 
 /**
@@ -202,13 +187,13 @@ export interface RefreshTokenStats {
   enabled: boolean;
   config: RefreshTokenConfig;
   activeTimers: number;
-
   cleanupEnabled: boolean;
+  scheduledRefreshes: string[];
 }
 
 export class RefreshTokenManager {
   private readonly logger = createLogger("RefreshTokenManager");
-  private refreshTimers = new Map<string, NodeJS.Timeout>();
+  private readonly scheduler: TokenRefreshScheduler;
   private encryptionManager: EncryptionManager | undefined;
   private cleanupTimer: NodeJS.Timeout | undefined;
 
@@ -222,6 +207,12 @@ export class RefreshTokenManager {
     // Validate configuration
     RefreshTokenConfigSchema.parse(config);
     this.validateConfiguration();
+
+    // Initialize token refresh scheduler
+    this.scheduler = new TokenRefreshScheduler(
+      { refreshBuffer: config.refreshBuffer },
+      metrics
+    );
 
     // Initialize encryption manager if enabled
     if (config.enableEncryption) {
@@ -269,12 +260,11 @@ export class RefreshTokenManager {
 
   /**
    * Generate cache key for refresh token storage
-   * Optimized: Use simple concatenation for userId:sessionId to avoid expensive SHA256 hashing
+   * Uses '#' delimiter to avoid conflicts with user IDs containing ':'
    */
   private generateRefreshCacheKey(userId: string, sessionId: string): string {
-    // For userId:sessionId format, use simple concatenation (validated by Zod schemas)
-    // This is ~80% faster than SHA256 hashing while maintaining security through validation
-    return `refresh_tokens:${userId}:${sessionId}`;
+    // Use # as safe delimiter (validated by Zod schemas)
+    return `refresh_tokens#${userId}#${sessionId}`;
   }
 
   /**
@@ -346,9 +336,10 @@ export class RefreshTokenManager {
 
   /**
    * Deserialize token info (convert date strings to Date objects)
+   * Validates the result to ensure data integrity
    */
   private deserializeTokenInfo(data: DeserializedTokenData): StoredTokenInfo {
-    return {
+    const tokenInfo = {
       ...data,
       expiresAt:
         typeof data.expiresAt === "string"
@@ -369,131 +360,43 @@ export class RefreshTokenManager {
           : data.lastRefreshedAt
         : undefined,
     };
+
+    // Validate deserialized data for security
+    try {
+      return StoredTokenInfoSchema.parse(tokenInfo);
+    } catch (validationError) {
+      this.logger.error("Deserialized token info failed validation", {
+        error:
+          validationError instanceof Error
+            ? validationError.message
+            : String(validationError),
+      });
+      throw new Error("Invalid token data from cache");
+    }
   }
 
   /**
-   * Schedule automatic token refresh with race condition protection
+   * Schedule automatic token refresh using the scheduler
    */
   private async scheduleTokenRefresh(
     userId: string,
     sessionId: string,
     expiresAt: Date
   ): Promise<void> {
-    const refreshKey = `${userId}:${sessionId}`;
-    const lockKey = `scheduling_lock:${userId}:${sessionId}`;
+    const key = `${userId}:${sessionId}`;
 
-    // Check if scheduling is already in progress using TTL-based lock
-    const existingLock = await this.cacheManager.get("scheduling", lockKey);
-    if (existingLock.hit) {
-      this.logger.debug("Token refresh scheduling already in progress", {
-        userId,
-        sessionId,
-      });
-      return;
-    }
-
-    // Set TTL-based lock to prevent concurrent scheduling
-    await this.cacheManager.set(
-      "scheduling",
-      lockKey,
-      {
-        startedAt: new Date().toISOString(),
-        expiresAt: expiresAt.toISOString(),
-      },
-      SCHEDULING_LOCK_TTL
-    );
-
-    try {
-      await this.doScheduleTokenRefresh(refreshKey, expiresAt);
-    } finally {
-      // Remove the lock when done (TTL will clean it up anyway, but this is cleaner)
-      await this.cacheManager.invalidate("scheduling", lockKey);
-    }
-  }
-
-  /**
-   * Internal method to handle token refresh scheduling
-   */
-  private async doScheduleTokenRefresh(
-    refreshKey: string,
-    expiresAt: Date
-  ): Promise<void> {
-    // Extract userId and sessionId from refreshKey
-    const [userId, sessionId] = refreshKey.split(":", 2);
-
-    if (!userId || !sessionId) {
-      this.logger.error("Invalid refresh key format", { refreshKey });
-      return;
-    }
-    // Cancel existing timer if any
-    if (this.refreshTimers.has(refreshKey)) {
-      clearTimeout(this.refreshTimers.get(refreshKey)!);
-      this.refreshTimers.delete(refreshKey);
-    }
-
-    // Calculate refresh time (buffer before expiration)
-    const refreshTime = new Date(
-      expiresAt.getTime() - this.config.refreshBuffer * 1000
-    );
-    const delay = Math.max(0, refreshTime.getTime() - Date.now());
-
-    if (delay === 0) {
-      this.logger.debug("Token expires soon, refreshing immediately", {
-        userId,
-        sessionId,
-        expiresAt: expiresAt.toISOString(),
-      });
-
-      this.refreshUserTokens(userId, sessionId).catch((error) => {
-        this.logger.error("Immediate refresh failed", {
-          userId,
-          sessionId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-      return;
-    }
-
-    // Schedule refresh
-    const timer = setTimeout(async () => {
-      // Ensure timer is removed from Map even if callback fails completely
-      const cleanup = () => {
-        this.refreshTimers.delete(refreshKey);
-      };
-
+    await this.scheduler.scheduleRefresh(key, expiresAt, async () => {
       try {
-        this.logger.debug("Scheduled token refresh triggered", {
-          userId,
-          sessionId,
-          scheduledFor: refreshTime.toISOString(),
-        });
-
-        await this.refreshUserTokens(userId, sessionId);
-
-        this.logger.debug("Scheduled token refresh completed", {
-          userId,
-          sessionId,
-        });
+        const result = await this.refreshUserTokens(userId, sessionId);
+        return result.success;
       } catch (error) {
-        this.logger.error("Scheduled refresh failed", {
+        this.logger.error("Refresh callback failed", {
           userId,
           sessionId,
           error: error instanceof Error ? error.message : String(error),
         });
-      } finally {
-        // Guaranteed cleanup - this executes even if process crashes
-        cleanup();
+        return false;
       }
-    }, delay);
-
-    this.refreshTimers.set(refreshKey, timer);
-
-    this.logger.debug("Token refresh scheduled", {
-      userId,
-      sessionId,
-      expiresAt: expiresAt.toISOString(),
-      refreshAt: refreshTime.toISOString(),
-      delayMs: delay,
     });
   }
 
@@ -517,7 +420,24 @@ export class RefreshTokenManager {
         return null;
       }
 
-      const encryptedInfo = JSON.parse(cachedResult.data as unknown as string);
+      // Parse JSON with error handling
+      let encryptedInfo: TokenStorageData;
+      try {
+        encryptedInfo = JSON.parse(cachedResult.data as unknown as string);
+      } catch (parseError) {
+        this.logger.error("Failed to parse cached token data", {
+          userId,
+          sessionId,
+          error:
+            parseError instanceof Error
+              ? parseError.message
+              : String(parseError),
+        });
+        // Invalidate corrupted cache entry
+        await this.cacheManager.invalidate("stored_tokens", cacheKey);
+        return null;
+      }
+
       return this.decryptTokenInfo(encryptedInfo);
     } catch (error) {
       this.logger.error("Failed to get stored tokens", {
@@ -721,14 +641,9 @@ export class RefreshTokenManager {
     const cacheKey = this.generateRefreshCacheKey(userId, sessionId);
     await this.cacheManager.invalidate("stored_tokens", cacheKey);
 
-    // Cancel any scheduled refresh
+    // Cancel any scheduled refresh using the scheduler
     const refreshKey = `${userId}:${sessionId}`;
-
-    // Note: No need to wait for scheduling locks - TTL handles cleanup automatically
-    if (this.refreshTimers.has(refreshKey)) {
-      clearTimeout(this.refreshTimers.get(refreshKey)!);
-      this.refreshTimers.delete(refreshKey);
-    }
+    this.scheduler.cancelRefresh(refreshKey);
 
     this.logger.debug("Stored tokens removed", {
       userId,
@@ -767,16 +682,21 @@ export class RefreshTokenManager {
    * Get refresh token manager statistics
    */
   getRefreshTokenStats() {
+    const schedulerStats = this.scheduler.getStats();
+
     const stats = {
       enabled: true,
       config: this.config,
-      activeTimers: this.refreshTimers.size,
+      activeTimers: schedulerStats.activeTimers,
       cleanupEnabled: !!this.cleanupTimer,
+      scheduledRefreshes: schedulerStats.scheduledRefreshes,
     };
 
     // Record gauge metrics
-    this.metrics?.recordGauge(ACTIVE_TIMERS_METRIC, this.refreshTimers.size);
-    this.metrics?.recordGauge(ACTIVE_LOCKS_METRIC, 0); // TTL-based locks not counted
+    this.metrics?.recordGauge(
+      ACTIVE_TIMERS_METRIC,
+      schedulerStats.activeTimers
+    );
 
     return stats;
   }
@@ -877,8 +797,10 @@ export class RefreshTokenManager {
    * Call this when the application is shutting down
    */
   async dispose(): Promise<void> {
+    const schedulerStats = this.scheduler.getStats();
+
     this.logger.debug("Disposing RefreshTokenManager resources", {
-      activeTimers: this.refreshTimers.size,
+      activeTimers: schedulerStats.activeTimers,
     });
 
     // Stop periodic cleanup
@@ -887,15 +809,8 @@ export class RefreshTokenManager {
       this.cleanupTimer = undefined;
     }
 
-    // Cancel all active timers
-    for (const [refreshKey, timer] of this.refreshTimers) {
-      clearTimeout(timer);
-      this.logger.debug("Cancelled refresh timer", { refreshKey });
-    }
-    this.refreshTimers.clear();
-
-    // Note: No need to wait for scheduling locks - TTL handles automatic cleanup
-    // No in-memory mutexes to clear - TTL-based locking is used
+    // Dispose scheduler (handles all timer cleanup)
+    await this.scheduler.dispose();
 
     // Clean up encryption manager if present
     if (this.encryptionManager) {

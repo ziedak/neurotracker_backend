@@ -3,11 +3,135 @@
  *
  * This module provides the foundation types used across all session management
  * components, ensuring type safety and consistency throughout the system.
+ *
+ * SOURCE OF TRUTH: Database models (@libs/database)
+ * All session operations use UserSession directly from Prisma schema
  */
 
 import { z } from "zod";
-import type { UserInfo } from "../../types";
-import type { KeycloakTokenResponse } from "../../client/KeycloakClient";
+
+// Re-export database types as primary and ONLY types
+export type {
+  UserSession,
+  UserSessionCreateInput,
+  UserSessionUpdateInput,
+  SessionLog,
+  SessionLogCreateInput,
+  SessionLogUpdateInput,
+} from "@libs/database";
+
+/**
+ * Session creation options with smart defaults for required DB fields
+ */
+export interface SessionCreationOptions {
+  userId: string;
+  sessionId: string;
+
+  // Keycloak-specific
+  keycloakSessionId?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  idToken?: string;
+  tokenExpiresAt?: Date;
+  refreshExpiresAt?: Date;
+
+  // Store-specific (optional - will use default if not provided)
+  storeId?: string;
+  token?: string; // Session token (will generate if not provided)
+
+  // Common fields
+  fingerprint?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  expiresAt?: Date;
+  metadata?: unknown;
+}
+
+/**
+ * Default values for required DB fields
+ */
+export const DEFAULT_STORE_ID = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * Generate a unique session token
+ * Format: keycloak_<timestamp>_<random>
+ */
+function generateSessionToken(): string {
+  const timestamp = Date.now().toString(36);
+  const random = Math.random().toString(36).substring(2, 15);
+  return `keycloak_${timestamp}_${random}`;
+}
+
+/**
+ * Converts SessionCreationOptions to UserSessionCreateInput
+ * Handles smart defaults for required DB fields
+ * Uses Prisma's relation syntax for foreign keys
+ */
+export function toUserSessionCreateInput(
+  options: SessionCreationOptions
+): import("@libs/database").UserSessionCreateInput {
+  const storeId = options.storeId || DEFAULT_STORE_ID;
+  const token = options.token || generateSessionToken();
+
+  const input: import("@libs/database").UserSessionCreateInput = {
+    // Use Prisma relation syntax for foreign keys
+    user: { connect: { id: options.userId } },
+    store: { connect: { id: storeId } },
+    sessionId: options.sessionId,
+    token,
+  };
+
+  // Add optional fields only if defined (to satisfy exactOptionalPropertyTypes)
+  if (options.keycloakSessionId !== undefined) {
+    input.keycloakSessionId = options.keycloakSessionId;
+  }
+  if (options.accessToken !== undefined) {
+    input.accessToken = options.accessToken;
+  }
+  if (options.refreshToken !== undefined) {
+    input.refreshToken = options.refreshToken;
+  }
+  if (options.idToken !== undefined) {
+    input.idToken = options.idToken;
+  }
+  if (options.tokenExpiresAt !== undefined) {
+    input.tokenExpiresAt = options.tokenExpiresAt;
+  }
+  if (options.refreshExpiresAt !== undefined) {
+    input.refreshExpiresAt = options.refreshExpiresAt;
+  }
+  if (options.fingerprint !== undefined) {
+    input.fingerprint = options.fingerprint;
+  }
+  if (options.expiresAt !== undefined) {
+    input.expiresAt = options.expiresAt;
+  }
+  if (options.ipAddress !== undefined) {
+    input.ipAddress = options.ipAddress;
+  }
+  if (options.userAgent !== undefined) {
+    input.userAgent = options.userAgent;
+  }
+  if (options.metadata !== undefined) {
+    input.metadata = options.metadata as any;
+  }
+
+  return input;
+}
+
+/**
+ * Check if session uses default store
+ */
+export function isDefaultStore(storeId: string): boolean {
+  return storeId === DEFAULT_STORE_ID;
+}
+
+/**
+ * Check if session is a Keycloak session (vs other types)
+ */
+export function isKeycloakSession(token: string): boolean {
+  return token.startsWith("keycloak_");
+}
 
 /**
  * Zod validation schemas for runtime type checking
@@ -25,66 +149,30 @@ export const SessionIdSchema = z
 // Token validation schema
 export const TokenSchema = z.string().min(10, "Token too short");
 
-// Keycloak session data validation schema
-export const KeycloakSessionDataSchema = z.object({
-  id: SessionIdSchema,
+// UserSession validation schema (aligned with DB model)
+export const UserSessionSchema = z.object({
+  id: z.string().uuid(),
   userId: UserIdSchema,
-  userInfo: z.record(z.any()),
-  keycloakSessionId: z.string().optional(),
-  accessToken: z.string().optional(),
-  refreshToken: z.string().optional(),
-  idToken: z.string().optional(),
-  tokenExpiresAt: z.date().optional(),
-  refreshExpiresAt: z.date().optional(),
-  createdAt: z.date(),
+  storeId: z.string().uuid(),
+  sessionId: SessionIdSchema,
+  token: z.string().min(1),
+  keycloakSessionId: z.string().nullable().optional(),
+  accessToken: z.string().nullable().optional(),
+  refreshToken: z.string().nullable().optional(),
+  idToken: z.string().nullable().optional(),
+  tokenExpiresAt: z.date().nullable().optional(),
+  refreshExpiresAt: z.date().nullable().optional(),
+  fingerprint: z.string().nullable().optional(),
   lastAccessedAt: z.date(),
-  expiresAt: z.date(),
-  ipAddress: z.string(),
-  userAgent: z.string(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+  expiresAt: z.date().nullable().optional(),
+  ipAddress: z.string().nullable().optional(),
+  userAgent: z.string().nullable().optional(),
+  metadata: z.unknown().nullable().optional(),
   isActive: z.boolean(),
-  fingerprint: z.string(),
-  metadata: z.record(z.any()).optional().default({}),
+  endedAt: z.date().nullable().optional(),
 });
-
-/**
- * Core session data interface
- */
-export interface KeycloakSessionData {
-  readonly id: string;
-  readonly userId: string;
-  readonly userInfo: UserInfo;
-  readonly keycloakSessionId?: string | undefined;
-  accessToken?: string | undefined;
-  refreshToken?: string | undefined;
-  readonly idToken?: string | undefined;
-  tokenExpiresAt?: Date | undefined;
-  readonly refreshExpiresAt?: Date | undefined;
-  readonly createdAt: Date;
-  readonly lastAccessedAt: Date;
-  readonly expiresAt: Date;
-  readonly ipAddress: string;
-  readonly userAgent: string;
-  readonly isActive: boolean;
-  readonly fingerprint: string;
-  readonly metadata?: Record<string, any> | undefined;
-}
-
-/**
- * Token validation result interface
- */
-export interface TokenValidationResult {
-  readonly isValid: boolean;
-  readonly reason?: string;
-  readonly shouldRefresh: boolean;
-  readonly expiresAt?: Date;
-  readonly payload?: {
-    userId: string;
-    username?: string;
-    email?: string;
-    roles: string[];
-    scopes: string[];
-  };
-}
 
 /**
  * Session validation result interface
@@ -95,7 +183,7 @@ export interface SessionValidationResult {
   readonly timestamp: Date;
   readonly shouldTerminate?: boolean;
   readonly shouldRefreshToken?: boolean;
-  readonly sessionData?: KeycloakSessionData;
+  readonly sessionData?: import("@libs/database").UserSession;
   readonly expirationTime?: Date;
   readonly sessionAge?: number;
   readonly idleTime?: number;
@@ -113,7 +201,6 @@ export interface AuthResult {
   readonly sessionId?: string | undefined;
   readonly reason?: string | undefined;
   readonly expiresAt?: Date | undefined;
-  readonly userInfo?: UserInfo | undefined;
 }
 
 /**
@@ -173,78 +260,4 @@ export interface SessionFingerprint {
   readonly screenResolution?: string;
   readonly timezone?: string;
   readonly platform?: string;
-}
-
-/**
- * Session creation options interface
- */
-export interface SessionCreationOptions {
-  readonly userId: string;
-  readonly tokens: KeycloakTokenResponse;
-  readonly requestContext: {
-    readonly ipAddress: string;
-    readonly userAgent: string;
-    readonly fingerprint?: Record<string, string>;
-  };
-}
-
-/**
- * Session cleanup result interface
- */
-export interface SessionCleanupResult {
-  readonly operation: string;
-  readonly recordsDeleted: number;
-  readonly duration: number;
-  readonly success: boolean;
-}
-
-/**
- * Type guards for runtime type checking
- */
-
-/**
- * Type guard to check if object is KeycloakSessionData
- */
-export function isKeycloakSessionData(obj: any): obj is KeycloakSessionData {
-  try {
-    KeycloakSessionDataSchema.parse(obj);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Type guard to check if object is valid session validation result
- */
-export function isSessionValidationResult(
-  obj: any
-): obj is SessionValidationResult {
-  return (
-    typeof obj === "object" &&
-    obj !== null &&
-    typeof obj.isValid === "boolean" &&
-    obj.timestamp instanceof Date
-  );
-}
-
-/**
- * Type guard to check if object is valid auth result
- */
-export function isAuthResult(obj: any): obj is AuthResult {
-  return (
-    typeof obj === "object" && obj !== null && typeof obj.success === "boolean"
-  );
-}
-
-/**
- * Type guard to check if object is valid security check result
- */
-export function isSecurityCheckResult(obj: any): obj is SecurityCheckResult {
-  return (
-    typeof obj === "object" &&
-    obj !== null &&
-    typeof obj.isValid === "boolean" &&
-    typeof obj.shouldTerminate === "boolean"
-  );
 }

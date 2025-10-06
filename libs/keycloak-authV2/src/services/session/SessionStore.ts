@@ -19,36 +19,25 @@ import crypto from "crypto";
 import { createLogger } from "@libs/utils";
 import type { ILogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
-import type { PostgreSQLClient, CacheService } from "@libs/database";
-import type { KeycloakSessionData, HealthCheckResult } from "./sessionTypes";
+import type {
+  CacheService,
+  UserSessionRepository,
+  UserSession,
+} from "@libs/database";
+import type { HealthCheckResult } from "./sessionTypes";
 import {
-  KeycloakSessionDataSchema,
   SessionIdSchema,
   UserIdSchema,
+  SessionCreationOptions,
+  toUserSessionCreateInput,
+  UserSessionSchema,
 } from "./sessionTypes";
 
 /**
- * Database row interface for session data
+ * @deprecated Using UserSession type from @libs/database instead
+ * Database row interface - no longer used after repository refactoring
  */
-interface SessionDatabaseRow {
-  id: string;
-  userId: string;
-  sessionId: string;
-  keycloakSessionId?: string;
-  accessToken?: string;
-  refreshToken?: string;
-  idToken?: string;
-  tokenExpiresAt?: Date;
-  refreshExpiresAt?: Date;
-  fingerprint?: string;
-  lastAccessedAt: Date;
-  createdAt: Date;
-  expiresAt?: Date;
-  ipAddress?: string;
-  userAgent?: string;
-  metadata?: string;
-  isActive: boolean;
-}
+// interface SessionDatabaseRow { ... }
 
 /**
  * Session Store Configuration
@@ -69,13 +58,14 @@ const DEFAULT_STORE_CONFIG: SessionStoreConfig = {
 
 /**
  * High-performance session storage with caching and optimization
+ * REFACTORED: Now uses repository pattern instead of raw SQL
  */
 export class SessionStore {
   private readonly logger: ILogger;
   private readonly config: SessionStoreConfig;
 
   constructor(
-    private readonly dbClient: PostgreSQLClient,
+    private readonly userSessionRepo: UserSessionRepository,
     private readonly cacheService?: CacheService,
     logger?: ILogger,
     private readonly metrics?: IMetricsCollector,
@@ -84,7 +74,7 @@ export class SessionStore {
     this.logger = logger || createLogger("SessionStore");
     this.config = { ...DEFAULT_STORE_CONFIG, ...config };
 
-    this.logger.info("SessionStore initialized", {
+    this.logger.info("SessionStore initialized with repository pattern", {
       cacheEnabled: this.config.cacheEnabled && !!this.cacheService,
       batchSize: this.config.batchSize,
       accessUpdateThreshold: this.config.accessUpdateThreshold,
@@ -93,69 +83,113 @@ export class SessionStore {
 
   /**
    * Store session data in database and cache
+   * REFACTORED: Now uses repository pattern with upsert logic
+   * Accepts either full UserSession or SessionCreationOptions
    */
-  async storeSession(sessionData: KeycloakSessionData): Promise<void> {
+  async storeSession(
+    sessionData: UserSession | SessionCreationOptions
+  ): Promise<void> {
     const startTime = performance.now();
     const operationId = crypto.randomUUID();
 
     try {
+      // Determine if we have a full UserSession or just creation options
+      const isFullSession = "id" in sessionData && "createdAt" in sessionData;
+      const sessionId = isFullSession
+        ? (sessionData as UserSession).sessionId
+        : (sessionData as SessionCreationOptions).sessionId;
+
       this.logger.debug("Storing session", {
         operationId,
-        sessionId: this.hashSessionId(sessionData.id),
+        sessionId: this.hashSessionId(sessionId),
         userId: sessionData.userId,
       });
 
-      // Validate session data
-      KeycloakSessionDataSchema.parse(sessionData);
+      if (isFullSession) {
+        // Validate full UserSession
+        UserSessionSchema.parse(sessionData);
 
-      // Store in database with upsert logic
-      await this.dbClient.executeRaw(
-        `INSERT INTO user_sessions (
-          id, user_id, session_id, keycloak_session_id, access_token,
-          refresh_token, id_token, token_expires_at, refresh_expires_at,
-          fingerprint, last_accessed_at, created_at, updated_at,
-          expires_at, ip_address, user_agent, metadata, is_active
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-        ON CONFLICT (session_id) DO UPDATE SET
-          last_accessed_at = EXCLUDED.last_accessed_at,
-          updated_at = EXCLUDED.updated_at,
-          access_token = EXCLUDED.access_token,
-          refresh_token = EXCLUDED.refresh_token,
-          token_expires_at = EXCLUDED.token_expires_at,
-          refresh_expires_at = EXCLUDED.refresh_expires_at,
-          metadata = EXCLUDED.metadata,
-          is_active = EXCLUDED.is_active`,
-        [
-          crypto.randomUUID(), // Generate unique database ID
-          sessionData.userId,
-          sessionData.id, // session_id is the session identifier
-          sessionData.keycloakSessionId,
-          sessionData.accessToken || null,
-          sessionData.refreshToken || null,
-          sessionData.idToken || null,
-          sessionData.tokenExpiresAt,
-          sessionData.refreshExpiresAt,
-          sessionData.fingerprint,
-          sessionData.lastAccessedAt,
-          sessionData.createdAt,
-          sessionData.createdAt, // updated_at = created_at initially
-          sessionData.expiresAt,
-          sessionData.ipAddress,
-          sessionData.userAgent,
-          JSON.stringify(sessionData.metadata || {}),
-          sessionData.isActive,
-        ]
-      );
+        // Update existing session
+        const session = sessionData as UserSession;
+        const updateData: any = {
+          lastAccessedAt: session.lastAccessedAt,
+          isActive: session.isActive,
+        };
+
+        // Only add fields that are not undefined/null
+        if (session.accessToken !== undefined && session.accessToken !== null) {
+          updateData.accessToken = session.accessToken;
+        }
+        if (
+          session.refreshToken !== undefined &&
+          session.refreshToken !== null
+        ) {
+          updateData.refreshToken = session.refreshToken;
+        }
+        if (
+          session.tokenExpiresAt !== undefined &&
+          session.tokenExpiresAt !== null
+        ) {
+          updateData.tokenExpiresAt = session.tokenExpiresAt;
+        }
+        if (
+          session.refreshExpiresAt !== undefined &&
+          session.refreshExpiresAt !== null
+        ) {
+          updateData.refreshExpiresAt = session.refreshExpiresAt;
+        }
+        if (session.metadata !== undefined && session.metadata !== null) {
+          updateData.metadata = session.metadata;
+        }
+
+        await this.userSessionRepo.updateById(session.id, updateData);
+      } else {
+        // Handle creation options
+        const options = sessionData as SessionCreationOptions;
+
+        // Check if session exists (upsert logic)
+        const existing = await this.userSessionRepo.findBySessionToken(
+          options.sessionId
+        );
+
+        if (existing) {
+          // Update existing session - only include defined fields
+          const updateData: any = {
+            lastAccessedAt: new Date(),
+            isActive: true,
+          };
+
+          if (options.accessToken) updateData.accessToken = options.accessToken;
+          if (options.refreshToken)
+            updateData.refreshToken = options.refreshToken;
+          if (options.tokenExpiresAt)
+            updateData.tokenExpiresAt = options.tokenExpiresAt;
+          if (options.refreshExpiresAt)
+            updateData.refreshExpiresAt = options.refreshExpiresAt;
+          if (options.metadata) updateData.metadata = options.metadata;
+
+          await this.userSessionRepo.updateById(existing.id, updateData);
+        } else {
+          // Create new session
+          const createInput = toUserSessionCreateInput(options);
+          await this.userSessionRepo.create(createInput);
+        }
+      }
 
       // Store in cache if available and configured
       if (this.cacheService && this.config.cacheEnabled) {
-        const cacheKey = this.buildSessionCacheKey(sessionData.id);
-        const ttl = Math.floor(
-          (sessionData.expiresAt.getTime() - Date.now()) / 1000
-        );
+        const cacheKey = this.buildSessionCacheKey(sessionId);
+        const session = isFullSession
+          ? (sessionData as UserSession)
+          : await this.userSessionRepo.findBySessionToken(sessionId);
 
-        if (ttl > 0) {
-          await this.cacheService.set(cacheKey, sessionData, ttl);
+        if (session) {
+          const expiresAt = session.expiresAt || new Date(Date.now() + 3600000);
+          const ttl = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
+
+          if (ttl > 0) {
+            await this.cacheService.set(cacheKey, session, ttl);
+          }
         }
       }
 
@@ -168,14 +202,18 @@ export class SessionStore {
 
       this.logger.debug("Session stored successfully", {
         operationId,
-        sessionId: this.hashSessionId(sessionData.id),
+        sessionId: this.hashSessionId(sessionId),
         duration: performance.now() - startTime,
       });
     } catch (error) {
       this.logger.error("Failed to store session", {
         operationId,
         error,
-        sessionId: this.hashSessionId(sessionData.id),
+        sessionId: this.hashSessionId(
+          "sessionId" in sessionData
+            ? sessionData.sessionId
+            : (sessionData as any).id || "unknown"
+        ),
       });
       this.metrics?.recordCounter("session.store.error", 1);
       throw error;
@@ -184,10 +222,9 @@ export class SessionStore {
 
   /**
    * Retrieve session data from cache or database
+   * REFACTORED: Now returns UserSession directly from database
    */
-  async retrieveSession(
-    sessionId: string
-  ): Promise<KeycloakSessionData | null> {
+  async retrieveSession(sessionId: string): Promise<UserSession | null> {
     const startTime = performance.now();
     const operationId = crypto.randomUUID();
 
@@ -203,9 +240,7 @@ export class SessionStore {
       // Check cache first if available
       if (this.cacheService && this.config.cacheEnabled) {
         const cacheKey = this.buildSessionCacheKey(sessionId);
-        const result = await this.cacheService.get<KeycloakSessionData>(
-          cacheKey
-        );
+        const result = await this.cacheService.get<UserSession>(cacheKey);
 
         if (result.data) {
           this.metrics?.recordCounter("session.cache_hit", 1);
@@ -217,51 +252,22 @@ export class SessionStore {
         }
       }
 
-      // Fallback to database
-      const rows = await this.dbClient.cachedQuery<SessionDatabaseRow[]>(
-        `SELECT 
-          id, user_id as "userId", session_id as "sessionId",
-          keycloak_session_id as "keycloakSessionId",
-          access_token as "accessToken",
-          refresh_token as "refreshToken",
-          id_token as "idToken",
-          token_expires_at as "tokenExpiresAt",
-          refresh_expires_at as "refreshExpiresAt",
-          fingerprint,
-          last_accessed_at as "lastAccessedAt",
-          created_at as "createdAt",
-          expires_at as "expiresAt",
-          ip_address as "ipAddress",
-          user_agent as "userAgent",
-          metadata,
-          is_active as "isActive"
-        FROM user_sessions 
-        WHERE session_id = $1 AND is_active = true`,
-        [sessionId],
-        this.config.defaultCacheTTL
-      );
+      // Fallback to database using repository
+      const session = await this.userSessionRepo.findBySessionToken(sessionId);
 
-      if (!rows.length) {
+      if (!session || !session.isActive) {
         this.metrics?.recordCounter("session.not_found", 1);
         return null;
       }
 
-      const sessionRow = rows[0];
-      if (!sessionRow) {
-        throw new Error("Session data not found after database query");
-      }
-
-      const sessionData = this.mapRowToSessionData(sessionRow);
-
       // Update cache with retrieved data
       if (this.cacheService && this.config.cacheEnabled) {
         const cacheKey = this.buildSessionCacheKey(sessionId);
-        const ttl = Math.floor(
-          (sessionData.expiresAt.getTime() - Date.now()) / 1000
-        );
+        const expiresAt = session.expiresAt || new Date(Date.now() + 3600000);
+        const ttl = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
 
         if (ttl > 0) {
-          await this.cacheService.set(cacheKey, sessionData, ttl);
+          await this.cacheService.set(cacheKey, session, ttl);
         }
       }
 
@@ -277,7 +283,7 @@ export class SessionStore {
         duration: performance.now() - startTime,
       });
 
-      return sessionData;
+      return session;
     } catch (error) {
       this.logger.error("Failed to retrieve session", {
         operationId,
@@ -365,19 +371,45 @@ export class SessionStore {
         throw new Error(`Session not found: ${sessionId}`);
       }
 
-      // Create updated session data (properties are readonly)
-      const updatedSession: KeycloakSessionData = {
-        ...session,
+      // Update session with new tokens
+      const updateData: any = {
         accessToken: newTokens.accessToken,
-        refreshToken: newTokens.refreshToken || session.refreshToken,
-        expiresAt: newTokens.expiresAt,
-        refreshExpiresAt:
-          newTokens.refreshExpiresAt || session.refreshExpiresAt,
+        tokenExpiresAt: newTokens.expiresAt,
         lastAccessedAt: new Date(),
       };
 
-      // Store updated session
-      await this.storeSession(updatedSession);
+      // Handle nullable fields properly
+      if (
+        newTokens.refreshToken !== undefined &&
+        newTokens.refreshToken !== null
+      ) {
+        updateData.refreshToken = newTokens.refreshToken;
+      } else if (newTokens.refreshToken === null) {
+        // Explicitly set to null if provided as null
+        updateData.refreshToken = null;
+      } else {
+        // Keep existing refresh token if not provided
+        updateData.refreshToken = session.refreshToken;
+      }
+
+      if (
+        newTokens.refreshExpiresAt !== undefined &&
+        newTokens.refreshExpiresAt !== null
+      ) {
+        updateData.refreshExpiresAt = newTokens.refreshExpiresAt;
+      } else if (newTokens.refreshExpiresAt === null) {
+        updateData.refreshExpiresAt = null;
+      } else {
+        updateData.refreshExpiresAt = session.refreshExpiresAt;
+      }
+
+      await this.userSessionRepo.updateById(session.id, updateData);
+
+      // Invalidate cache
+      if (this.cacheService && this.config.cacheEnabled) {
+        const cacheKey = this.buildSessionCacheKey(sessionId);
+        await this.cacheService.invalidate(cacheKey);
+      }
 
       this.logger.info("Session tokens updated successfully", {
         operationId,
@@ -403,8 +435,9 @@ export class SessionStore {
 
   /**
    * Get all active sessions for a user
+   * REFACTORED: Now uses repository pattern and returns UserSession[]
    */
-  async getUserSessions(userId: string): Promise<KeycloakSessionData[]> {
+  async getUserSessions(userId: string): Promise<UserSession[]> {
     const startTime = performance.now();
     const operationId = crypto.randomUUID();
 
@@ -416,48 +449,26 @@ export class SessionStore {
 
       UserIdSchema.parse(userId);
 
-      const rows = await this.dbClient.cachedQuery<SessionDatabaseRow[]>(
-        `SELECT 
-          id, user_id as "userId", session_id as "sessionId",
-          keycloak_session_id as "keycloakSessionId",
-          access_token as "accessToken",
-          refresh_token as "refreshToken",
-          id_token as "idToken",
-          token_expires_at as "tokenExpiresAt",
-          refresh_expires_at as "refreshExpiresAt",
-          fingerprint,
-          last_accessed_at as "lastAccessedAt",
-          created_at as "createdAt",
-          expires_at as "expiresAt",
-          ip_address as "ipAddress",
-          user_agent as "userAgent",
-          metadata,
-          is_active as "isActive"
-        FROM user_sessions 
-        WHERE user_id = $1 AND is_active = true AND expires_at > NOW()
-        ORDER BY last_accessed_at DESC`,
-        [userId],
-        300 // Cache for 5 minutes
-      );
+      // Use repository to get active sessions
+      const sessions = await this.userSessionRepo.findActiveByUserId(userId, {
+        orderBy: { lastAccessedAt: "desc" },
+      });
 
-      const sessions = rows.map((row) => this.mapRowToSessionData(row));
+      this.logger.debug("User sessions retrieved", {
+        operationId,
+        userId,
+        count: sessions.length,
+        duration: performance.now() - startTime,
+      });
 
       this.metrics?.recordTimer(
         "session.get_user_sessions.duration",
         performance.now() - startTime
       );
-      this.metrics?.recordCounter("session.user_sessions_retrieved", 1);
-
-      this.logger.debug("User sessions retrieved", {
-        operationId,
-        userId,
-        sessionCount: sessions.length,
-        duration: performance.now() - startTime,
-      });
 
       return sessions;
     } catch (error) {
-      this.logger.error("Failed to get user sessions", {
+      this.logger.error("Failed to retrieve user sessions", {
         operationId,
         error,
         userId,
@@ -469,6 +480,7 @@ export class SessionStore {
 
   /**
    * Mark session as inactive (soft delete)
+   * REFACTORED: Now uses repository pattern
    */
   async markSessionInactive(
     sessionId: string,
@@ -486,14 +498,13 @@ export class SessionStore {
 
       SessionIdSchema.parse(sessionId);
 
-      // Update database
-      await this.dbClient.executeRaw(
-        `UPDATE user_sessions 
-         SET is_active = false, 
-             updated_at = NOW()
-         WHERE session_id = $1`,
-        [sessionId]
-      );
+      // Find and update session using repository
+      const session = await this.userSessionRepo.findBySessionToken(sessionId);
+      if (session) {
+        await this.userSessionRepo.updateById(session.id, {
+          isActive: false,
+        });
+      }
 
       // Clear from cache
       await this.invalidateSessionCache(sessionId);
@@ -524,6 +535,7 @@ export class SessionStore {
 
   /**
    * Cleanup expired sessions (returns count of cleaned sessions)
+   * REFACTORED: Now uses repository pattern
    */
   async cleanupExpiredSessions(): Promise<number> {
     const startTime = performance.now();
@@ -532,14 +544,9 @@ export class SessionStore {
     try {
       this.logger.debug("Starting expired sessions cleanup", { operationId });
 
-      const result = await this.dbClient.executeRaw(
-        `UPDATE user_sessions 
-         SET is_active = false, updated_at = NOW() 
-         WHERE is_active = true AND expires_at < NOW()
-         RETURNING id`
-      );
-
-      const cleanedCount = Array.isArray(result) ? result.length : 0;
+      // Use repository to cleanup expired sessions
+      const result = await this.userSessionRepo.cleanupExpiredSessions();
+      const cleanedCount = result.count;
 
       this.metrics?.recordTimer(
         "session.cleanup.duration",
@@ -588,13 +595,14 @@ export class SessionStore {
 
   /**
    * Perform health check on storage systems
+   * REFACTORED: Repository pattern - simplified database test
    */
   async healthCheck(): Promise<HealthCheckResult> {
     const startTime = performance.now();
 
     try {
-      // Test database connectivity
-      await this.dbClient.executeRaw("SELECT 1");
+      // Test database connectivity by counting sessions (lightweight query)
+      await this.userSessionRepo.count();
 
       // Test cache if enabled
       let cacheStatus = "disabled";
@@ -634,6 +642,7 @@ export class SessionStore {
 
   /**
    * Get storage statistics
+   * REFACTORED: Now uses repository pattern
    */
   async getStorageStats(): Promise<{
     activeSessions: number;
@@ -641,21 +650,16 @@ export class SessionStore {
     cacheEnabled: boolean;
   }> {
     try {
-      const activeResult = await this.dbClient.executeRaw(
-        `SELECT COUNT(*) as count FROM user_sessions 
-         WHERE is_active = true AND expires_at > NOW()`
-      );
-
-      const totalResult = await this.dbClient.executeRaw(
-        `SELECT COUNT(*) as count FROM user_sessions`
-      );
-
-      const activeCount = Array.isArray(activeResult)
-        ? (activeResult[0] as any)?.count || 0
-        : 0;
-      const totalCount = Array.isArray(totalResult)
-        ? (totalResult[0] as any)?.count || 0
-        : 0;
+      // Use repository count methods
+      const totalCount = await this.userSessionRepo.count();
+      const activeCount = await this.userSessionRepo.count({
+        where: {
+          isActive: true,
+          expiresAt: {
+            gt: new Date(),
+          },
+        },
+      });
 
       return {
         activeSessions: activeCount,
@@ -689,27 +693,11 @@ export class SessionStore {
     return hash.digest("hex").substring(0, 8) + "...";
   }
 
-  private mapRowToSessionData(row: SessionDatabaseRow): KeycloakSessionData {
-    return {
-      id: row.sessionId,
-      userId: row.userId,
-      userInfo: row.metadata ? JSON.parse(row.metadata).userInfo || {} : {},
-      keycloakSessionId: row.keycloakSessionId || "",
-      accessToken: row.accessToken,
-      refreshToken: row.refreshToken,
-      idToken: row.idToken,
-      tokenExpiresAt: row.tokenExpiresAt,
-      refreshExpiresAt: row.refreshExpiresAt,
-      createdAt: row.createdAt,
-      lastAccessedAt: row.lastAccessedAt,
-      expiresAt: row.expiresAt || new Date(Date.now() + 24 * 60 * 60 * 1000),
-      ipAddress: row.ipAddress || "",
-      userAgent: row.userAgent || "",
-      isActive: row.isActive,
-      fingerprint: row.fingerprint || "",
-      metadata: row.metadata ? JSON.parse(row.metadata) : {},
-    };
-  }
+  /**
+   * @deprecated Replaced by userSessionToSessionData helper from sessionTypes
+   * Kept for reference but no longer used
+   */
+  // private mapRowToSessionData(row: SessionDatabaseRow): SessionData { ... }
 
   /**
    * Cleanup resources

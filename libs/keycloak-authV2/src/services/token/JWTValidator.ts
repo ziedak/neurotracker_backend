@@ -24,7 +24,7 @@ const TokenSchema = z
 export class JWTValidator {
   private readonly logger = createLogger("JWTValidator");
   private remoteJWKS: ReturnType<typeof createRemoteJWKSet> | null = null;
-  private initializationMutex = false;
+  private initializationPromise: Promise<void> | null = null;
 
   constructor(
     private readonly jwksEndpoint: string,
@@ -62,22 +62,18 @@ export class JWTValidator {
   private async ensureJWKSInitialized(): Promise<void> {
     if (this.remoteJWKS) return;
 
-    if (this.initializationMutex) {
-      // Wait for ongoing initialization
-      while (this.initializationMutex && !this.remoteJWKS) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      return;
+    // Wait for ongoing initialization
+    if (this.initializationPromise) {
+      return this.initializationPromise;
     }
 
-    this.initializationMutex = true;
+    // Start initialization
+    this.initializationPromise = this.initializeJWKS();
+
     try {
-      if (!this.remoteJWKS) {
-        // Double-check after acquiring lock
-        await this.initializeJWKS();
-      }
+      await this.initializationPromise;
     } finally {
-      this.initializationMutex = false;
+      this.initializationPromise = null;
     }
   }
 
@@ -119,11 +115,12 @@ export class JWTValidator {
       return true;
     }
 
-    const tokenId = `${jti}:${iat}`;
+    // Use # delimiter to avoid collision with jti containing ':'
+    const tokenId = `${jti}#${iat}`;
     const cachePrefix = "jwt:replay";
 
     // Check if token was already processed
-    const cachedResult = await this.cacheManager.get<AuthResult>(
+    const cachedResult = await this.cacheManager.get<boolean>(
       cachePrefix,
       tokenId
     );
@@ -135,19 +132,8 @@ export class JWTValidator {
     // Mark token as processed with TTL based on token expiration
     const ttl = exp ? Math.max(60, exp - Math.floor(Date.now() / 1000)) : 3600; // Default 1 hour
 
-    // Store a minimal AuthResult to mark token as processed
-    const replayMarker: AuthResult = {
-      success: true,
-      user: {
-        id: "replay_marker",
-        username: "replay_marker",
-        email: "",
-        name: "",
-        roles: [],
-        permissions: [],
-      },
-    };
-    await this.cacheManager.set(cachePrefix, tokenId, replayMarker, ttl);
+    // Store simple boolean marker (not full AuthResult)
+    await this.cacheManager.set(cachePrefix, tokenId, true, ttl);
 
     this.logger.debug("Token marked as processed for replay protection", {
       jti,

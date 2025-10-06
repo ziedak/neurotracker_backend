@@ -24,6 +24,7 @@ const TTLSchema = z
   .int()
   .min(1, "TTL must be at least 1 second")
   .max(86400, "TTL cannot exceed 24 hours");
+const KeySchema = z.string().min(1).max(8192);
 
 export interface CacheResult<T> {
   data?: T;
@@ -46,15 +47,27 @@ export class SecureCacheManager {
 
   /**
    * Generate secure cache key to prevent collision attacks
+   * Uses '#' delimiter to avoid conflicts with user-provided data containing ':'
    */
   private generateSecureCacheKey(prefix: string, key: string): string {
     // For simple keys (userId:sessionId), avoid expensive hashing
-    if (key.length <= 128 && /^[a-zA-Z0-9:_-]+$/.test(key)) {
-      return `${prefix}:${key}`;
+    try {
+      CachePrefixSchema.parse(prefix);
+      KeySchema.parse(key);
+      // Use # as delimiter (less common in identifiers than :)
+      if (/^[a-zA-Z0-9:_-]+$/.test(key)) {
+        return `${prefix}#${key}`;
+      }
+    } catch (error) {
+      this.logger.warn("Invalid cache key parameters", {
+        prefix,
+        keyLength: key.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
     // For complex keys, use hashing to prevent collisions
     const hash = crypto.createHash("sha256").update(key).digest("hex");
-    return `${prefix}:${hash}`;
+    return `${prefix}#${hash}`;
   }
 
   /**
@@ -68,7 +81,7 @@ export class SecureCacheManager {
     // Validate inputs
     try {
       CachePrefixSchema.parse(prefix);
-      z.string().min(1).max(8192).parse(key);
+      KeySchema.parse(key);
     } catch (error) {
       this.logger.warn("Invalid cache get parameters", {
         prefix,
@@ -122,8 +135,8 @@ export class SecureCacheManager {
     // Validate inputs
     try {
       CachePrefixSchema.parse(prefix);
-      z.string().min(1).max(8192).parse(key);
       TTLSchema.parse(ttl);
+      KeySchema.parse(key);
     } catch (error) {
       this.logger.warn("Invalid cache set parameters", {
         prefix,

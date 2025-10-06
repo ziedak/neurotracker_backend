@@ -18,8 +18,8 @@
 import { createLogger } from "@libs/utils";
 import type { ILogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
+import type { UserSession } from "@libs/database";
 import type {
-  KeycloakSessionData,
   SessionStats,
   MutableSessionStats,
   HealthCheckResult,
@@ -191,7 +191,7 @@ export class SessionMetrics {
    * Record session creation metrics
    */
   async recordSessionCreation(
-    sessionData: KeycloakSessionData,
+    sessionData: UserSession,
     creationTime: number,
     success: boolean
   ): Promise<void> {
