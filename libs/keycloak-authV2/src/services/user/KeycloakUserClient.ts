@@ -1,10 +1,12 @@
 /**
- * UserRepository - Single Responsibility: User CRUD operations with caching
+ * KeycloakUserClient - Keycloak REST API Client for User Operations
+ *
+ * IMPORTANT: This class communicates with REMOTE Keycloak API (not local database)
  *
  * SOLID Principles:
- * - Single Responsibility: Only handles user data operations and caching
+ * - Single Responsibility: Only handles Keycloak API user operations with caching
  * - Open/Closed: Extensible for different caching strategies
- * - Liskov Substitution: Can be replaced with different repository implementations
+ * - Liskov Substitution: Can be replaced with different Keycloak client implementations
  * - Interface Segregation: Focused on user operations only
  * - Dependency Inversion: Depends on abstractions (IKeycloakApiClient, CacheService)
  */
@@ -24,8 +26,8 @@ import type {
   ResetPasswordOptions,
 } from "./interfaces";
 
-export class UserRepository implements IUserRepository {
-  private readonly logger: ILogger = createLogger("UserRepository");
+export class KeycloakUserClient implements IUserRepository {
+  private readonly logger: ILogger = createLogger("KeycloakUserClient");
 
   constructor(
     private readonly apiClient: IKeycloakApiClient,

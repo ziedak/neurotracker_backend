@@ -11,21 +11,54 @@
 export * from "./interfaces";
 
 // Core Components
-export { AdminTokenManager } from "./AdminTokenManager";
-export { KeycloakApiClient } from "./KeycloakApiClient";
-export { UserRepository } from "./UserRepository";
+export {
+  ClientCredentialsTokenProvider,
+  createAdminTokenProvider,
+} from "./ClientCredentialsTokenProvider";
+export { KeycloakUserClient } from "./KeycloakUserClient";
 export { RoleManager } from "./RoleManager";
-export { UserInfoConverter } from "./UserInfoConverter";
 
-// Main Service (Facade Pattern)
+// Data Conversion Utilities (Replaces UserInfoConverter)
+export {
+  keycloakUserToUserInfo,
+  userInfoToKeycloakUser,
+} from "./user-converters";
+
+/**
+ * @deprecated Use `keycloakUserToUserInfo` and `userInfoToKeycloakUser` utility functions instead.
+ * This class-based converter will be removed in the next major version.
+ *
+ * Migration:
+ * ```typescript
+ * // Old way (300+ lines, duplication with KeycloakClient)
+ * const converter = new UserInfoConverter();
+ * const userInfo = converter.convertToUserInfo(user, roles, permissions);
+ *
+ * // New way (50 lines, pure functions, zero duplication)
+ * import { keycloakUserToUserInfo } from '@libs/keycloak-authV2';
+ * const userInfo = keycloakUserToUserInfo(user, roles, permissions);
+ * ```
+ */
+
+// Main Services
 export { KeycloakUserService } from "./KeycloakUserService";
+export { UserFacade } from "./UserFacade";
+
+// Backward compatibility exports (DEPRECATED)
+/** @deprecated Use KeycloakUserClient instead */
+export { KeycloakUserClient as UserRepository } from "./KeycloakUserClient";
+/** @deprecated Use KeycloakUserService instead */
+export { KeycloakUserService as UserService } from "./KeycloakUserService";
+/** @deprecated Use UserFacade instead */
+export { UserFacade as UserManagementService } from "./UserFacade";
 
 // Convenience re-exports
 export type {
-  IAdminTokenManager,
+  IClientCredentialsTokenProvider,
+  IAdminTokenManager, // Deprecated - for backward compatibility
   IKeycloakApiClient,
   IUserRepository,
   IRoleManager,
-  IUserInfoConverter,
+  IUserInfoConverter, // Deprecated - use utility functions instead
   IUserService,
 } from "./interfaces";

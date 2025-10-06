@@ -19,11 +19,12 @@ import crypto from "crypto";
 import { createLogger } from "@libs/utils";
 import type { ILogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
-import type {
+import {
   CacheService,
   UserSessionRepository,
   SessionLogRepository,
   SessionActivityRepository,
+  PostgreSQLClient,
 } from "@libs/database";
 
 // Component imports
@@ -38,7 +39,7 @@ import { SessionCleaner, type SessionCleanerConfig } from "./SessionCleaner";
 import { SessionTokenCoordinator } from "./SessionTokenCoordinator";
 
 // Type imports
-import type { UserSession } from "@libs/database";
+import { UserSession, PrismaClient } from "@libs/database";
 import type {
   SessionValidationResult,
   SessionStats,
@@ -146,7 +147,11 @@ export class SessionManager {
     // Initialize core components (always required)
     // REFACTORED: Now uses repository pattern
     this.sessionStore = new SessionStore(
-      this.userSessionRepo,
+      new UserSessionRepository(
+        PostgreSQLClient,
+        this.metrics,
+        this.cacheService
+      ),
       this.cacheService,
       this.logger.child({ component: "SessionStore" }),
       this.metrics,

@@ -1,15 +1,5 @@
 /**
-export * from "./apikey";
-
-// User Management - Modular SOLID Architecture (Recommended)
-export * from "./user";
-
-// Integration Service - Modular SOLID Architecture (Recommended)
-export * from "./integration";
-
-// Legacy Monolithic Implementations (Deprecated)
-export { KeycloakUserManager } from "./KeycloakUserManager";
-export { KeycloakIntegrationService as LegacyKeycloakIntegrationService } from "./KeycloakIntegrationService";ices exports
+ * Keycloak Auth V2 Services Exports
  */
 
 export * from "./apikey";
@@ -17,15 +7,20 @@ export * from "./apikey";
 // User Management - Modular SOLID Architecture (Recommended)
 export * from "./user";
 
-// Legacy Monolithic Implementation (Deprecated)
-// export { KeycloakUserManager } from "./KeycloakUserManager.ts.old";
-
+// User Management Facade (Recommended for applications)
 export {
-  KeycloakSessionManager,
-  type KeycloakSessionData,
-  type SessionValidationResult,
-  type SessionStats,
-} from "./session";
+  UserFacade,
+  type RegisterUserInput,
+  type AuthenticationResult,
+  type SearchUsersOptions,
+} from "./user/UserFacade";
+
+// Backward compatibility (DEPRECATED)
+/** @deprecated Use UserFacade instead */
+export { UserFacade as UserManagementService } from "./user/UserFacade";
+
+// Session Management
+export * from "./session";
 
 // Token Management (Refactored)
 export * from "./token/config";
@@ -50,4 +45,27 @@ export {
   type PKCEValidationResult,
 } from "./PKCEManager";
 
-export * from "./integration";
+// Integration Service (with renamed SessionValidator to avoid conflicts)
+export { KeycloakIntegrationService } from "./integration/KeycloakIntegrationService";
+export { InputValidator } from "./integration/InputValidator";
+export { ConfigurationManager } from "./integration/ConfigurationManager";
+export { StatisticsCollector } from "./integration/StatisticsCollector";
+export { AuthenticationManager } from "./integration/AuthenticationManager";
+export { SessionValidator as IntegrationSessionValidator } from "./integration/SessionValidator";
+export { UserManager } from "./integration/UserManager";
+export { ResourceManager } from "./integration/ResourceManager";
+export type {
+  IIntegrationService,
+  IAuthenticationManager,
+  ISessionValidator as IIntegrationSessionValidator,
+  IInputValidator,
+  IStatisticsCollector,
+  IConfigurationManager,
+  IUserManager,
+  IResourceManager,
+  KeycloakConnectionOptions,
+  ClientContext,
+  LogoutResult,
+  ValidationResult,
+  IntegrationStats,
+} from "./integration/interfaces";

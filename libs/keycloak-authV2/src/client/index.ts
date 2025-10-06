@@ -34,3 +34,11 @@ export {
   createResilientKeycloakClient,
   type FallbackConfig,
 } from "./KeycloakClientExtensions";
+
+// Admin API client for Keycloak Admin REST API operations
+export {
+  KeycloakAdminClient,
+  createKeycloakAdminClient,
+  type IKeycloakAdminClient,
+  type KeycloakAdminClientConfig,
+} from "./KeycloakAdminClient";

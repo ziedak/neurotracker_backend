@@ -1,45 +1,170 @@
 /**
- * KeycloakApiClient - Single Responsibility: Low-level HTTP operations with Keycloak Admin API
+ * KeycloakAdminClient - Enterprise-grade Keycloak Admin API HTTP Client
+ *
+ * Purpose: Low-level HTTP operations with Keycloak Admin REST API
+ *
+ * Key Features:
+ * - Comprehensive JWT validation before API calls
+ * - Automatic admin token management via ClientCredentialsTokenProvider
+ * - Retry logic and error handling
+ * - Metrics and monitoring integration
+ * - Type-safe API operations
  *
  * SOLID Principles:
- * - Single Responsibility: Only handles HTTP communication with Keycloak API
+ * - Single Responsibility: Only handles HTTP communication with Keycloak Admin API
  * - Open/Closed: Extensible for new API endpoints
  * - Liskov Substitution: Can be replaced with different API implementations
  * - Interface Segregation: Focused on API operations only
- * - Dependency Inversion: Depends on abstractions (IAdminTokenManager, HttpClient)
+ * - Dependency Inversion: Depends on abstractions (IClientCredentialsTokenProvider, JWTValidator, HttpClient)
  */
 
 import { createLogger } from "@libs/utils";
 import type { ILogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
 import { createHttpClient, HttpStatus, type HttpClient } from "@libs/messaging";
-import type { KeycloakClient } from "../../client/KeycloakClient";
+import type { KeycloakClient } from "./KeycloakClient";
+import { JWTValidator } from "../services/token/JWTValidator";
 import type {
-  IKeycloakApiClient,
-  IAdminTokenManager,
+  IClientCredentialsTokenProvider,
   KeycloakUser,
   KeycloakRole,
   KeycloakCredential,
   UserSearchOptions,
   UpdateUserOptions,
-} from "./interfaces";
+} from "../services/user/interfaces";
 
-export class KeycloakApiClient implements IKeycloakApiClient {
-  private readonly logger: ILogger = createLogger("KeycloakApiClient");
+/**
+ * Interface for Keycloak Admin API operations
+ */
+export interface IKeycloakAdminClient {
+  searchUsers(options: UserSearchOptions): Promise<KeycloakUser[]>;
+  getUserById(userId: string): Promise<KeycloakUser | null>;
+  createUser(user: KeycloakUser): Promise<string>;
+  updateUser(userId: string, updates: UpdateUserOptions): Promise<void>;
+  deleteUser(userId: string): Promise<void>;
+  resetPassword(userId: string, credential: KeycloakCredential): Promise<void>;
+  getUserRealmRoles(userId: string): Promise<KeycloakRole[]>;
+  assignRealmRoles(userId: string, roles: KeycloakRole[]): Promise<void>;
+  removeRealmRoles(userId: string, roles: KeycloakRole[]): Promise<void>;
+  assignClientRoles(
+    userId: string,
+    clientId: string,
+    roles: KeycloakRole[]
+  ): Promise<void>;
+  getRealmRoles(): Promise<KeycloakRole[]>;
+  getClientRoles(clientId: string): Promise<KeycloakRole[]>;
+  getClientInternalId(clientId: string): Promise<string>;
+}
+
+/**
+ * Configuration for admin client
+ */
+export interface KeycloakAdminClientConfig {
+  /** Enable JWT validation before API calls (default: true) */
+  enableJwtValidation?: boolean;
+  /** HTTP timeout in milliseconds (default: 30000) */
+  timeout?: number;
+  /** Max retry attempts for failed requests (default: 3) */
+  retries?: number;
+}
+
+/**
+ * KeycloakAdminClient - Production-grade Admin API HTTP client
+ */
+export class KeycloakAdminClient implements IKeycloakAdminClient {
+  private readonly logger: ILogger = createLogger("KeycloakAdminClient");
   private readonly httpClient: HttpClient;
   private readonly baseUrl: string;
+  private readonly config: Required<KeycloakAdminClientConfig>;
+  private jwtValidator?: JWTValidator;
 
   constructor(
     private readonly keycloakClient: KeycloakClient,
-    private readonly tokenManager: IAdminTokenManager,
+    private readonly tokenProvider: IClientCredentialsTokenProvider,
+    config: KeycloakAdminClientConfig = {},
     private readonly metrics?: IMetricsCollector
   ) {
+    // Merge with defaults
+    this.config = {
+      enableJwtValidation: config.enableJwtValidation ?? true,
+      timeout: config.timeout ?? 30000,
+      retries: config.retries ?? 3,
+    };
+
     this.httpClient = createHttpClient({
-      timeout: 30000,
-      retries: 3,
+      timeout: this.config.timeout,
+      retries: this.config.retries,
     });
 
     this.baseUrl = this.buildAdminApiUrl();
+
+    // Initialize JWT validator if enabled
+    if (this.config.enableJwtValidation) {
+      const discoveryDoc = keycloakClient.getDiscoveryDocument();
+      if (discoveryDoc?.jwks_uri && discoveryDoc?.issuer) {
+        this.jwtValidator = new JWTValidator(
+          discoveryDoc.jwks_uri,
+          discoveryDoc.issuer,
+          undefined, // No specific audience for admin tokens
+          metrics
+        );
+      } else {
+        this.logger.warn(
+          "JWT validation enabled but discovery document incomplete"
+        );
+      }
+    }
+
+    this.logger.debug("KeycloakAdminClient initialized", {
+      baseUrl: this.baseUrl,
+      jwtValidationEnabled:
+        this.config.enableJwtValidation && !!this.jwtValidator,
+    });
+  }
+
+  /**
+   * Get validated admin token
+   * - Retrieves token from provider (with automatic refresh)
+   * - Validates JWT signature and claims if enabled
+   * - Returns validated token ready for use
+   */
+  private async getValidatedToken(): Promise<string> {
+    const token = await this.tokenProvider.getValidToken();
+
+    // Validate token if JWT validation is enabled
+    if (this.config.enableJwtValidation && this.jwtValidator) {
+      const startTime = performance.now();
+
+      try {
+        const result = await this.jwtValidator.validateJWT(token);
+
+        if (!result.success) {
+          this.metrics?.recordCounter(
+            "admin_client.token_validation_failed",
+            1
+          );
+          this.logger.error("Admin token validation failed", {
+            error: result.error,
+          });
+          throw new Error(`Admin token validation failed: ${result.error}`);
+        }
+
+        this.metrics?.recordCounter("admin_client.token_validation_success", 1);
+        this.metrics?.recordTimer(
+          "admin_client.token_validation_duration",
+          performance.now() - startTime
+        );
+
+        this.logger.debug("Admin token validated successfully", {
+          userId: result.user?.id,
+        });
+      } catch (error) {
+        this.metrics?.recordCounter("admin_client.token_validation_error", 1);
+        throw error;
+      }
+    }
+
+    return token;
   }
 
   /**
@@ -49,7 +174,7 @@ export class KeycloakApiClient implements IKeycloakApiClient {
     const startTime = performance.now();
 
     try {
-      const token = await this.tokenManager.getValidToken();
+      const token = await this.getValidatedToken();
       const params = this.buildSearchParams(options);
 
       const response = await this.httpClient.get<KeycloakUser[]>(
@@ -83,7 +208,7 @@ export class KeycloakApiClient implements IKeycloakApiClient {
     const startTime = performance.now();
 
     try {
-      const token = await this.tokenManager.getValidToken();
+      const token = await this.getValidatedToken();
 
       const response = await this.httpClient.get<KeycloakUser>(
         `${this.baseUrl}/users/${userId}`,
@@ -119,7 +244,7 @@ export class KeycloakApiClient implements IKeycloakApiClient {
     const startTime = performance.now();
 
     try {
-      const token = await this.tokenManager.getValidToken();
+      const token = await this.getValidatedToken();
 
       const response = await this.httpClient.post<KeycloakUser>(
         `${this.baseUrl}/users`,
@@ -161,7 +286,7 @@ export class KeycloakApiClient implements IKeycloakApiClient {
     const startTime = performance.now();
 
     try {
-      const token = await this.tokenManager.getValidToken();
+      const token = await this.getValidatedToken();
 
       const response = await this.httpClient.put<KeycloakUser>(
         `${this.baseUrl}/users/${userId}`,
@@ -191,7 +316,7 @@ export class KeycloakApiClient implements IKeycloakApiClient {
     const startTime = performance.now();
 
     try {
-      const token = await this.tokenManager.getValidToken();
+      const token = await this.getValidatedToken();
 
       const response = await this.httpClient.delete(
         `${this.baseUrl}/users/${userId}`,
@@ -227,7 +352,7 @@ export class KeycloakApiClient implements IKeycloakApiClient {
     const startTime = performance.now();
 
     try {
-      const token = await this.tokenManager.getValidToken();
+      const token = await this.getValidatedToken();
 
       const response = await this.httpClient.put(
         `${this.baseUrl}/users/${userId}/reset-password`,
@@ -260,7 +385,7 @@ export class KeycloakApiClient implements IKeycloakApiClient {
     const startTime = performance.now();
 
     try {
-      const token = await this.tokenManager.getValidToken();
+      const token = await this.getValidatedToken();
 
       const response = await this.httpClient.get<KeycloakRole[]>(
         `${this.baseUrl}/users/${userId}/role-mappings/realm`,
@@ -292,7 +417,7 @@ export class KeycloakApiClient implements IKeycloakApiClient {
     const startTime = performance.now();
 
     try {
-      const token = await this.tokenManager.getValidToken();
+      const token = await this.getValidatedToken();
 
       const response = await this.httpClient.post(
         `${this.baseUrl}/users/${userId}/role-mappings/realm`,
@@ -325,7 +450,7 @@ export class KeycloakApiClient implements IKeycloakApiClient {
     const startTime = performance.now();
 
     try {
-      const token = await this.tokenManager.getValidToken();
+      const token = await this.getValidatedToken();
 
       const response = await this.httpClient.delete(
         `${this.baseUrl}/users/${userId}/role-mappings/realm`,
@@ -362,7 +487,7 @@ export class KeycloakApiClient implements IKeycloakApiClient {
     const startTime = performance.now();
 
     try {
-      const token = await this.tokenManager.getValidToken();
+      const token = await this.getValidatedToken();
       const internalClientId = await this.getClientInternalId(clientId);
 
       const response = await this.httpClient.post(
@@ -397,7 +522,7 @@ export class KeycloakApiClient implements IKeycloakApiClient {
     const startTime = performance.now();
 
     try {
-      const token = await this.tokenManager.getValidToken();
+      const token = await this.getValidatedToken();
 
       const response = await this.httpClient.get<KeycloakRole[]>(
         `${this.baseUrl}/roles`,
@@ -429,7 +554,7 @@ export class KeycloakApiClient implements IKeycloakApiClient {
     const startTime = performance.now();
 
     try {
-      const token = await this.tokenManager.getValidToken();
+      const token = await this.getValidatedToken();
       const internalClientId = await this.getClientInternalId(clientId);
 
       const response = await this.httpClient.get<KeycloakRole[]>(
@@ -462,7 +587,7 @@ export class KeycloakApiClient implements IKeycloakApiClient {
     const startTime = performance.now();
 
     try {
-      const token = await this.tokenManager.getValidToken();
+      const token = await this.getValidatedToken();
 
       const response = await this.httpClient.get<any[]>(
         `${this.baseUrl}/clients?clientId=${clientId}`,
@@ -506,6 +631,10 @@ export class KeycloakApiClient implements IKeycloakApiClient {
     const baseUrl = discoveryDoc.issuer.replace(/\/realms\/.*$/, "");
     const realm = discoveryDoc.issuer.split("/realms/")[1];
 
+    if (!realm) {
+      throw new Error("Could not extract realm from discovery document");
+    }
+
     return `${baseUrl}/admin/realms/${realm}`;
   }
 
@@ -535,14 +664,35 @@ export class KeycloakApiClient implements IKeycloakApiClient {
   }
 
   private recordMetrics(operation: string, duration?: number): void {
-    this.metrics?.recordCounter(`keycloak_api.${operation}`, 1);
+    this.metrics?.recordCounter(`admin_client.${operation}`, 1);
     if (duration !== undefined) {
-      this.metrics?.recordTimer(`keycloak_api.${operation}_duration`, duration);
+      this.metrics?.recordTimer(`admin_client.${operation}_duration`, duration);
     }
   }
 
   private recordError(operation: string, error: unknown): void {
-    this.metrics?.recordCounter(`keycloak_api.${operation}_error`, 1);
+    this.metrics?.recordCounter(`admin_client.${operation}_error`, 1);
     this.logger.error(`${operation} failed`, { error });
   }
+}
+
+/**
+ * Factory function to create KeycloakAdminClient with defaults
+ */
+export function createKeycloakAdminClient(
+  keycloakClient: KeycloakClient,
+  tokenProvider: IClientCredentialsTokenProvider,
+  config?: KeycloakAdminClientConfig,
+  metrics?: IMetricsCollector
+): KeycloakAdminClient {
+  return new KeycloakAdminClient(
+    keycloakClient,
+    tokenProvider,
+    {
+      enableJwtValidation: config?.enableJwtValidation ?? true,
+      timeout: config?.timeout ?? 30000,
+      retries: config?.retries ?? 3,
+    },
+    metrics
+  );
 }

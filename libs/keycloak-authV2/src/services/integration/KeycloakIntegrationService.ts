@@ -8,7 +8,7 @@ import type { IMetricsCollector } from "@libs/monitoring";
 import type { PostgreSQLClient } from "@libs/database";
 import { KeycloakClient } from "../../client/KeycloakClient";
 import { KeycloakUserService } from "../user/KeycloakUserService";
-import { KeycloakSessionManager } from "../session";
+import { SessionManager } from "../session";
 
 // Component imports
 import { InputValidator } from "./InputValidator";
@@ -61,7 +61,7 @@ export class KeycloakIntegrationService implements IIntegrationService {
   // Core services
   private readonly keycloakClient: KeycloakClient;
   private readonly userService: KeycloakUserService;
-  private readonly sessionManager: KeycloakSessionManager;
+  private readonly sessionManager: SessionManager;
 
   /**
    * Factory method for creating KeycloakIntegrationService
@@ -117,11 +117,7 @@ export class KeycloakIntegrationService implements IIntegrationService {
     );
 
     // Initialize session manager
-    this.sessionManager = new KeycloakSessionManager(
-      this.dbClient,
-      undefined,
-      metrics
-    );
+    this.sessionManager = new SessionManager(undefined, metrics);
 
     // Initialize component managers (following dependency inversion)
     this.statisticsCollector = new StatisticsCollector(

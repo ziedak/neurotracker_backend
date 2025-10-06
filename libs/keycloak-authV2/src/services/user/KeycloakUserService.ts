@@ -1,8 +1,10 @@
 /**
- * KeycloakUserService - Facade Pattern: High-level orchestration of user operations
+ * KeycloakUserService - Orchestrates Keycloak User Operations
+ *
+ * IMPORTANT: This service manages REMOTE Keycloak user operations (not local database)
  *
  * SOLID Principles:
- * - Single Responsibility: Orchestrates user management operations
+ * - Single Responsibility: Orchestrates Keycloak user management operations
  * - Open/Closed: Extensible through component composition
  * - Liskov Substitution: Components can be substituted via interfaces
  * - Interface Segregation: Uses focused component interfaces
@@ -16,17 +18,21 @@ import type { CacheService } from "@libs/database";
 import type { UserInfo } from "../../types";
 import type { AuthV2Config } from "../token/config";
 import type { KeycloakClient } from "../../client/KeycloakClient";
+import { keycloakUserToUserInfo } from "./user-converters";
 import type {
   IUserService,
   IUserRepository,
   IRoleManager,
-  IUserInfoConverter,
   UserSearchOptions,
   CreateUserOptions,
   UpdateUserOptions,
   ResetPasswordOptions,
   KeycloakUser,
 } from "./interfaces";
+import { ClientCredentialsTokenProvider } from "./ClientCredentialsTokenProvider";
+import { KeycloakAdminClient } from "../../client/KeycloakAdminClient";
+import { KeycloakUserClient } from "./KeycloakUserClient";
+import { RoleManager } from "./RoleManager";
 
 export class KeycloakUserService implements IUserService {
   private readonly logger: ILogger = createLogger("KeycloakUserService");
@@ -34,7 +40,6 @@ export class KeycloakUserService implements IUserService {
   constructor(
     private readonly userRepository: IUserRepository,
     private readonly roleManager: IRoleManager,
-    private readonly converter: IUserInfoConverter,
     private readonly metrics?: IMetricsCollector
   ) {}
 
@@ -48,34 +53,28 @@ export class KeycloakUserService implements IUserService {
     cacheService?: CacheService,
     metrics?: IMetricsCollector
   ): KeycloakUserService {
-    // Import components (dynamic imports for better modularity)
-    const { AdminTokenManager } = require("./AdminTokenManager");
-    const { KeycloakApiClient } = require("./KeycloakApiClient");
-    const { UserRepository } = require("./UserRepository");
-    const { RoleManager } = require("./RoleManager");
-    const { UserInfoConverter } = require("./UserInfoConverter");
+    // Import components (static imports for better tree-shaking)
 
-    // Build dependency chain
-    const tokenManager = new AdminTokenManager(
+    // Build dependency chain with new ClientCredentialsTokenProvider
+    const tokenProvider = new ClientCredentialsTokenProvider(
       keycloakClient,
       undefined,
       metrics
     );
-    const apiClient = new KeycloakApiClient(
+    const apiClient = new KeycloakAdminClient(
       keycloakClient,
-      tokenManager,
+      tokenProvider,
+      {},
       metrics
     );
-    const userRepository = new UserRepository(apiClient, cacheService, metrics);
+    const userRepository = new KeycloakUserClient(
+      apiClient,
+      cacheService,
+      metrics
+    );
     const roleManager = new RoleManager(apiClient, metrics);
-    const converter = new UserInfoConverter();
 
-    return new KeycloakUserService(
-      userRepository,
-      roleManager,
-      converter,
-      metrics
-    );
+    return new KeycloakUserService(userRepository, roleManager, metrics);
   }
 
   /**
@@ -308,15 +307,11 @@ export class KeycloakUserService implements IUserService {
       const realmRoles = await this.roleManager.getUserRealmRoles(userId);
       const roles = realmRoles.map((role) => `realm:${role.name}`);
 
-      // Convert to UserInfo format
+      // Convert to UserInfo format using utility function
       // Note: Permissions would need additional logic based on your business rules
       const permissions: string[] = []; // Could be derived from roles or fetched separately
 
-      const userInfo = this.converter.convertToUserInfo(
-        user,
-        roles,
-        permissions
-      );
+      const userInfo = keycloakUserToUserInfo(user, roles, permissions);
 
       this.recordMetrics(
         "get_complete_user_info",
@@ -395,8 +390,8 @@ export class KeycloakUserService implements IUserService {
               error,
             });
 
-            // Fallback to basic conversion
-            const basicUserInfo = this.converter.convertToUserInfo(user);
+            // Fallback to basic conversion using utility function
+            const basicUserInfo = keycloakUserToUserInfo(user);
             userInfos.push(basicUserInfo);
           }
         }

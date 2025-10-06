@@ -79,12 +79,19 @@ export interface ResetPasswordOptions {
 // Component Interfaces (ISP - Interface Segregation)
 
 /**
- * Admin token management interface
+ * Client credentials token provider interface
+ * Replaces IAdminTokenManager with more robust implementation
  */
-export interface IAdminTokenManager {
+export interface IClientCredentialsTokenProvider {
   getValidToken(): Promise<string>;
-  invalidateToken(): void;
+  invalidateToken(): Promise<void>;
 }
+
+/**
+ * @deprecated Use IClientCredentialsTokenProvider instead
+ * Kept for backward compatibility
+ */
+export interface IAdminTokenManager extends IClientCredentialsTokenProvider {}
 
 /**
  * Low-level Keycloak API client interface
