@@ -1,5 +1,8 @@
 /**
- * KeycloakUserClient - Keycloak REST API Client for User Operations
+ * KeycloakUserClient - Keycloak    private readonly cacheConfig = {
+      userTtl: CACHE_TTL.USER,
+      searchTtl: CACHE_TTL.SEARCH,
+    };T API Client for User Operations
  *
  * IMPORTANT: This class communicates with REMOTE Keycloak API (not local database)
  *
@@ -155,12 +158,12 @@ export class KeycloakUserClient implements IUserRepository {
       // Build user representation
       const user: KeycloakUser = {
         username: options.username,
-        email: options.email,
-        firstName: options.firstName,
-        lastName: options.lastName,
+        ...(options.email && { email: options.email }),
+        ...(options.firstName && { firstName: options.firstName }),
+        ...(options.lastName && { lastName: options.lastName }),
         enabled: options.enabled !== false,
         emailVerified: options.emailVerified || false,
-        attributes: options.attributes,
+        ...(options.attributes && { attributes: options.attributes }),
       };
 
       // Add password credential if provided

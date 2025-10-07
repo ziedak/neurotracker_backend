@@ -5,6 +5,7 @@
  */
 
 import type { UserCreateInput, UserUpdateInput } from "@libs/database";
+import { QUEUE_CONFIG, WORKER_CONFIG, HEALTH_THRESHOLDS } from "../constants";
 
 /**
  * Sync Operation Types
@@ -301,19 +302,19 @@ export interface SyncMetrics {
  * Default sync configuration
  */
 export const DEFAULT_SYNC_CONFIG: SyncConfig = {
-  maxQueueSize: 1000,
+  maxQueueSize: QUEUE_CONFIG.MAX_SIZE,
   maxRetries: 5,
-  retryBaseDelay: 5000, // 5 seconds
-  retryMultiplier: 5, // Exponential: 5s, 25s, 125s, 625s, 3125s
-  workerConcurrency: 5,
-  workerPollInterval: 1000, // 1 second
-  healthCheckInterval: 30000, // 30 seconds
-  successRateThreshold: 0.95, // 95%
-  queueSizeThreshold: 100,
-  operationAgeThreshold: 600000, // 10 minutes
+  retryBaseDelay: QUEUE_CONFIG.RETRY_BASE_DELAY,
+  retryMultiplier: QUEUE_CONFIG.RETRY_MULTIPLIER,
+  workerConcurrency: WORKER_CONFIG.CONCURRENCY,
+  workerPollInterval: WORKER_CONFIG.POLL_INTERVAL,
+  healthCheckInterval: WORKER_CONFIG.HEALTH_CHECK_INTERVAL,
+  successRateThreshold: HEALTH_THRESHOLDS.SUCCESS_RATE,
+  queueSizeThreshold: HEALTH_THRESHOLDS.QUEUE_SIZE,
+  operationAgeThreshold: HEALTH_THRESHOLDS.AGE_THRESHOLD,
   redisUrl: process.env["REDIS_URL"] || "redis://localhost:6379",
   redisKeyPrefix: "sync:",
-  operationTimeout: 30000, // 30 seconds
+  operationTimeout: WORKER_CONFIG.OPERATION_TIMEOUT,
 };
 
 /**

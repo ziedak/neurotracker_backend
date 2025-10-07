@@ -28,6 +28,7 @@ import { KeycloakUserService } from "./KeycloakUserService";
 import type { KeycloakClient } from "../../client/KeycloakClient";
 import { UserSyncService } from "./sync/UserSyncService";
 import type { SyncStatus, HealthStatus, QueueStats } from "./sync/sync-types";
+import { validateUserUniqueness, validateUserStatus } from "./UserValidation";
 
 /**
  * Registration data for new users
@@ -125,7 +126,17 @@ export class UserFacade {
       });
 
       // 1. Validate email/username uniqueness in both systems
-      await this.validateUserUniqueness(data.username, data.email);
+      const uniquenessValidation = await validateUserUniqueness(
+        data.username,
+        data.email,
+        this.keycloakUserService,
+        this.keycloakUserService,
+        this.logger
+      );
+
+      if (!uniquenessValidation.isValid) {
+        throw new Error(uniquenessValidation.error);
+      }
 
       // 2. Create user in LOCAL DB first (source of truth)
       const localUserData: UserCreateInput = {
@@ -221,7 +232,10 @@ export class UserFacade {
       }
 
       // 3. Validate user status
-      this.validateUserStatus(user);
+      const statusValidation = validateUserStatus(user);
+      if (!statusValidation.isValid) {
+        throw new Error(statusValidation.error);
+      }
 
       // 4. Update last login timestamp in LOCAL DB
       await this.localUserRepository.updateLastLogin(user.id);
@@ -255,10 +269,11 @@ export class UserFacade {
    */
   async getUserById(userId: string): Promise<User | null> {
     try {
-      return await this.localUserRepository.findById(userId);
+      const user = await this.localUserRepository.findById(userId);
+      return user;
     } catch (error) {
       this.logger.error("Failed to get user by ID", { error, userId });
-      throw error;
+      return null; // Return null instead of throwing for consistency
     }
   }
 
@@ -267,10 +282,11 @@ export class UserFacade {
    */
   async getUserByEmail(email: string): Promise<User | null> {
     try {
-      return await this.localUserRepository.findByEmail(email);
+      const user = await this.localUserRepository.findByEmail(email);
+      return user;
     } catch (error) {
       this.logger.error("Failed to get user by email", { error, email });
-      throw error;
+      return null; // Return null instead of throwing for consistency
     }
   }
 
@@ -279,10 +295,11 @@ export class UserFacade {
    */
   async getUserByUsername(username: string): Promise<User | null> {
     try {
-      return await this.localUserRepository.findByUsername(username);
+      const user = await this.localUserRepository.findByUsername(username);
+      return user;
     } catch (error) {
       this.logger.error("Failed to get user by username", { error, username });
-      throw error;
+      return null; // Return null instead of throwing for consistency
     }
   }
 
@@ -586,53 +603,6 @@ export class UserFacade {
   }
 
   // ==================== Private Helper Methods ====================
-
-  /**
-   * Validate that username and email are unique in both systems
-   */
-  private async validateUserUniqueness(
-    username: string,
-    email: string
-  ): Promise<void> {
-    // Check local DB
-    const existingUserByUsername =
-      await this.localUserRepository.findByUsername(username);
-    if (existingUserByUsername) {
-      throw new Error(`Username '${username}' already exists`);
-    }
-
-    const existingUserByEmail = await this.localUserRepository.findByEmail(
-      email
-    );
-    if (existingUserByEmail) {
-      throw new Error(`Email '${email}' already exists`);
-    }
-
-    // Check Keycloak
-    const keycloakUserByUsername =
-      await this.keycloakUserService.getUserByUsername(username);
-    if (keycloakUserByUsername) {
-      throw new Error(`Username '${username}' already exists in Keycloak`);
-    }
-  }
-
-  /**
-   * Validate user status for authentication
-   */
-  private validateUserStatus(user: User): void {
-    if (user.status === "BANNED") {
-      throw new Error("User account is banned");
-    }
-    if (user.status === "DELETED") {
-      throw new Error("User account is deleted");
-    }
-    if (user.status === "INACTIVE") {
-      throw new Error("User account is inactive");
-    }
-    if (user.isDeleted) {
-      throw new Error("User account is deleted");
-    }
-  }
 
   /**
    * Record metrics

@@ -38,6 +38,7 @@ import type {
 } from "../../client/KeycloakClient";
 import { SecureCacheManager } from "../token/SecureCacheManager";
 import { JWTValidator } from "../token/JWTValidator";
+import { RETRY_CONFIG } from "./constants";
 
 /**
  * Configuration for client credentials token provider
@@ -124,8 +125,8 @@ export class ClientCredentialsTokenProvider
       requiredScopes: config.requiredScopes || DEFAULT_ADMIN_SCOPES,
       safetyBufferSeconds: config.safetyBufferSeconds ?? 30,
       enableCaching: config.enableCaching ?? true,
-      maxRetries: config.maxRetries ?? 3,
-      retryDelayMs: config.retryDelayMs ?? 1000,
+      maxRetries: config.maxRetries ?? RETRY_CONFIG.MAX_ATTEMPTS,
+      retryDelayMs: config.retryDelayMs ?? RETRY_CONFIG.BASE_DELAY_MS,
       enableJwtValidation: config.enableJwtValidation ?? true,
     };
 
@@ -391,13 +392,13 @@ export class ClientCredentialsTokenProvider
    * Acquire new token with retry logic and thread-safety
    */
   private async acquireToken(): Promise<KeycloakTokenResponse> {
-    // Thread-safety: Return existing refresh promise if one is in progress
+    // Thread-safety: If another acquisition is in progress, wait for it
     if (this.refreshPromise) {
       this.logger.debug("Waiting for existing token acquisition");
       return this.refreshPromise;
     }
 
-    // Start new acquisition
+    // Start new acquisition with proper locking
     this.refreshPromise = this.performTokenAcquisition();
 
     try {

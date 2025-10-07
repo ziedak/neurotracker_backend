@@ -7,18 +7,18 @@ import type { UserInfo } from "../../types";
 
 // Domain Models
 export interface KeycloakUser {
-  id?: string | undefined;
+  id?: string;
   username: string;
-  email?: string | undefined;
-  firstName?: string | undefined;
-  lastName?: string | undefined;
-  enabled?: boolean | undefined;
-  emailVerified?: boolean | undefined;
-  createdTimestamp?: number | undefined;
-  attributes?: Record<string, string[]> | undefined;
-  credentials?: KeycloakCredential[] | undefined;
-  realmRoles?: string[] | undefined;
-  clientRoles?: Record<string, string[]> | undefined;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  enabled?: boolean;
+  emailVerified?: boolean;
+  createdTimestamp?: number;
+  attributes?: Record<string, string[]>;
+  credentials?: KeycloakCredential[];
+  realmRoles?: string[];
+  clientRoles?: Record<string, string[]>;
 }
 
 export interface KeycloakCredential {

@@ -562,4 +562,28 @@ export class UserSyncService {
     const health = await this.getHealthStatus();
     return health.overall !== "UNHEALTHY";
   }
+
+  /**
+   * Dispose resources and cleanup
+   * Should be called when shutting down the service
+   */
+  async dispose(): Promise<void> {
+    this.logger.info("Disposing UserSyncService");
+
+    // Stop worker and health checks
+    await this.stopWorker();
+
+    // Clear any remaining intervals (defensive programming)
+    if (this.workerInterval) {
+      clearInterval(this.workerInterval);
+      this.workerInterval = null;
+    }
+
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+
+    this.logger.info("UserSyncService disposed");
+  }
 }

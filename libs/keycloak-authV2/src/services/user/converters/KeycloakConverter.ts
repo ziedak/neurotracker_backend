@@ -62,8 +62,8 @@ export namespace KeycloakConverter {
     const kcUser: KeycloakUser = {
       username: input.username,
       email: input.email,
-      firstName: input.firstName ?? undefined,
-      lastName: input.lastName ?? undefined,
+      ...(input.firstName && { firstName: input.firstName }),
+      ...(input.lastName && { lastName: input.lastName }),
       enabled: computeEnabledFromStatus(input.status),
       emailVerified: input.emailVerified ?? false,
       attributes: {},
@@ -116,13 +116,15 @@ export namespace KeycloakConverter {
     }
 
     if (input.firstName !== undefined) {
-      updates.firstName =
-        typeof input.firstName === "string" ? input.firstName : undefined;
+      if (typeof input.firstName === "string") {
+        updates.firstName = input.firstName;
+      }
     }
 
     if (input.lastName !== undefined) {
-      updates.lastName =
-        typeof input.lastName === "string" ? input.lastName : undefined;
+      if (typeof input.lastName === "string") {
+        updates.lastName = input.lastName;
+      }
     }
 
     if (

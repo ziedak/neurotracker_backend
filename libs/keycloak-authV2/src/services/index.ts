@@ -15,8 +15,7 @@ export {
   type SearchUsersOptions,
 } from "./user/UserFacade";
 
-// Backward compatibility (DEPRECATED)
-/** @deprecated Use UserFacade instead */
+
 export { UserFacade as UserManagementService } from "./user/UserFacade";
 
 // Session Management

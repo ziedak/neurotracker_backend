@@ -12,7 +12,7 @@ import type {
 } from "./interfaces";
 import type { UserInfo } from "../../types";
 import type { KeycloakClient } from "../../client/KeycloakClient";
-import type { KeycloakSessionManager } from "../session";
+import type { SessionManager } from "../session";
 import type { IInputValidator } from "./interfaces";
 
 /**
@@ -24,7 +24,7 @@ export class AuthenticationManager implements IAuthenticationManager {
 
   constructor(
     private readonly keycloakClient: KeycloakClient,
-    private readonly sessionManager: KeycloakSessionManager,
+    private readonly sessionManager: SessionManager,
     private readonly inputValidator: IInputValidator,
     private readonly metrics?: IMetricsCollector
   ) {}
