@@ -100,7 +100,7 @@ export class ApiKeyRepository
   async create(data: ApiKeyCreateInput): Promise<ApiKey> {
     return this.executeOperation("create", async () => {
       const result = await this.db.apiKey.create({
-        data,
+        data: data as unknown as Prisma.ApiKeyCreateInput,
       });
       return result as unknown as ApiKey;
     });
@@ -111,7 +111,7 @@ export class ApiKeyRepository
       const results = await Promise.all(
         data.map((apiKeyData) =>
           this.db.apiKey.create({
-            data: apiKeyData,
+            data: apiKeyData as unknown as Prisma.ApiKeyCreateInput,
           })
         )
       );

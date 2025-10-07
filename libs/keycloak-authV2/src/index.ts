@@ -45,37 +45,51 @@ export {
 } from "./services/apikey/APIKeyManager";
 
 export {
-  type APIKey,
   type APIKeyGenerationOptions,
   type APIKeyValidationResult,
   type APIKeyManagerStats,
 } from "./services/apikey/types";
 
+// Integration Service (SOLID Architecture) - Main Entry Point
+export { KeycloakIntegrationService } from "./services/integration/KeycloakIntegrationService";
+
+export {
+  type IIntegrationService,
+  type KeycloakConnectionOptions,
+  type ClientContext,
+  type AuthenticationResult as IntegrationAuthResult,
+  type LogoutResult as IntegrationLogoutResult,
+  type IntegrationStats,
+} from "./services/integration/interfaces";
+
+// Integration Service Builder (Fluent API)
+export {
+  KeycloakIntegrationServiceBuilder,
+  createIntegrationServiceBuilder,
+  quickBuild,
+  type BuilderConfig,
+} from "./services/integration/IntegrationServiceBuilder";
+
 // Legacy session manager (deprecated in favor of new SOLID architecture)
 export {
-  KeycloakSessionManager as LegacySessionManager,
-  type KeycloakSessionData as LegacySessionData,
   type SessionValidationResult as LegacySessionValidationResult,
   type SessionStats as LegacySessionStats,
 } from "./services/session";
 
 // New SOLID Session Management Components (recommended)
 export {
-  KeycloakSessionManager,
+  SessionManager,
   SessionStore,
-  TokenManager,
   SessionValidator,
   SessionSecurity,
   SessionMetrics,
   SessionCleaner,
-  type KeycloakSessionManagerConfig,
+  type SessionManagerConfig,
   type SessionStoreConfig,
-  type TokenManagerConfig,
   type SessionValidatorConfig,
   type SessionSecurityConfig,
   type SessionMetricsConfig,
   type SessionCleanerConfig,
-  type KeycloakSessionData,
   type SessionValidationResult,
   type AuthResult,
   type SessionStats,

@@ -30,11 +30,9 @@ import { APIKeyStorage } from "./APIKeyStorage";
 import { APIKeyMonitoring, type SystemHealth } from "./APIKeyMonitoring";
 
 // Import shared types
-import type {
-  APIKey,
-  APIKeyValidationResult,
-  APIKeyGenerationOptions,
-} from "./types";
+import type { APIKeyGenerationOptions, APIKeyValidationResult } from "./types";
+import type { ApiKey } from "@libs/database";
+import { ApiKeyRepository } from "@libs/database/src/postgress/repositories/apiKey";
 
 /**
  * Configuration for the entire API key management system
@@ -86,6 +84,9 @@ export class APIKeyManager {
     });
 
     try {
+      // Create repository instance
+      const apiKeyRepository = new ApiKeyRepository(this.dbClient.prisma);
+
       // Initialize consolidated components
       this.operations = new APIKeyOperations(
         this.dbClient,
@@ -107,7 +108,7 @@ export class APIKeyManager {
       );
 
       this.storage = new APIKeyStorage(
-        this.dbClient,
+        apiKeyRepository,
         this.cacheService,
         this.metrics,
         this.logger,
@@ -186,7 +187,7 @@ export class APIKeyManager {
   /**
    * Create a new API key
    */
-  async createAPIKey(request: APIKeyGenerationOptions): Promise<APIKey> {
+  async createAPIKey(request: APIKeyGenerationOptions): Promise<ApiKey> {
     const startTime = performance.now();
     const operationId = crypto.randomUUID();
 
@@ -201,10 +202,15 @@ export class APIKeyManager {
       const keyData = await this.operations.generateSecureKey(request.prefix);
 
       // Create API key object
-      const apiKey: APIKey = {
+      const apiKey: ApiKey = {
         id: crypto.randomUUID(),
         name: request.name || "Generated API Key",
         keyHash: crypto.createHash("sha256").update(keyData).digest("hex"),
+        keyIdentifier: crypto
+          .createHash("sha256")
+          .update(keyData)
+          .digest("hex")
+          .substring(0, 16),
         keyPreview: keyData.substring(0, 8) + "...",
         userId: request.userId,
         ...(request.storeId && { storeId: request.storeId }),
@@ -342,7 +348,7 @@ export class APIKeyManager {
   /**
    * Get API key by ID (using direct database query)
    */
-  async getAPIKey(keyId: string): Promise<APIKey | null> {
+  async getAPIKey(keyId: string): Promise<ApiKey | null> {
     const startTime = performance.now();
 
     try {
@@ -357,7 +363,7 @@ export class APIKeyManager {
       }
 
       const record = (result as any[])[0];
-      const apiKey: APIKey = {
+      const apiKey: ApiKey = {
         id: record.id,
         name: record.name,
         keyHash: record.keyHash,
@@ -396,7 +402,7 @@ export class APIKeyManager {
   /**
    * List API keys for a user
    */
-  async listAPIKeys(userId: string): Promise<APIKey[]> {
+  async listAPIKeys(userId: string): Promise<ApiKey[]> {
     const startTime = performance.now();
 
     try {
@@ -442,7 +448,7 @@ export class APIKeyManager {
   /**
    * Update an existing API key (simplified version using direct database operations)
    */
-  async updateAPIKey(keyId: string, updates: Partial<APIKey>): Promise<APIKey> {
+  async updateAPIKey(keyId: string, updates: Partial<ApiKey>): Promise<ApiKey> {
     const startTime = performance.now();
     const operationId = crypto.randomUUID();
 
@@ -460,10 +466,11 @@ export class APIKeyManager {
 
       // For simplicity, return a basic success confirmation
       // In a real implementation, you'd want to fetch and return the updated key
-      const updatedKey: APIKey = {
+      const updatedKey: ApiKey = {
         id: keyId,
         name: "Updated API Key",
         keyHash: "",
+        keyIdentifier: "",
         keyPreview: "updated...",
         userId: "unknown",
         permissions: [],

@@ -2,6 +2,7 @@
  * Shared types and interfaces for API Key management components
  */
 
+import type { ApiKey } from "@libs/database";
 import { z } from "zod";
 
 /**
@@ -138,25 +139,6 @@ export const APIKeyManagerStatsSchema = z.object({
 /**
  * Core interfaces
  */
-export interface APIKey {
-  id: string;
-  name: string;
-  keyHash: string;
-  keyPreview: string;
-  userId: string;
-  storeId?: string;
-  permissions?: string[];
-  scopes: string[];
-  lastUsedAt?: Date;
-  usageCount: number;
-  isActive: boolean;
-  expiresAt?: Date;
-  createdAt: Date;
-  updatedAt: Date;
-  revokedAt?: Date;
-  revokedBy?: string;
-  metadata?: Record<string, any>;
-}
 
 export interface APIKeyGenerationOptions {
   userId: string;
@@ -173,7 +155,7 @@ export interface APIKeyValidationResult {
   data?: any;
   success: boolean;
   user?: any; // UserInfo type from main module
-  keyData?: APIKey;
+  keyData?: ApiKey;
   expiresAt?: Date;
   error?: string;
   retryable?: boolean;
@@ -189,23 +171,8 @@ export interface APIKeyManagerStats {
   lastResetAt: Date;
 }
 
-export interface GenerationResult {
-  success: boolean;
-  apiKey?: string;
-  keyData?: APIKey;
-  error?: string;
-}
-
 export interface RevocationResult {
   success: boolean;
   error?: string;
   recoverable?: boolean;
 }
-
-export interface EntropyTestResult {
-  status: "healthy" | "degraded" | "failed";
-  details: any;
-}
-
-// Import and re-export standardized health check interface from common types
-export type { HealthCheckResult } from "../../types/common";

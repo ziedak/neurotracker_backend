@@ -5,6 +5,7 @@
 
 import type { UserInfo } from "../../types";
 import type { KeycloakSessionData, SessionStats } from "../session";
+import type { ApiKey } from "@libs/database";
 
 // Core Domain Models
 export interface ClientContext {
@@ -60,6 +61,14 @@ export interface IntegrationStats {
     validationCount: number;
     jwksLoaded: boolean;
   };
+  apiKey?: {
+    totalKeys: number;
+    activeKeys: number;
+    revokedKeys: number;
+    expiredKeys: number;
+    validationCount: number;
+    cacheHitRate: number;
+  };
 }
 
 // Component Interfaces (ISP Compliance)
@@ -110,6 +119,73 @@ export interface ISessionValidator {
       destroyAllSessions?: boolean;
     }
   ): Promise<LogoutResult>;
+}
+
+/**
+ * Interface for comprehensive session management
+ * Extends ISessionValidator with additional session lifecycle operations
+ */
+export interface ISessionManager extends ISessionValidator {
+  createSession(
+    userId: string,
+    tokens: {
+      accessToken: string;
+      refreshToken?: string;
+      idToken?: string;
+      expiresAt: Date;
+      refreshExpiresAt?: Date;
+    },
+    requestContext: {
+      ipAddress: string;
+      userAgent: string;
+      fingerprint?: Record<string, string>;
+    }
+  ): Promise<{
+    success: boolean;
+    sessionId?: string;
+    sessionData?: KeycloakSessionData;
+    error?: string;
+  }>;
+
+  getSession(sessionId: string): Promise<{
+    success: boolean;
+    session?: KeycloakSessionData;
+    error?: string;
+  }>;
+
+  updateSession(
+    sessionId: string,
+    updates: {
+      lastActivity?: Date;
+      metadata?: Record<string, any>;
+    }
+  ): Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  refreshSessionTokens(sessionId: string): Promise<{
+    success: boolean;
+    tokens?: {
+      accessToken: string;
+      refreshToken?: string;
+      expiresAt: Date;
+    };
+    error?: string;
+  }>;
+
+  invalidateSession(sessionId: string): Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  listUserSessions(userId: string): Promise<{
+    success: boolean;
+    sessions?: KeycloakSessionData[];
+    error?: string;
+  }>;
+
+  getSessionStats(): Promise<SessionStats>;
 }
 
 /**
@@ -165,6 +241,90 @@ export interface IConfigurationManager {
 }
 
 /**
+ * Interface for API Key management operations
+ */
+export interface IAPIKeyManager {
+  createAPIKey(options: {
+    userId: string;
+    name: string;
+    scopes?: string[];
+    permissions?: string[];
+    expiresAt?: Date;
+    storeId?: string;
+    prefix?: string;
+  }): Promise<{
+    success: boolean;
+    apiKey?: ApiKey;
+    rawKey?: string;
+    error?: string;
+  }>;
+
+  validateAPIKey(apiKey: string): Promise<{
+    valid: boolean;
+    keyData?: ApiKey;
+    error?: string;
+  }>;
+
+  revokeAPIKey(
+    keyId: string,
+    reason: string
+  ): Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  listAPIKeys(userId: string): Promise<{
+    success: boolean;
+    keys?: ApiKey[];
+    error?: string;
+  }>;
+
+  getAPIKey(keyId: string): Promise<{
+    success: boolean;
+    key?: ApiKey;
+    error?: string;
+  }>;
+
+  updateAPIKey(
+    keyId: string,
+    updates: {
+      name?: string;
+      scopes?: string[];
+      permissions?: string[];
+      expiresAt?: Date;
+    }
+  ): Promise<{
+    success: boolean;
+    key?: ApiKey;
+    error?: string;
+  }>;
+
+  rotateAPIKey(
+    keyId: string,
+    options?: { expiresAt?: Date }
+  ): Promise<{
+    success: boolean;
+    newKey?: ApiKey;
+    rawKey?: string;
+    error?: string;
+  }>;
+
+  deleteAPIKey(keyId: string): Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  getAPIKeyStats(): Promise<{
+    totalKeys: number;
+    activeKeys: number;
+    revokedKeys: number;
+    expiredKeys: number;
+    validationCount: number;
+    cacheHitRate: number;
+  }>;
+}
+
+/**
  * Interface for user management operations
  */
 export interface IUserManager {
@@ -186,6 +346,157 @@ export interface IUserManager {
   getUser(userId: string): Promise<{
     success: boolean;
     user?: UserInfo;
+    error?: string;
+  }>;
+}
+
+/**
+ * Batch operation result for tracking success/failures
+ */
+export interface BatchOperationResult<T = any> {
+  success: boolean;
+  successCount: number;
+  failureCount: number;
+  results: Array<{
+    success: boolean;
+    data?: T;
+    error?: string;
+    index: number;
+  }>;
+  errors?: Array<{
+    index: number;
+    error: string;
+  }>;
+}
+
+/**
+ * User attributes for custom metadata
+ */
+export interface UserAttributes {
+  [key: string]: string | string[] | number | boolean;
+}
+
+/**
+ * Advanced search filters for users
+ */
+export interface AdvancedUserSearchFilters {
+  username?: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  enabled?: boolean;
+  emailVerified?: boolean;
+  attributes?: Record<string, string>;
+  roleNames?: string[];
+  groupNames?: string[];
+  createdAfter?: Date;
+  createdBefore?: Date;
+  lastLoginAfter?: Date;
+  lastLoginBefore?: Date;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Interface for enhanced user management operations
+ */
+export interface IEnhancedUserManager {
+  // Batch operations
+  batchRegisterUsers(
+    users: Array<{
+      username: string;
+      email: string;
+      password: string;
+      firstName?: string;
+      lastName?: string;
+      attributes?: UserAttributes;
+    }>
+  ): Promise<BatchOperationResult<UserInfo>>;
+
+  batchUpdateUsers(
+    updates: Array<{
+      userId: string;
+      data: {
+        email?: string;
+        firstName?: string;
+        lastName?: string;
+        enabled?: boolean;
+        attributes?: UserAttributes;
+      };
+    }>
+  ): Promise<BatchOperationResult<UserInfo>>;
+
+  batchDeleteUsers(
+    userIds: string[],
+    deletedBy: string
+  ): Promise<BatchOperationResult<void>>;
+
+  batchAssignRoles(
+    assignments: Array<{
+      userId: string;
+      roleNames: string[];
+    }>
+  ): Promise<BatchOperationResult<void>>;
+
+  // Attribute management
+  getUserAttributes(userId: string): Promise<{
+    success: boolean;
+    attributes?: UserAttributes;
+    error?: string;
+  }>;
+
+  setUserAttributes(
+    userId: string,
+    attributes: UserAttributes
+  ): Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  updateUserAttributes(
+    userId: string,
+    attributes: Partial<UserAttributes>
+  ): Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  deleteUserAttributes(
+    userId: string,
+    attributeKeys: string[]
+  ): Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  // Advanced search
+  searchUsersAdvanced(filters: AdvancedUserSearchFilters): Promise<{
+    success: boolean;
+    users?: UserInfo[];
+    totalCount?: number;
+    error?: string;
+  }>;
+
+  // User groups management
+  getUserGroups(userId: string): Promise<{
+    success: boolean;
+    groups?: Array<{ id: string; name: string; path: string }>;
+    error?: string;
+  }>;
+
+  addUserToGroups(
+    userId: string,
+    groupIds: string[]
+  ): Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  removeUserFromGroups(
+    userId: string,
+    groupIds: string[]
+  ): Promise<{
+    success: boolean;
     error?: string;
   }>;
 }
@@ -220,11 +531,14 @@ export interface KeycloakConnectionOptions {
 
 /**
  * Main integration service interface
+ * Provides comprehensive authentication, session, user, and API key management
  */
 export interface IIntegrationService
   extends IAuthenticationManager,
-    ISessionValidator,
+    ISessionManager,
+    IAPIKeyManager,
     IUserManager,
+    IEnhancedUserManager,
     IResourceManager {
   getStats(): Promise<IntegrationStats>;
 }

@@ -10,6 +10,16 @@ module.exports = {
   coverageDirectory: "coverage",
   coverageReporters: ["text", "lcov", "html"],
   moduleNameMapper: {
+    "^@libs/database/src/(.*)$": "<rootDir>/../database/src/$1",
+    "^@libs/database$": "<rootDir>/../database/src/index.ts",
+    "^@libs/monitoring$": "<rootDir>/../monitoring/src/index.ts",
+    "^@libs/utils$": "<rootDir>/../utils/src/index.ts",
+    "^@libs/config$": "<rootDir>/../config/src/index.ts",
     "^@libs/(.*)$": "<rootDir>/../$1/src/index.ts",
+  },
+  globals: {
+    "ts-jest": {
+      isolatedModules: true,
+    },
   },
 };

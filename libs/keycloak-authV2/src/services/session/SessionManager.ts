@@ -24,7 +24,6 @@ import {
   UserSessionRepository,
   SessionLogRepository,
   SessionActivityRepository,
-  PostgreSQLClient,
 } from "@libs/database";
 
 // Component imports
@@ -39,7 +38,7 @@ import { SessionCleaner, type SessionCleanerConfig } from "./SessionCleaner";
 import { SessionTokenCoordinator } from "./SessionTokenCoordinator";
 
 // Type imports
-import { UserSession, PrismaClient } from "@libs/database";
+import { UserSession } from "@libs/database";
 import type {
   SessionValidationResult,
   SessionStats,
@@ -147,11 +146,7 @@ export class SessionManager {
     // Initialize core components (always required)
     // REFACTORED: Now uses repository pattern
     this.sessionStore = new SessionStore(
-      new UserSessionRepository(
-        PostgreSQLClient,
-        this.metrics,
-        this.cacheService
-      ),
+      this.userSessionRepo,
       this.cacheService,
       this.logger.child({ component: "SessionStore" }),
       this.metrics,

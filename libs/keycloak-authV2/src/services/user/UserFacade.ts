@@ -82,7 +82,7 @@ export class UserFacade {
     private readonly keycloakClient: KeycloakClient,
     private readonly keycloakUserService: KeycloakUserService,
     private readonly localUserRepository: LocalUserRepository,
-    private readonly syncService: UserSyncService,
+    private readonly syncService?: UserSyncService,
     private readonly metrics?: IMetricsCollector
   ) {}
 
@@ -92,8 +92,8 @@ export class UserFacade {
   static create(
     keycloakClient: KeycloakClient,
     keycloakUserService: KeycloakUserService,
-    syncService: UserSyncService,
     prisma: PrismaClient,
+    syncService?: UserSyncService,
     metrics?: IMetricsCollector
   ): UserFacade {
     const localUserRepository = new LocalUserRepository(prisma, metrics);
@@ -166,18 +166,30 @@ export class UserFacade {
 
       // 3. Queue user creation in Keycloak asynchronously
       // This provides better performance and automatic retry on failure
-      try {
-        await this.syncService.queueUserCreate(localUser.id, localUserData);
-        this.logger.info("User create queued for Keycloak sync", {
-          userId: localUser.id,
-        });
-      } catch (queueError) {
-        this.logger.warn("Failed to queue Keycloak create (will retry later)", {
-          error: queueError,
-          userId: localUser.id,
-        });
-        // Don't throw - sync will retry automatically
-        this.recordCounter("queue_create_warning");
+      if (this.syncService) {
+        try {
+          await this.syncService.queueUserCreate(localUser.id, localUserData);
+          this.logger.info("User create queued for Keycloak sync", {
+            userId: localUser.id,
+          });
+        } catch (queueError) {
+          this.logger.warn(
+            "Failed to queue Keycloak create (will retry later)",
+            {
+              error: queueError,
+              userId: localUser.id,
+            }
+          );
+          // Don't throw - sync will retry automatically
+          this.recordCounter("queue_create_warning");
+        }
+      } else {
+        this.logger.debug(
+          "Sync service not available, skipping Keycloak queue",
+          {
+            userId: localUser.id,
+          }
+        );
       }
 
       this.recordMetrics("register_user", performance.now() - startTime);
@@ -321,16 +333,26 @@ export class UserFacade {
       const user = await this.localUserRepository.updateById(userId, data);
 
       // 2. Queue sync to Keycloak asynchronously
-      try {
-        await this.syncService.queueUserUpdate(userId, data);
-        this.logger.debug("User update queued for Keycloak sync", { userId });
-      } catch (queueError) {
-        this.logger.warn("Failed to queue Keycloak update (will retry later)", {
-          error: queueError,
-          userId,
-        });
-        // Don't throw - sync will retry automatically
-        this.recordCounter("queue_update_warning");
+      if (this.syncService) {
+        try {
+          await this.syncService.queueUserUpdate(userId, data);
+          this.logger.debug("User update queued for Keycloak sync", { userId });
+        } catch (queueError) {
+          this.logger.warn(
+            "Failed to queue Keycloak update (will retry later)",
+            {
+              error: queueError,
+              userId,
+            }
+          );
+          // Don't throw - sync will retry automatically
+          this.recordCounter("queue_update_warning");
+        }
+      } else {
+        this.logger.debug(
+          "Sync service not available, skipping Keycloak update queue",
+          { userId }
+        );
       }
 
       this.recordMetrics("update_user", performance.now() - startTime);
@@ -387,16 +409,26 @@ export class UserFacade {
       this.logger.debug("User soft deleted from local DB", { userId });
 
       // 2. Queue delete from Keycloak asynchronously
-      try {
-        await this.syncService.queueUserDelete(userId);
-        this.logger.debug("User delete queued for Keycloak sync", { userId });
-      } catch (queueError) {
-        this.logger.warn("Failed to queue Keycloak delete (will retry later)", {
-          error: queueError,
-          userId,
-        });
-        // Don't throw - sync will retry automatically
-        this.recordCounter("queue_delete_warning");
+      if (this.syncService) {
+        try {
+          await this.syncService.queueUserDelete(userId);
+          this.logger.debug("User delete queued for Keycloak sync", { userId });
+        } catch (queueError) {
+          this.logger.warn(
+            "Failed to queue Keycloak delete (will retry later)",
+            {
+              error: queueError,
+              userId,
+            }
+          );
+          // Don't throw - sync will retry automatically
+          this.recordCounter("queue_delete_warning");
+        }
+      } else {
+        this.logger.debug(
+          "Sync service not available, skipping Keycloak delete queue",
+          { userId }
+        );
       }
 
       this.recordMetrics("delete_user", performance.now() - startTime);
@@ -465,6 +497,16 @@ export class UserFacade {
    * Check synchronization status between local DB and Keycloak
    */
   async getUserSyncStatus(userId: string): Promise<SyncStatus> {
+    if (!this.syncService) {
+      // Return default status when sync service is not available
+      return {
+        userId,
+        status: "SYNCED",
+        pendingOperations: 0,
+        failedOperations: 0,
+      };
+    }
+
     try {
       return await this.syncService.getUserSyncStatus(userId);
     } catch (error) {
@@ -477,6 +519,28 @@ export class UserFacade {
    * Get overall sync system health
    */
   async getSyncHealthStatus(): Promise<HealthStatus> {
+    if (!this.syncService) {
+      // Return healthy status when sync service is not available
+      const now = new Date();
+      return {
+        overall: "HEALTHY",
+        queue: {
+          status: "HEALTHY",
+          message: "Sync service not configured",
+          metrics: {},
+          timestamp: now,
+        },
+        sync: {
+          status: "HEALTHY",
+          message: "Sync service not configured",
+          metrics: {},
+          timestamp: now,
+        },
+        timestamp: now,
+        details: "Sync service not configured",
+      };
+    }
+
     try {
       return await this.syncService.getHealthStatus();
     } catch (error) {
@@ -489,6 +553,20 @@ export class UserFacade {
    * Get sync queue statistics
    */
   async getSyncQueueStats(): Promise<QueueStats> {
+    if (!this.syncService) {
+      // Return empty stats when sync service is not available
+      return {
+        pending: 0,
+        processing: 0,
+        retrying: 0,
+        failed: 0,
+        totalProcessed: 0,
+        totalSuccessful: 0,
+        totalFailed: 0,
+        avgDuration: 0,
+      };
+    }
+
     try {
       return await this.syncService.getQueueStats();
     } catch (error) {
@@ -502,6 +580,12 @@ export class UserFacade {
    * Useful for administrative recovery actions
    */
   async retrySyncOperations(limit: number = 10): Promise<number> {
+    if (!this.syncService) {
+      // Return 0 when sync service is not available
+      this.logger.debug("Sync service not available, cannot retry operations");
+      return 0;
+    }
+
     try {
       const retriedCount = await this.syncService.retryFailedOperations(limit);
       this.logger.info("Manually retried failed sync operations", {

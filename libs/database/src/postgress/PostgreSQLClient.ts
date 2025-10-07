@@ -797,6 +797,13 @@ export class PostgreSQLClient {
   }
 
   /**
+   * Get the underlying Prisma client for direct access when needed
+   */
+  get prisma(): PrismaClient {
+    return this.prismaClient;
+  }
+
+  /**
    * Enhanced connection management with monitoring and health tracking
    */
   async getConnectionInfo(): Promise<{

@@ -6,7 +6,8 @@
  * - APIKeyCacheManager.ts - Caching operations and cache management
  *
  * Responsibilities:
- * - Unified storage interface with cache-through pattern
+ * - Unified      // Use repository to update the API key
+      const updatedApiKey = await this.apiKeyRepository.updateById(id, updates);with cache-through pattern
  * - Database operations for API keys (CRUD operations)
  * - Cache operations with security and integrity validation
  * - Transaction management and data consistency
@@ -25,8 +26,15 @@ import * as crypto from "crypto";
 import { createLogger } from "@libs/utils";
 import type { ILogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
-import type { PostgreSQLClient, CacheService } from "@libs/database";
-import { APIKey, APIKeyManagerStats } from "./types";
+import type { CacheService } from "@libs/database";
+import type {
+  ApiKey,
+  ApiKeyCreateInput,
+  ApiKeyUpdateInput,
+} from "@libs/database";
+import { ApiKeyCreateInputSchema } from "@libs/database";
+import type { IApiKeyRepository } from "@libs/database/src/postgress/repositories/apiKey";
+import { APIKeyManagerStats } from "./types";
 
 // ==================== INTERFACES ====================
 
@@ -114,7 +122,7 @@ export class APIKeyStorage {
   };
 
   constructor(
-    private readonly dbClient: PostgreSQLClient,
+    private readonly apiKeyRepository: IApiKeyRepository,
     private readonly cacheService?: CacheService,
     private readonly metrics?: IMetricsCollector,
     logger?: ILogger,
@@ -129,36 +137,35 @@ export class APIKeyStorage {
   /**
    * Create new API key in database with cache invalidation
    */
-  async createAPIKey(keyData: APIKey): Promise<StorageResult<APIKey>> {
+  async createAPIKey(keyData: ApiKey): Promise<StorageResult<ApiKey>> {
     const startTime = performance.now();
 
     try {
-      // Validate key data
+      // Validate key data using Zod schema
       this.validateKeyData(keyData);
 
-      // Execute database insert with retry logic
-      await this.executeWithRetry(async () => {
-        return this.dbClient.executeRaw(
-          `INSERT INTO api_keys 
-           (id, name, key_hash, key_preview, user_id, store_id, permissions, scopes, 
-            usage_count, is_active, expires_at, created_at, updated_at, metadata)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-          keyData.id,
-          keyData.name,
-          keyData.keyHash,
-          keyData.keyPreview,
-          keyData.userId,
-          keyData.storeId,
-          JSON.stringify(keyData.permissions),
-          keyData.scopes,
-          keyData.usageCount,
-          keyData.isActive,
-          keyData.expiresAt,
-          keyData.createdAt,
-          keyData.updatedAt,
-          keyData.metadata ? JSON.stringify(keyData.metadata) : null
-        );
-      });
+      // Convert to repository input format
+      const createInput = {
+        id: keyData.id,
+        name: keyData.name,
+        keyHash: keyData.keyHash,
+        keyIdentifier: keyData.keyIdentifier,
+        keyPreview: keyData.keyPreview,
+        userId: keyData.userId,
+        storeId: keyData.storeId || undefined,
+        permissions: keyData.permissions || undefined,
+        scopes: keyData.scopes,
+        lastUsedAt: keyData.lastUsedAt || undefined,
+        usageCount: keyData.usageCount,
+        isActive: keyData.isActive,
+        expiresAt: keyData.expiresAt || undefined,
+        revokedAt: keyData.revokedAt || undefined,
+        revokedBy: keyData.revokedBy || undefined,
+        metadata: keyData.metadata || undefined,
+      } as ApiKeyCreateInput;
+
+      // Create using repository
+      const createdKey = await this.apiKeyRepository.create(createInput);
 
       // Invalidate related cache entries
       if (this.config.enableCache) {
@@ -175,7 +182,7 @@ export class APIKeyStorage {
 
       return {
         success: true,
-        data: keyData,
+        data: createdKey,
         executionTime,
       };
     } catch (error) {
@@ -198,7 +205,7 @@ export class APIKeyStorage {
   /**
    * Retrieve API key by ID with cache-through pattern
    */
-  async getAPIKeyById(keyId: string): Promise<StorageResult<APIKey>> {
+  async getAPIKeyById(keyId: string): Promise<StorageResult<ApiKey>> {
     const startTime = performance.now();
 
     try {
@@ -219,24 +226,16 @@ export class APIKeyStorage {
         this.cacheStats.misses++;
       }
 
-      // Fetch from database
-      const result = (await this.dbClient.executeRaw(
-        `SELECT ak.*, u.email as user_email 
-         FROM api_keys ak
-         LEFT JOIN users u ON ak.user_id = u.id
-         WHERE ak.id = $1`,
-        keyId
-      )) as any;
+      // Fetch from repository
+      const keyData = await this.apiKeyRepository.findById(keyId);
 
-      if (!result.rows || result.rows.length === 0) {
+      if (!keyData) {
         return {
           success: false,
           error: "API key not found",
           executionTime: performance.now() - startTime,
         };
       }
-
-      const keyData = this.mapDatabaseResult(result.rows[0]);
 
       // Cache the result if enabled
       if (this.config.enableCache) {
@@ -274,17 +273,16 @@ export class APIKeyStorage {
    */
   async updateAPIKey(
     keyId: string,
-    updates: Partial<APIKey>
-  ): Promise<StorageResult<APIKey>> {
+    updates: Partial<ApiKey>
+  ): Promise<StorageResult<ApiKey>> {
     const startTime = performance.now();
 
     try {
-      // Build dynamic update query
-      const { query, params } = this.buildUpdateQuery(keyId, updates);
-
-      await this.executeWithRetry(async () => {
-        return this.dbClient.executeRaw(query, ...params);
-      });
+      // Update using repository
+      const updatedKey = await this.apiKeyRepository.updateById(
+        keyId,
+        updates as ApiKeyUpdateInput
+      );
 
       // Invalidate cache
       if (this.config.enableCache) {
@@ -301,19 +299,9 @@ export class APIKeyStorage {
         executionTime,
       });
 
-      // Return updated key data
-      const updatedKey = await this.getAPIKeyById(keyId);
-      if (!updatedKey.success || !updatedKey.data) {
-        return {
-          success: false,
-          error: "Failed to retrieve updated API key",
-          executionTime,
-        };
-      }
-
       return {
         success: true,
-        data: updatedKey.data,
+        data: updatedKey,
         executionTime,
       };
     } catch (error) {
@@ -343,15 +331,8 @@ export class APIKeyStorage {
     const startTime = performance.now();
 
     try {
-      const result = await this.executeWithRetry(async () => {
-        return this.dbClient.executeRaw(
-          `UPDATE api_keys 
-           SET is_active = false, revoked_at = CURRENT_TIMESTAMP, revoked_by = $2
-           WHERE id = $1 AND is_active = true`,
-          keyId,
-          deletedBy
-        );
-      });
+      // Use repository to revoke the API key
+      await this.apiKeyRepository.revokeById(keyId);
 
       // Clear from cache
       if (this.config.enableCache) {
@@ -359,34 +340,18 @@ export class APIKeyStorage {
       }
 
       const executionTime = performance.now() - startTime;
-      const success = (result as any).rowCount > 0;
+      this.metrics?.recordTimer("apikey.storage.delete_success", executionTime);
+      this.logger.info("API key deleted successfully", {
+        keyId,
+        deletedBy,
+        executionTime,
+      });
 
-      if (success) {
-        this.metrics?.recordTimer(
-          "apikey.storage.delete_success",
-          executionTime
-        );
-        this.logger.info("API key deleted successfully", {
-          keyId,
-          deletedBy,
-          executionTime,
-        });
-      }
-
-      if (success) {
-        return {
-          success: true,
-          data: true,
-          executionTime,
-        };
-      } else {
-        return {
-          success: false,
-          data: false,
-          error: "Key not found or already deleted",
-          executionTime,
-        };
-      }
+      return {
+        success: true,
+        data: true,
+        executionTime,
+      };
     } catch (error) {
       const executionTime = performance.now() - startTime;
       this.metrics?.recordCounter("apikey.storage.delete_failure");
@@ -410,7 +375,7 @@ export class APIKeyStorage {
   async getAPIKeysByUserId(
     userId: string,
     includeInactive = false
-  ): Promise<StorageResult<APIKey[]>> {
+  ): Promise<StorageResult<ApiKey[]>> {
     const startTime = performance.now();
 
     try {
@@ -429,18 +394,10 @@ export class APIKeyStorage {
         this.cacheStats.misses++;
       }
 
-      const activeCondition = includeInactive ? "" : "AND ak.is_active = true";
-      const result = (await this.dbClient.executeRaw(
-        `SELECT ak.*, u.email as user_email 
-         FROM api_keys ak
-         LEFT JOIN users u ON ak.user_id = u.id
-         WHERE ak.user_id = $1 ${activeCondition}
-         ORDER BY ak.created_at DESC`,
-        userId
-      )) as any;
-
-      const keys =
-        result.rows?.map((row: any) => this.mapDatabaseResult(row)) || [];
+      // Use repository to get API keys by user
+      const keys = includeInactive
+        ? await this.apiKeyRepository.findByUser(userId)
+        : await this.apiKeyRepository.findActiveByUser(userId);
 
       // Cache active keys only
       if (this.config.enableCache && !includeInactive) {
@@ -483,25 +440,16 @@ export class APIKeyStorage {
     const startTime = performance.now();
 
     try {
-      const result = (await this.dbClient.executeRaw(`
-        SELECT 
-          COUNT(*) as total_keys,
-          COUNT(*) FILTER (WHERE is_active = true) as active_keys,
-          COUNT(*) FILTER (WHERE expires_at < CURRENT_TIMESTAMP) as expired_keys,
-          COUNT(*) FILTER (WHERE revoked_at IS NOT NULL) as revoked_keys,
-          COUNT(*) FILTER (WHERE DATE(last_used_at) = CURRENT_DATE) as validations_today
-        FROM api_keys
-      `)) as any;
-
-      const dbStats = result.rows[0];
+      // Use repository to get API key statistics
+      const dbStats = await this.apiKeyRepository.getApiKeyStats();
       const cacheHitRate = this.calculateCacheHitRate();
 
       const stats: APIKeyManagerStats = {
-        totalKeys: parseInt(dbStats.total_keys),
-        activeKeys: parseInt(dbStats.active_keys),
-        expiredKeys: parseInt(dbStats.expired_keys),
-        revokedKeys: parseInt(dbStats.revoked_keys),
-        validationsToday: parseInt(dbStats.validations_today),
+        totalKeys: dbStats.total,
+        activeKeys: dbStats.active,
+        expiredKeys: dbStats.expired,
+        revokedKeys: dbStats.revoked,
+        validationsToday: 0, // TODO: Implement in repository if needed
         cacheHitRate,
         lastResetAt: new Date(), // TODO: Track actual reset time
       };
@@ -532,7 +480,7 @@ export class APIKeyStorage {
   /**
    * Get cached API key by ID
    */
-  private async getCachedKey(keyId: string): Promise<APIKey | null> {
+  private async getCachedKey(keyId: string): Promise<ApiKey | null> {
     if (!this.cacheService || !this.config.enableCache) return null;
 
     try {
@@ -554,7 +502,7 @@ export class APIKeyStorage {
   /**
    * Cache API key data
    */
-  private async setCachedKey(keyId: string, keyData: APIKey): Promise<void> {
+  private async setCachedKey(keyId: string, keyData: ApiKey): Promise<void> {
     if (!this.cacheService || !this.config.enableCache) return;
 
     try {
@@ -572,7 +520,7 @@ export class APIKeyStorage {
   /**
    * Get cached user keys
    */
-  private async getCachedUserKeys(userId: string): Promise<APIKey[] | null> {
+  private async getCachedUserKeys(userId: string): Promise<ApiKey[] | null> {
     if (!this.cacheService || !this.config.enableCache) return null;
 
     try {
@@ -597,7 +545,7 @@ export class APIKeyStorage {
    */
   private async setCachedUserKeys(
     userId: string,
-    keys: APIKey[]
+    keys: ApiKey[]
   ): Promise<void> {
     if (!this.cacheService || !this.config.enableCache) return;
 
@@ -665,100 +613,26 @@ export class APIKeyStorage {
   /**
    * Validate API key data before database operations
    */
-  private validateKeyData(keyData: APIKey): void {
-    if (!keyData.id || !keyData.keyHash || !keyData.userId) {
-      throw new Error("Missing required key data");
-    }
-
-    if (keyData.keyHash.length > this.config.maxKeyLength) {
-      throw new Error("Key hash exceeds maximum length");
-    }
-  }
-
-  /**
-   * Execute database operation with retry logic
-   */
-  private async executeWithRetry<T>(operation: () => Promise<T>): Promise<T> {
-    let lastError: Error | null = null;
-
-    for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
-      try {
-        return await operation();
-      } catch (error) {
-        lastError = error as Error;
-
-        if (attempt < this.config.retryAttempts) {
-          this.logger.warn(
-            `Database operation failed, retrying (${attempt}/${this.config.retryAttempts})`,
-            { error }
-          );
-          await this.delay(this.config.retryDelay * attempt);
-        }
-      }
-    }
-
-    throw lastError;
-  }
-
-  /**
-   * Build dynamic update query
-   */
-  private buildUpdateQuery(
-    keyId: string,
-    updates: Partial<APIKey>
-  ): { query: string; params: any[] } {
-    const setParts: string[] = [];
-    const params: any[] = [];
-    let paramIndex = 1;
-
-    // Add each update field
-    Object.entries(updates).forEach(([key, value]) => {
-      if (value !== undefined) {
-        setParts.push(`${key} = $${paramIndex}`);
-        params.push(value);
-        paramIndex++;
-      }
+  private validateKeyData(keyData: ApiKey): void {
+    // Use the comprehensive Zod validation from the model
+    ApiKeyCreateInputSchema.parse({
+      id: keyData.id,
+      name: keyData.name,
+      keyHash: keyData.keyHash,
+      keyIdentifier: keyData.keyIdentifier,
+      keyPreview: keyData.keyPreview,
+      userId: keyData.userId,
+      storeId: keyData.storeId,
+      permissions: keyData.permissions,
+      scopes: keyData.scopes,
+      lastUsedAt: keyData.lastUsedAt,
+      usageCount: keyData.usageCount,
+      isActive: keyData.isActive,
+      expiresAt: keyData.expiresAt,
+      revokedAt: keyData.revokedAt,
+      revokedBy: keyData.revokedBy,
+      metadata: keyData.metadata,
     });
-
-    // Always update the updated_at timestamp
-    setParts.push(`updated_at = CURRENT_TIMESTAMP`);
-
-    // Add keyId as the final parameter
-    params.push(keyId);
-
-    const query = `
-      UPDATE api_keys 
-      SET ${setParts.join(", ")}
-      WHERE id = $${paramIndex}
-      RETURNING *
-    `;
-
-    return { query, params };
-  }
-
-  /**
-   * Map database result to APIKey object
-   */
-  private mapDatabaseResult(row: any): APIKey {
-    return {
-      id: row.id,
-      name: row.name,
-      keyHash: row.key_hash,
-      keyPreview: row.key_preview,
-      userId: row.user_id,
-      storeId: row.store_id,
-      permissions: row.permissions ? JSON.parse(row.permissions) : [],
-      scopes: row.scopes || [],
-      lastUsedAt: row.last_used_at,
-      usageCount: row.usage_count || 0,
-      isActive: row.is_active,
-      expiresAt: row.expires_at,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      revokedAt: row.revoked_at,
-      revokedBy: row.revoked_by,
-      metadata: row.metadata ? JSON.parse(row.metadata) : {},
-    };
   }
 
   /**
@@ -776,7 +650,7 @@ export class APIKeyStorage {
   /**
    * Validate and parse cached data
    */
-  private validateAndParseCachedData(cached: string): APIKey | null {
+  private validateAndParseCachedData(cached: string): ApiKey | null {
     try {
       const parsed = JSON.parse(cached);
 
@@ -785,7 +659,7 @@ export class APIKeyStorage {
         return null;
       }
 
-      return parsed as APIKey;
+      return parsed as ApiKey;
     } catch (error) {
       this.logger.warn("Invalid cached data format", { error });
       return null;
@@ -795,7 +669,7 @@ export class APIKeyStorage {
   /**
    * Serialize data for cache storage
    */
-  private serializeForCache(data: APIKey): string {
+  private serializeForCache(data: ApiKey): string {
     return JSON.stringify(data);
   }
 
@@ -878,12 +752,5 @@ export class APIKeyStorage {
     this.cacheStats.lastCleanup = new Date();
     // For now, just log the cleanup event
     // Future implementation would remove least recently used entries
-  }
-
-  /**
-   * Simple delay utility
-   */
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

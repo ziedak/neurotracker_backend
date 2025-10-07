@@ -6,8 +6,13 @@
  * through the main SessionManager orchestrator.
  */
 
+import type { SessionManager } from "./SessionManager";
+
 // Main orchestrator (recommended entry point)
 export { SessionManager, type SessionManagerConfig } from "./SessionManager";
+
+// Type aliases for backward compatibility
+export type KeycloakSessionManager = SessionManager;
 
 // Individual components (for advanced usage)
 export { SessionStore, type SessionStoreConfig } from "./SessionStore";

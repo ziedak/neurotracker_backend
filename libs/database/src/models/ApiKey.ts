@@ -5,12 +5,24 @@ import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 // Input types (moved from repositories)
-export type ApiKeyCreateInput = Omit<
-  Prisma.ApiKeyCreateInput,
-  "id" | "createdAt" | "updatedAt" | "lastUsedAt"
-> & {
+export interface ApiKeyCreateInput {
   id?: string;
-};
+  name: string;
+  keyHash: string;
+  keyIdentifier: string;
+  keyPreview: string;
+  userId: string;
+  storeId?: string | null;
+  permissions?: Prisma.InputJsonValue | null;
+  scopes: string[];
+  lastUsedAt?: Date | null;
+  usageCount?: number;
+  isActive?: boolean;
+  expiresAt?: Date | null;
+  revokedAt?: Date | null;
+  revokedBy?: string | null;
+  metadata?: Prisma.InputJsonValue | null;
+}
 
 export type ApiKeyUpdateInput = Prisma.ApiKeyUpdateInput;
 

@@ -20,6 +20,9 @@ export type {
   SessionLogUpdateInput,
 } from "@libs/database";
 
+// Type aliases for backward compatibility
+export type KeycloakSessionData = import("@libs/database").UserSession;
+
 /**
  * Session creation options with smart defaults for required DB fields
  */

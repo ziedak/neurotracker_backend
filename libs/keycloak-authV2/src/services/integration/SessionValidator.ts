@@ -6,7 +6,7 @@
 import { createLogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
 import type { ISessionValidator, LogoutResult } from "./interfaces";
-import type { KeycloakSessionManager, KeycloakSessionData } from "../session";
+import type { SessionManager, KeycloakSessionData } from "../session";
 import type { KeycloakClient } from "../../client/KeycloakClient";
 import type { IInputValidator } from "./interfaces";
 
@@ -19,7 +19,7 @@ export class SessionValidator implements ISessionValidator {
 
   constructor(
     private readonly keycloakClient: KeycloakClient,
-    private readonly sessionManager: KeycloakSessionManager,
+    private readonly sessionManager: SessionManager,
     private readonly inputValidator: IInputValidator,
     private readonly metrics?: IMetricsCollector
   ) {}

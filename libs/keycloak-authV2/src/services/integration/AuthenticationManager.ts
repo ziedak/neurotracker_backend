@@ -14,6 +14,16 @@ import type { UserInfo } from "../../types";
 import type { KeycloakClient } from "../../client/KeycloakClient";
 import type { SessionManager } from "../session";
 import type { IInputValidator } from "./interfaces";
+import type { User } from "@libs/database";
+
+/**
+ * Interface for user lookup operations needed by authentication
+ */
+export interface IUserLookupService {
+  getUserById(userId: string): Promise<User | null>;
+  getUserByUsername(username: string): Promise<User | null>;
+  getUserByEmail(email: string): Promise<User | null>;
+}
 
 /**
  * Authentication Manager Component
@@ -25,9 +35,34 @@ export class AuthenticationManager implements IAuthenticationManager {
   constructor(
     private readonly keycloakClient: KeycloakClient,
     private readonly sessionManager: SessionManager,
+    private readonly userLookupService: IUserLookupService,
     private readonly inputValidator: IInputValidator,
     private readonly metrics?: IMetricsCollector
   ) {}
+
+  /**
+   * Convert database User to UserInfo format
+   */
+  private convertUserToUserInfo(user: User): UserInfo {
+    return {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      name:
+        [user.firstName, user.lastName].filter(Boolean).join(" ") || undefined,
+      roles: user.role ? [user.role.name] : [],
+      permissions: [], // Would need to be derived from role permissions
+      metadata: {
+        status: user.status,
+        emailVerified: user.emailVerified,
+        phoneVerified: user.phoneVerified,
+        lastLoginAt: user.lastLoginAt,
+        createdAt: user.createdAt,
+        storeId: user.storeId,
+        organizationId: user.organizationId,
+      },
+    };
+  }
 
   /**
    * Authenticate user with username/password
@@ -88,17 +123,20 @@ export class AuthenticationManager implements IAuthenticationManager {
         };
       }
 
-      // Get user information
-      const userInfo = await this.keycloakClient.getUserInfo(
-        authResult.tokens.access_token
+      // Get user information using user lookup service (proper separation of concerns)
+      const user = await this.userLookupService.getUserByUsername(
+        usernameValidation.sanitized!
       );
 
-      if (!userInfo) {
+      if (!user) {
         return {
           success: false,
-          error: "Failed to retrieve user information",
+          error: "User not found",
         };
       }
+
+      // Convert database User to UserInfo format
+      const userInfo = this.convertUserToUserInfo(user);
 
       // Create session
       const sessionResult = await this.createSessionForUser(
@@ -197,17 +235,32 @@ export class AuthenticationManager implements IAuthenticationManager {
         };
       }
 
-      // Get user information
-      const userInfo = await this.keycloakClient.getUserInfo(
+      // Get user information from token and then from database (proper separation of concerns)
+      const keycloakUserInfo = await this.keycloakClient.getUserInfo(
         tokenResult.tokens.access_token
       );
 
-      if (!userInfo) {
+      if (!keycloakUserInfo) {
         return {
           success: false,
-          error: "Failed to retrieve user information",
+          error: "Failed to retrieve user information from token",
         };
       }
+
+      // Get user from database using user lookup service (source of truth)
+      const user = await this.userLookupService.getUserById(
+        keycloakUserInfo.sub
+      );
+
+      if (!user) {
+        return {
+          success: false,
+          error: "User not found in database",
+        };
+      }
+
+      // Convert database User to UserInfo format
+      const userInfo = this.convertUserToUserInfo(user);
 
       // Create session
       const sessionResult = await this.createSessionForUser(
