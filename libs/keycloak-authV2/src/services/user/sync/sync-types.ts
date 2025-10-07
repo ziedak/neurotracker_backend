@@ -203,39 +203,6 @@ export interface SyncConfig {
 }
 
 /**
- * Sync Error
- * Detailed error information
- */
-export interface SyncError {
-  /** Operation ID */
-  operationId: string;
-
-  /** User ID */
-  userId: string;
-
-  /** Operation type */
-  type: SyncOperationType;
-
-  /** Error message */
-  error: string;
-
-  /** Error stack trace */
-  stack?: string;
-
-  /** Current attempt */
-  attempt: number;
-
-  /** Whether error is recoverable */
-  recoverable: boolean;
-
-  /** Next retry timestamp (if retrying) */
-  nextRetryAt?: Date;
-
-  /** Timestamp of error */
-  timestamp: Date;
-}
-
-/**
  * Queue Statistics
  * Statistics about the sync queue
  */

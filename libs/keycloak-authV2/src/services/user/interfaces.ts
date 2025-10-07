@@ -88,12 +88,6 @@ export interface IClientCredentialsTokenProvider {
 }
 
 /**
- * @deprecated Use IClientCredentialsTokenProvider instead
- * Kept for backward compatibility
- */
-export interface IAdminTokenManager extends IClientCredentialsTokenProvider {}
-
-/**
  * Low-level Keycloak API client interface
  */
 export interface IKeycloakApiClient {
@@ -141,17 +135,6 @@ export interface IRoleManager {
     clientId: string,
     roleNames: string[]
   ): Promise<void>;
-}
-
-/**
- * User info conversion interface
- */
-export interface IUserInfoConverter {
-  convertToUserInfo(
-    keycloakUser: KeycloakUser,
-    roles?: string[],
-    permissions?: string[]
-  ): UserInfo;
 }
 
 /**

@@ -62,10 +62,8 @@ export type {
 // Convenience re-exports
 export type {
   IClientCredentialsTokenProvider,
-  IAdminTokenManager, // Deprecated - for backward compatibility
   IKeycloakApiClient,
   IUserRepository,
   IRoleManager,
-  IUserInfoConverter, // Deprecated - use utility functions instead
   IUserService,
 } from "./interfaces";

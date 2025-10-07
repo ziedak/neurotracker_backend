@@ -43,7 +43,7 @@ import { RETRY_CONFIG } from "./constants";
 /**
  * Configuration for client credentials token provider
  */
-export interface ClientCredentialsConfig {
+interface ClientCredentialsConfig {
   /** Required OAuth2 scopes for admin operations */
   requiredScopes: string[];
   /** Safety buffer in seconds before token expiry (default: 30) */
@@ -89,9 +89,9 @@ export interface IClientCredentialsTokenProvider {
 }
 
 /**
- * Token information for monitoring and debugging
+ * Token information with expiration details
  */
-export interface TokenInfo {
+interface TokenInfo {
   expiresAt: Date;
   scopes: string[];
   issuedAt: Date;
