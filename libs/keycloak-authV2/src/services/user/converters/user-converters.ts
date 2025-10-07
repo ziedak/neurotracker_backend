@@ -17,8 +17,8 @@
  * - Functional composition instead of class methods
  */
 
-import type { UserInfo } from "../../types";
-import type { KeycloakUser } from "./interfaces";
+import type { UserInfo } from "../../../types";
+import type { KeycloakUser } from "../interfaces";
 
 /**
  * Convert Keycloak user to internal UserInfo format

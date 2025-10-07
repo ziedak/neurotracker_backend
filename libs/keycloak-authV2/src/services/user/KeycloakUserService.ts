@@ -18,7 +18,7 @@ import type { CacheService } from "@libs/database";
 import type { UserInfo } from "../../types";
 import type { AuthV2Config } from "../token/config";
 import type { KeycloakClient } from "../../client/KeycloakClient";
-import { keycloakUserToUserInfo } from "./user-converters";
+import { keycloakUserToUserInfo } from "./converters/user-converters";
 import type {
   IUserService,
   IUserRepository,

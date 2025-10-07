@@ -520,6 +520,153 @@ export class RedisClient {
       return false;
     }
   }
+
+  async safeZadd(
+    key: RedisKey,
+    ...scoreMembers: (string | number | Buffer)[]
+  ): Promise<number> {
+    try {
+      return await executeRedisWithRetry<number>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.zadd(key, ...scoreMembers)),
+        (error) => this.logger.warn(`Safe ZADD failed for key ${key}`, error),
+        {
+          operationName: "redis_zadd",
+          enableCircuitBreaker: true,
+          enableMetrics: true,
+        }
+      );
+    } catch (error) {
+      this.logger.warn(`Safe ZADD failed for key ${key}`, error);
+      return 0;
+    }
+  }
+
+  async safeRpush(
+    key: RedisKey,
+    ...values: (string | Buffer)[]
+  ): Promise<number> {
+    try {
+      return await executeRedisWithRetry<number>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.rpush(key, ...values)),
+        (error) => this.logger.warn(`Safe RPUSH failed for key ${key}`, error),
+        {
+          operationName: "redis_rpush",
+          enableCircuitBreaker: true,
+          enableMetrics: true,
+        }
+      );
+    } catch (error) {
+      this.logger.warn(`Safe RPUSH failed for key ${key}`, error);
+      return 0;
+    }
+  }
+
+  async safeZpopmax(key: RedisKey, count?: number): Promise<string[]> {
+    try {
+      return await executeRedisWithRetry<string[]>(
+        this.redis,
+        (redis: Redis) =>
+          Promise.resolve(
+            count !== undefined ? redis.zpopmax(key, count) : redis.zpopmax(key)
+          ),
+        (error) => this.logger.warn(`Safe ZPOPMAX failed for key ${key}`, error)
+      );
+    } catch (error) {
+      this.logger.warn(`Safe ZPOPMAX failed for key ${key}`, error);
+      return [];
+    }
+  }
+
+  async safeLpop(key: RedisKey): Promise<string | null> {
+    try {
+      return await executeRedisWithRetry<string | null>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.lpop(key)),
+        (error) => this.logger.warn(`Safe LPOP failed for key ${key}`, error)
+      );
+    } catch (error) {
+      this.logger.warn(`Safe LPOP failed for key ${key}`, error);
+      return null;
+    }
+  }
+
+  async safeRpop(key: RedisKey): Promise<string | null> {
+    try {
+      return await executeRedisWithRetry<string | null>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.rpop(key)),
+        (error) => this.logger.warn(`Safe RPOP failed for key ${key}`, error)
+      );
+    } catch (error) {
+      this.logger.warn(`Safe RPOP failed for key ${key}`, error);
+      return null;
+    }
+  }
+  async safeExpire(key: RedisKey, seconds: number): Promise<boolean> {
+    try {
+      const result = await executeRedisWithRetry<number>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.expire(key, seconds)),
+        (error) => this.logger.warn(`Safe EXPIRE failed for key ${key}`, error),
+        {
+          operationName: "redis_expire",
+          enableCircuitBreaker: true,
+          enableMetrics: true,
+        }
+      );
+      return result === 1;
+    } catch (error) {
+      this.logger.warn(`Safe EXPIRE failed for key ${key}`, error);
+      return false;
+    }
+  }
+
+  async safeHset(
+    key: RedisKey,
+    ...fieldValues: (string | number | Buffer)[]
+  ): Promise<number> {
+    try {
+      return await executeRedisWithRetry<number>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.hset(key, ...fieldValues)),
+        (error) => this.logger.warn(`Safe HSET failed for key ${key}`, error),
+        {
+          operationName: "redis_hset",
+          enableCircuitBreaker: true,
+          enableMetrics: true,
+        }
+      );
+    } catch (error) {
+      this.logger.warn(`Safe HSET failed for key ${key}`, error);
+      return 0;
+    }
+  }
+
+  async safeHincrby(
+    key: RedisKey,
+    field: string,
+    increment: number
+  ): Promise<number> {
+    try {
+      return await executeRedisWithRetry<number>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.hincrby(key, field, increment)),
+        (error) =>
+          this.logger.warn(`Safe HINCRBY failed for key ${key}`, error),
+        {
+          operationName: "redis_hincrby",
+          enableCircuitBreaker: true,
+          enableMetrics: true,
+        }
+      );
+    } catch (error) {
+      this.logger.warn(`Safe HINCRBY failed for key ${key}`, error);
+      return 0;
+    }
+  }
+
   async safePipeline(): Promise<ChainableCommander> {
     try {
       return await executeRedisWithRetry<ChainableCommander>(
@@ -538,7 +685,193 @@ export class RedisClient {
       return this.redis.pipeline();
     }
   }
+  async safeSadd(
+    key: RedisKey,
+    ...members: (string | Buffer)[]
+  ): Promise<number> {
+    try {
+      return await executeRedisWithRetry<number>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.sadd(key, ...members)),
+        (error) => this.logger.warn(`Safe SADD failed for key ${key}`, error),
+        {
+          operationName: "redis_sadd",
+          enableCircuitBreaker: true,
+          enableMetrics: true,
+        }
+      );
+    } catch (error) {
+      this.logger.warn(`Safe SADD failed for key ${key}`, error);
+      return 0;
+    }
+  }
+  async safeZrem(
+    key: string | Buffer,
+    ...members: (string | Buffer)[]
+  ): Promise<number> {
+    try {
+      return await executeRedisWithRetry<number>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.zrem(key, ...members)),
+        (error) => this.logger.warn(`Safe ZREM failed for key ${key}`, error),
+        {
+          operationName: "redis_zrem",
+          enableCircuitBreaker: true,
+          enableMetrics: true,
+        }
+      );
+    } catch (error) {
+      this.logger.warn(`Safe ZREM failed for key ${key}`, error);
+      return 0;
+    }
+  }
+  async safeSrem(
+    key: string | Buffer,
+    ...members: (string | Buffer)[]
+  ): Promise<number> {
+    try {
+      return await executeRedisWithRetry<number>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.srem(key, ...members)),
+        (error) => this.logger.warn(`Safe SREM failed for key ${key}`, error),
+        {
+          operationName: "redis_srem",
+          enableCircuitBreaker: true,
+          enableMetrics: true,
+        }
+      );
+    } catch (error) {
+      this.logger.warn(`Safe SREM failed for key ${key}`, error);
+      return 0;
+    }
+  }
+  async safeScard(key: string | Buffer): Promise<number> {
+    try {
+      return await executeRedisWithRetry<number>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.scard(key)),
+        (error) => this.logger.warn(`Safe SCARD failed for key ${key}`, error),
+        {
+          operationName: "redis_scard",
+          enableCircuitBreaker: true,
+          enableMetrics: true,
+        }
+      );
+    } catch (error) {
+      this.logger.warn(`Safe SCARD failed for key ${key}`, error);
+      return 0;
+    }
+  }
+  async safeLrange(
+    key: string | Buffer,
+    start: number,
+    stop: number
+  ): Promise<string[]> {
+    try {
+      return await executeRedisWithRetry<string[]>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.lrange(key, start, stop)),
+        (error) => this.logger.warn(`Safe LRANGE failed for key ${key}`, error)
+      );
+    } catch (error) {
+      this.logger.warn(`Safe LRANGE failed for key ${key}`, error);
+      return [];
+    }
+  }
 
+  async safeZcard(key: string | Buffer): Promise<number> {
+    try {
+      return await executeRedisWithRetry<number>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.zcard(key)),
+        (error) => this.logger.warn(`Safe ZCARD failed for key ${key}`, error),
+        {
+          operationName: "redis_zcard",
+          enableCircuitBreaker: true,
+          enableMetrics: true,
+        }
+      );
+    } catch (error) {
+      this.logger.warn(`Safe ZCARD failed for key ${key}`, error);
+      return 0;
+    }
+  }
+
+  async safeLlen(key: string | Buffer): Promise<number> {
+    try {
+      return await executeRedisWithRetry<number>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.llen(key)),
+        (error) => this.logger.warn(`Safe LLEN failed for key ${key}`, error),
+        {
+          operationName: "redis_llen",
+          enableCircuitBreaker: true,
+          enableMetrics: true,
+        }
+      );
+    } catch (error) {
+      this.logger.warn(`Safe LLEN failed for key ${key}`, error);
+      return 0;
+    }
+  }
+  async safeHgetall(key: string | Buffer): Promise<Record<string, string>> {
+    try {
+      return await executeRedisWithRetry<Record<string, string>>(
+        this.redis,
+        (redis: Redis) => Promise.resolve(redis.hgetall(key)),
+        (error) =>
+          this.logger.warn(`Safe HGETALL failed for key ${key}`, error),
+        {
+          operationName: "redis_hgetall",
+          enableCircuitBreaker: true,
+          enableMetrics: true,
+        }
+      );
+    } catch (error) {
+      this.logger.warn(`Safe HGETALL failed for key ${key}`, error);
+      return {};
+    }
+  }
+
+  async safeZrange(
+    key: string | Buffer,
+    start: number,
+    stop: number,
+    pattern: "WITHSCORES"
+  ): Promise<string[]> {
+    try {
+      return await executeRedisWithRetry<string[]>(
+        this.redis,
+        (redis: Redis) =>
+          Promise.resolve(redis.zrange(key, start, stop, pattern)),
+        (error) => this.logger.warn(`Safe ZRANGE failed for key ${key}`, error)
+      );
+    } catch (error) {
+      this.logger.warn(`Safe ZRANGE failed for key ${key}`, error);
+      return [];
+    }
+  }
+  async safeZrangebyscore(
+    key: string | Buffer,
+    min: string | number,
+    max: string | number,
+    callback?:
+      | ((err?: Error | null, result?: string[] | undefined) => void)
+      | undefined
+  ): Promise<string[]> {
+    try {
+      return await executeRedisWithRetry<string[]>(
+        this.redis,
+        (redis: Redis) =>
+          Promise.resolve(redis.zrangebyscore(key, min, max, callback)),
+        (error) =>
+          this.logger.warn(`Safe ZRANGEBYSCORE failed for key ${key}`, error)
+      );
+    } catch (error) {
+      this.logger.warn(`Safe ZRANGEBYSCORE failed for key ${key}`, error);
+      return [];
+    }
+  }
   async safeScan(
     cursor: string | number,
     patternToken: "MATCH",

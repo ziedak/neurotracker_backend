@@ -12,8 +12,10 @@
  *
  * SOLID Principles:
  * - Single Responsibility: Bridges Keycloak auth with local user data
- * - Open/Closed: Extensible thr  /**
- * Validate user status for operations
+ * - Open/Closed: Extensible through namespace pattern without modifying existing code
+ * - Liskov Substitution: Compatible with database and Keycloak interfaces
+ * - Interface Segregation: Clean, focused method signatures
+ * - Dependency Inversion: Depends on abstractions (interfaces) not implementations
  */
 
 import { createLogger } from "@libs/utils";
@@ -22,11 +24,10 @@ import type { IMetricsCollector } from "@libs/monitoring";
 import type { PrismaClient } from "@libs/database";
 import { UserRepository as LocalUserRepository } from "@libs/database";
 import type { User, UserCreateInput, UserUpdateInput } from "@libs/database";
-import { UserCreateInputSchema, UserUpdateInputSchema } from "@libs/database";
 import { KeycloakUserService } from "./KeycloakUserService";
 import type { KeycloakClient } from "../../client/KeycloakClient";
-import type { CreateUserOptions, UpdateUserOptions } from "./interfaces";
-import { KeycloakConverter } from "./converters";
+import { UserSyncService } from "./sync/UserSyncService";
+import type { SyncStatus, HealthStatus, QueueStats } from "./sync/sync-types";
 
 /**
  * Registration data for new users
@@ -80,6 +81,7 @@ export class UserFacade {
     private readonly keycloakClient: KeycloakClient,
     private readonly keycloakUserService: KeycloakUserService,
     private readonly localUserRepository: LocalUserRepository,
+    private readonly syncService: UserSyncService,
     private readonly metrics?: IMetricsCollector
   ) {}
 
@@ -89,6 +91,7 @@ export class UserFacade {
   static create(
     keycloakClient: KeycloakClient,
     keycloakUserService: KeycloakUserService,
+    syncService: UserSyncService,
     prisma: PrismaClient,
     metrics?: IMetricsCollector
   ): UserFacade {
@@ -98,6 +101,7 @@ export class UserFacade {
       keycloakClient,
       keycloakUserService,
       localUserRepository,
+      syncService,
       metrics
     );
   }
@@ -149,48 +153,26 @@ export class UserFacade {
       const localUser = await this.localUserRepository.create(localUserData);
       this.logger.info("User created in local DB", { userId: localUser.id });
 
-      // 3. Create user in Keycloak with same ID for consistency
-      // Uses KeycloakConverter internally for type-safe conversion
+      // 3. Queue user creation in Keycloak asynchronously
+      // This provides better performance and automatic retry on failure
       try {
-        const keycloakOptions: CreateUserOptions = {
-          username: data.username,
-          email: data.email,
-          password: data.password,
-          enabled: true,
-          emailVerified: false,
-        };
-
-        if (data.firstName) keycloakOptions.firstName = data.firstName;
-        if (data.lastName) keycloakOptions.lastName = data.lastName;
-        if (data.realmRoles) keycloakOptions.realmRoles = data.realmRoles;
-        if (data.clientRoles) keycloakOptions.clientRoles = data.clientRoles;
-
-        await this.createKeycloakUserWithId(localUser.id, keycloakOptions);
-
-        this.logger.info("User created in Keycloak", { userId: localUser.id });
-
-        this.recordMetrics("register_user", performance.now() - startTime);
-        this.recordCounter("register_user_success");
-
-        return localUser;
-      } catch (keycloakError) {
-        // Rollback: Delete local user if Keycloak creation fails
-        this.logger.error("Keycloak user creation failed, rolling back", {
-          error: keycloakError,
+        await this.syncService.queueUserCreate(localUser.id, localUserData);
+        this.logger.info("User create queued for Keycloak sync", {
           userId: localUser.id,
         });
-
-        await this.localUserRepository.deleteById(localUser.id);
-        this.recordCounter("register_user_rollback");
-
-        throw new Error(
-          `Failed to create user in Keycloak: ${
-            keycloakError instanceof Error
-              ? keycloakError.message
-              : String(keycloakError)
-          }`
-        );
+      } catch (queueError) {
+        this.logger.warn("Failed to queue Keycloak create (will retry later)", {
+          error: queueError,
+          userId: localUser.id,
+        });
+        // Don't throw - sync will retry automatically
+        this.recordCounter("queue_create_warning");
       }
+
+      this.recordMetrics("register_user", performance.now() - startTime);
+      this.recordCounter("register_user_success");
+
+      return localUser;
     } catch (error) {
       this.recordCounter("register_user_failure");
       this.logger.error("User registration failed", { error });
@@ -306,11 +288,11 @@ export class UserFacade {
 
   /**
    * Update user
-   * Updates in BOTH Keycloak and local DB
+   * Updates in local DB, queues sync to Keycloak asynchronously
    *
    * Flow:
    * 1. Update in LOCAL DB (source of truth)
-   * 2. Sync relevant changes to Keycloak (best effort)
+   * 2. Queue sync to Keycloak (non-blocking, automatic retry)
    */
   async updateUser(userId: string, data: UserUpdateInput): Promise<User> {
     const startTime = performance.now();
@@ -321,32 +303,17 @@ export class UserFacade {
       // 1. Update in LOCAL DB (source of truth)
       const user = await this.localUserRepository.updateById(userId, data);
 
-      // 2. Sync relevant changes to Keycloak (best effort)
-      const keycloakUpdates: Partial<UpdateUserOptions> = {};
-
-      if (typeof data.email === "string") keycloakUpdates.email = data.email;
-      if (typeof data.firstName === "string")
-        keycloakUpdates.firstName = data.firstName;
-      if (typeof data.lastName === "string")
-        keycloakUpdates.lastName = data.lastName;
-      if (typeof data.status === "string")
-        keycloakUpdates.enabled = data.status === "ACTIVE";
-
-      if (Object.keys(keycloakUpdates).length > 0) {
-        try {
-          await this.keycloakUserService.updateUser(
-            userId,
-            keycloakUpdates as UpdateUserOptions
-          );
-          this.logger.debug("User synced to Keycloak", { userId });
-        } catch (keycloakError) {
-          this.logger.warn("Failed to sync update to Keycloak (non-critical)", {
-            error: keycloakError,
-            userId,
-          });
-          // Don't throw - local DB is source of truth
-          this.recordCounter("sync_keycloak_warning");
-        }
+      // 2. Queue sync to Keycloak asynchronously
+      try {
+        await this.syncService.queueUserUpdate(userId, data);
+        this.logger.debug("User update queued for Keycloak sync", { userId });
+      } catch (queueError) {
+        this.logger.warn("Failed to queue Keycloak update (will retry later)", {
+          error: queueError,
+          userId,
+        });
+        // Don't throw - sync will retry automatically
+        this.recordCounter("queue_update_warning");
       }
 
       this.recordMetrics("update_user", performance.now() - startTime);
@@ -386,11 +353,11 @@ export class UserFacade {
 
   /**
    * Delete user
-   * Soft delete in local DB, hard delete from Keycloak
+   * Soft delete in local DB, queue hard delete from Keycloak
    *
    * Flow:
    * 1. Soft delete in LOCAL DB (preserves data for audit)
-   * 2. Hard delete from Keycloak (removes authentication)
+   * 2. Queue hard delete from Keycloak (non-blocking, automatic retry)
    */
   async deleteUser(userId: string, deletedBy: string): Promise<void> {
     const startTime = performance.now();
@@ -402,17 +369,17 @@ export class UserFacade {
       await this.localUserRepository.softDelete(userId, deletedBy);
       this.logger.debug("User soft deleted from local DB", { userId });
 
-      // 2. Delete from Keycloak (best effort)
+      // 2. Queue delete from Keycloak asynchronously
       try {
-        await this.keycloakUserService.deleteUser(userId);
-        this.logger.debug("User deleted from Keycloak", { userId });
-      } catch (keycloakError) {
-        this.logger.warn("Failed to delete from Keycloak (non-critical)", {
-          error: keycloakError,
+        await this.syncService.queueUserDelete(userId);
+        this.logger.debug("User delete queued for Keycloak sync", { userId });
+      } catch (queueError) {
+        this.logger.warn("Failed to queue Keycloak delete (will retry later)", {
+          error: queueError,
           userId,
         });
-        // Don't throw - user is deleted from local DB (source of truth)
-        this.recordCounter("delete_keycloak_warning");
+        // Don't throw - sync will retry automatically
+        this.recordCounter("queue_delete_warning");
       }
 
       this.recordMetrics("delete_user", performance.now() - startTime);
@@ -472,6 +439,60 @@ export class UserFacade {
       return await this.localUserRepository.getUserStats();
     } catch (error) {
       this.logger.error("Failed to get user stats", { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get user sync status
+   * Check synchronization status between local DB and Keycloak
+   */
+  async getUserSyncStatus(userId: string): Promise<SyncStatus> {
+    try {
+      return await this.syncService.getUserSyncStatus(userId);
+    } catch (error) {
+      this.logger.error("Failed to get user sync status", { error, userId });
+      throw error;
+    }
+  }
+
+  /**
+   * Get overall sync system health
+   */
+  async getSyncHealthStatus(): Promise<HealthStatus> {
+    try {
+      return await this.syncService.getHealthStatus();
+    } catch (error) {
+      this.logger.error("Failed to get sync health status", { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get sync queue statistics
+   */
+  async getSyncQueueStats(): Promise<QueueStats> {
+    try {
+      return await this.syncService.getQueueStats();
+    } catch (error) {
+      this.logger.error("Failed to get sync queue stats", { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Manually retry failed sync operations
+   * Useful for administrative recovery actions
+   */
+  async retrySyncOperations(limit: number = 10): Promise<number> {
+    try {
+      const retriedCount = await this.syncService.retryFailedOperations(limit);
+      this.logger.info("Manually retried failed sync operations", {
+        count: retriedCount,
+      });
+      return retriedCount;
+    } catch (error) {
+      this.logger.error("Failed to retry sync operations", { error });
       throw error;
     }
   }
@@ -610,62 +631,6 @@ export class UserFacade {
     }
     if (user.isDeleted) {
       throw new Error("User account is deleted");
-    }
-  }
-
-  /**
-   * Create Keycloak user with specific ID
-   * Keycloak allows setting ID during creation to match local DB
-   *
-   * Updated to use KeycloakConverter for type-safe conversions
-   */
-  private async createKeycloakUserWithId(
-    userId: string,
-    userData: CreateUserOptions
-  ): Promise<void> {
-    // Access the low-level API client from UserService
-    const apiClient = (this.keycloakUserService as any).userRepository
-      .apiClient;
-
-    // Convert to database format for use with KeycloakConverter
-    const userInput: UserCreateInput = {
-      username: userData.username,
-      email: userData.email ?? "",
-      password: userData.password ?? "",
-      firstName: userData.firstName ?? null,
-      lastName: userData.lastName ?? null,
-      status: userData.enabled === false ? "INACTIVE" : "ACTIVE",
-      emailVerified: userData.emailVerified ?? false,
-      phoneVerified: false,
-      isDeleted: false,
-    };
-
-    // Use KeycloakConverter to create proper Keycloak format
-    const keycloakUser = KeycloakConverter.toKeycloakCreate(userInput);
-
-    // Override with specific ID to match local DB
-    keycloakUser.id = userId;
-
-    await apiClient.createUser(keycloakUser);
-
-    // Assign roles if provided
-    if (userData.realmRoles?.length) {
-      await this.keycloakUserService.assignRealmRoles(
-        userId,
-        userData.realmRoles
-      );
-    }
-
-    if (userData.clientRoles) {
-      for (const [clientId, roles] of Object.entries(userData.clientRoles)) {
-        if (roles.length > 0) {
-          await this.keycloakUserService.assignClientRoles(
-            userId,
-            clientId,
-            roles
-          );
-        }
-      }
     }
   }
 

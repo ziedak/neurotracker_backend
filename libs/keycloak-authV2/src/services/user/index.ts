@@ -22,7 +22,7 @@ export { RoleManager } from "./RoleManager";
 export {
   keycloakUserToUserInfo,
   userInfoToKeycloakUser,
-} from "./user-converters";
+} from "./converters/user-converters";
 
 /**
  * @deprecated Use `keycloakUserToUserInfo` and `userInfoToKeycloakUser` utility functions instead.
@@ -43,6 +43,24 @@ export {
 // Main Services
 export { KeycloakUserService } from "./KeycloakUserService";
 export { UserFacade } from "./UserFacade";
+
+// Sync Services (Async Keycloak Synchronization)
+export { UserSyncService } from "./sync/UserSyncService";
+export { SyncQueue } from "./sync/SyncQueue";
+export { SyncMonitor } from "./sync/SyncMonitor";
+export type {
+  SyncConfig,
+  SyncOperation,
+  SyncResult,
+  SyncStatus,
+  HealthStatus,
+  QueueStats,
+  SyncOperationType,
+  SyncOperationStatus,
+  UserSyncStatus,
+  HealthLevel,
+  HealthCheck,
+} from "./sync/sync-types";
 
 // Backward compatibility exports (DEPRECATED)
 /** @deprecated Use KeycloakUserClient instead */

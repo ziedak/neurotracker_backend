@@ -7,7 +7,7 @@
 import {
   keycloakUserToUserInfo,
   userInfoToKeycloakUser,
-} from "../../../src/services/user/user-converters";
+} from "../../../src/services/user/converters/user-converters";
 import type { KeycloakUser } from "../../../src/services/user/interfaces";
 import type { UserInfo } from "../../../src/types";
 
