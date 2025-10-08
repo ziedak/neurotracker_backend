@@ -129,6 +129,7 @@ export class SessionSecurity {
   private readonly userProfiles = new Map<string, UserSecurityProfile>();
   private readonly deviceRegistry = new Map<string, DeviceInfo>();
   private readonly recentViolations = new Map<string, SecurityViolation[]>();
+  private cleanupTimer: NodeJS.Timeout | undefined;
 
   constructor(
     private readonly cacheService?: CacheService,
@@ -935,7 +936,7 @@ export class SessionSecurity {
   }
 
   private startPeriodicCleanup(): void {
-    setInterval(() => {
+    this.cleanupTimer = setInterval(() => {
       this.cleanupExpiredData();
     }, 60 * 60 * 1000); // Every hour
   }
@@ -999,6 +1000,12 @@ export class SessionSecurity {
    * Cleanup resources
    */
   async cleanup(): Promise<void> {
+    // Clear cleanup timer
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = undefined;
+    }
+
     this.userProfiles.clear();
     this.deviceRegistry.clear();
     this.recentViolations.clear();

@@ -53,18 +53,31 @@ export class HttpClient {
   }
 
   private setupInterceptors(): void {
-    // Request interceptor - only add if enabled
-    if (this.config.enableRequestId) {
-      this.client.interceptors.request.use(
-        (config) => {
-          // Add request ID for tracking
+    // Request interceptor
+    this.client.interceptors.request.use(
+      (config) => {
+        // Add request ID for tracking if enabled
+        if (this.config.enableRequestId) {
           config.headers = config.headers || {};
           config.headers["X-Request-ID"] = crypto.randomUUID();
-          return config;
-        },
-        (error) => Promise.reject(error)
-      );
-    }
+        }
+
+        // Handle form-urlencoded data properly
+        // If data is already a string and Content-Type is form-urlencoded,
+        // prevent Axios from applying JSON transformers
+        const contentType = config.headers?.["Content-Type"];
+        if (
+          typeof config.data === "string" &&
+          contentType === "application/x-www-form-urlencoded"
+        ) {
+          // Use identity transformer to preserve the string as-is
+          config.transformRequest = [(data) => data];
+        }
+
+        return config;
+      },
+      (error) => Promise.reject(error)
+    );
 
     // Response interceptor
     this.client.interceptors.response.use(

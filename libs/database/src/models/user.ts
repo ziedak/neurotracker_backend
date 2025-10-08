@@ -68,6 +68,7 @@ export interface RolePermission {
 
 export interface User {
   id: string;
+  keycloakId?: string | null;
   email: string;
   password: string;
   username: string;
@@ -214,6 +215,7 @@ export type UserEventUpdateInput = Prisma.UserEventUpdateInput;
 // Zod validation schemas
 export const UserCreateInputSchema = z.object({
   id: z.string().uuid().optional(),
+  keycloakId: z.string().max(255).optional().nullable(),
   email: z.string().email(),
   password: z.string().min(8),
   username: z.string().min(3).max(50),
@@ -250,6 +252,7 @@ export const UserCreateInputSchema = z.object({
 });
 
 export const UserUpdateInputSchema = z.object({
+  keycloakId: z.string().max(255).nullable().optional(),
   email: z.string().email().optional(),
   password: z.string().min(8).optional(),
   username: z.string().min(3).max(50).optional(),

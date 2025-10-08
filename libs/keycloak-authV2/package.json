@@ -6,6 +6,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "jest",
+    "test:unit": "jest --config jest.config.js",
+    "test:integration": "jest --config jest.integration.config.js",
+    "test:integration:watch": "jest --config jest.integration.config.js --watch",
+    "test:integration:coverage": "jest --config jest.integration.config.js --coverage",
+    "test:all": "pnpm test:unit && pnpm test:integration",
     "lint": "eslint src/**/*.ts"
   },
   "dependencies": {

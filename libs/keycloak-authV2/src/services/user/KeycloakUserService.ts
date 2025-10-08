@@ -49,22 +49,44 @@ export class KeycloakUserService implements IUserService {
    */
   static create(
     keycloakClient: KeycloakClient,
-    _config: AuthV2Config,
+    config: AuthV2Config & {
+      jwksEndpoint?: string;
+      issuer?: string;
+      enableJwtValidation?: boolean;
+    },
     cacheService?: CacheService,
     metrics?: IMetricsCollector
   ): KeycloakUserService {
     // Import components (static imports for better tree-shaking)
 
     // Build dependency chain with new ClientCredentialsTokenProvider
+    const tokenProviderConfig: Partial<{
+      jwksEndpoint: string;
+      issuer: string;
+      enableJwtValidation: boolean;
+    }> = {
+      enableJwtValidation: config.enableJwtValidation ?? false, // Default to false for backward compatibility
+    };
+
+    // Only add JWT config if provided
+    if (config.jwksEndpoint) {
+      tokenProviderConfig.jwksEndpoint = config.jwksEndpoint;
+    }
+    if (config.issuer) {
+      tokenProviderConfig.issuer = config.issuer;
+    }
+
     const tokenProvider = new ClientCredentialsTokenProvider(
       keycloakClient,
-      undefined,
+      tokenProviderConfig,
       metrics
     );
     const apiClient = new KeycloakAdminClient(
       keycloakClient,
       tokenProvider,
-      {},
+      {
+        enableJwtValidation: config.enableJwtValidation ?? false,
+      },
       metrics
     );
     const userRepository = new KeycloakUserClient(

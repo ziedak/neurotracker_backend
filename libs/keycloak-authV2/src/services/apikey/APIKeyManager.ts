@@ -32,7 +32,7 @@ import { APIKeyMonitoring, type SystemHealth } from "./APIKeyMonitoring";
 // Import shared types
 import type { APIKeyGenerationOptions, APIKeyValidationResult } from "./types";
 import type { ApiKey } from "@libs/database";
-import { ApiKeyRepository } from "@libs/database/src/postgress/repositories/apiKey";
+import { ApiKeyRepository } from "@libs/database";
 
 /**
  * Configuration for the entire API key management system

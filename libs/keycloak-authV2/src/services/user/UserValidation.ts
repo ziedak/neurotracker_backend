@@ -69,11 +69,27 @@ export async function validateUserUniqueness(
 
     return { isValid: true };
   } catch (error) {
+    // Improved error serialization
+    let errorMessage = "Validation failed";
+
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    } else if (typeof error === "object" && error !== null) {
+      // Handle HTTP error responses
+      if ("message" in error && typeof error.message === "string") {
+        errorMessage = error.message;
+      } else if ("data" in error) {
+        errorMessage = JSON.stringify(error.data);
+      } else {
+        errorMessage = JSON.stringify(error);
+      }
+    } else {
+      errorMessage = String(error);
+    }
+
     return {
       isValid: false,
-      error: `Validation failed: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      error: `Validation failed: ${errorMessage}`,
     };
   }
 }

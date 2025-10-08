@@ -4,7 +4,9 @@
  * Purpose: Low-level HTTP operations with Keycloak Admin REST API
  *
  * Key Features:
- * - Comprehensive JWT validation before API calls
+ * - Comprehensive   async searchUsers(options: UserSearchOptions = {}): Promise<KeycloakUser[]> {
+    this.ensureBaseUrl(); // Ensure baseUrl is initialized
+    const startTime = performance.now();T validation before API calls
  * - Automatic admin token management via ClientCredentialsTokenProvider
  * - Retry logic and error handling
  * - Metrics and monitoring integration
@@ -74,7 +76,7 @@ export interface KeycloakAdminClientConfig {
 export class KeycloakAdminClient implements IKeycloakAdminClient {
   private readonly logger: ILogger = createLogger("KeycloakAdminClient");
   private readonly httpClient: HttpClient;
-  private readonly baseUrl: string;
+  private baseUrl: string; // Changed from readonly to allow lazy initialization
   private readonly config: Required<KeycloakAdminClientConfig>;
   private jwtValidator?: JWTValidator;
 
@@ -96,12 +98,16 @@ export class KeycloakAdminClient implements IKeycloakAdminClient {
       retries: this.config.retries,
     });
 
-    this.baseUrl = this.buildAdminApiUrl();
+    // Defer baseUrl building - will be set on first use or after discovery doc is available
+    this.baseUrl = "";
 
-    // Initialize JWT validator if enabled
+    // Initialize JWT validator if enabled (after discovery document is available)
     if (this.config.enableJwtValidation) {
       const discoveryDoc = keycloakClient.getDiscoveryDocument();
       if (discoveryDoc?.jwks_uri && discoveryDoc?.issuer) {
+        // Build baseUrl now that discovery doc is available
+        this.baseUrl = this.buildAdminApiUrl();
+
         this.jwtValidator = new JWTValidator(
           discoveryDoc.jwks_uri,
           discoveryDoc.issuer,
@@ -110,7 +116,17 @@ export class KeycloakAdminClient implements IKeycloakAdminClient {
         );
       } else {
         this.logger.warn(
-          "JWT validation enabled but discovery document incomplete"
+          "JWT validation enabled but discovery document incomplete - will retry on first use"
+        );
+      }
+    } else {
+      // Try to build baseUrl even without validation
+      try {
+        this.baseUrl = this.buildAdminApiUrl();
+      } catch (error) {
+        this.logger.warn(
+          "Discovery document not yet available - baseUrl will be built on first API call",
+          { error }
         );
       }
     }
@@ -129,7 +145,21 @@ export class KeycloakAdminClient implements IKeycloakAdminClient {
    * - Returns validated token ready for use
    */
   private async getValidatedToken(): Promise<string> {
+    this.logger.debug("Getting validated token from provider");
+
     const token = await this.tokenProvider.getValidToken();
+
+    this.logger.debug("Token received from provider", {
+      hasToken: !!token,
+      tokenLength: token?.length,
+      tokenType: typeof token,
+      tokenPrefix: token ? token.substring(0, 50) + "..." : "NO_TOKEN",
+    });
+
+    if (!token) {
+      this.logger.error("Token provider returned undefined or empty token");
+      throw new Error("Token provider returned undefined or empty token");
+    }
 
     // Validate token if JWT validation is enabled
     if (this.config.enableJwtValidation && this.jwtValidator) {
@@ -171,21 +201,38 @@ export class KeycloakAdminClient implements IKeycloakAdminClient {
    * Search for users
    */
   async searchUsers(options: UserSearchOptions): Promise<KeycloakUser[]> {
+    this.ensureBaseUrl();
     const startTime = performance.now();
 
     try {
       const token = await this.getValidatedToken();
       const params = this.buildSearchParams(options);
+      const url = `${this.baseUrl}/users?${params.toString()}`;
 
-      const response = await this.httpClient.get<KeycloakUser[]>(
-        `${this.baseUrl}/users?${params.toString()}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/json",
-          },
-        }
-      );
+      this.logger.info("🔍 Executing Admin API search_users request", {
+        url,
+        baseUrl: this.baseUrl,
+        params: params.toString(),
+        options,
+        hasToken: !!token,
+        tokenLength: token?.length,
+        tokenPrefix: token ? token.substring(0, 50) + "..." : "NO_TOKEN",
+        authHeader: token ? `Bearer ${token.substring(0, 20)}...` : "NO_AUTH",
+      });
+
+      const response = await this.httpClient.get<KeycloakUser[]>(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      });
+
+      this.logger.info("✅ Admin API search_users response received", {
+        status: response.status,
+        statusText: response.statusText,
+        hasData: !!response.data,
+        dataLength: Array.isArray(response.data) ? response.data.length : 0,
+      });
 
       this.validateResponse(response, "User search failed");
 
@@ -196,6 +243,20 @@ export class KeycloakAdminClient implements IKeycloakAdminClient {
 
       return users;
     } catch (error) {
+      this.logger.error("search_users failed with detailed error", {
+        error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorType: error?.constructor?.name,
+        errorData:
+          typeof error === "object" && error !== null && "data" in error
+            ? error.data
+            : undefined,
+        errorStatus:
+          typeof error === "object" && error !== null && "status" in error
+            ? error.status
+            : undefined,
+        options,
+      });
       this.recordError("search_users", error);
       throw error;
     }
@@ -205,6 +266,7 @@ export class KeycloakAdminClient implements IKeycloakAdminClient {
    * Get user by ID
    */
   async getUserById(userId: string): Promise<KeycloakUser | null> {
+    this.ensureBaseUrl();
     const startTime = performance.now();
 
     try {
@@ -241,10 +303,20 @@ export class KeycloakAdminClient implements IKeycloakAdminClient {
    * Create user
    */
   async createUser(user: KeycloakUser): Promise<string> {
+    this.ensureBaseUrl(); // Ensure baseUrl is initialized
     const startTime = performance.now();
 
     try {
       const token = await this.getValidatedToken();
+
+      this.logger.info("Creating user in Keycloak", {
+        username: user.username,
+        email: user.email,
+        enabled: user.enabled,
+        hasCredentials: !!user.credentials,
+        credentialsCount: user.credentials?.length,
+        credentialTypes: user.credentials?.map((c) => c.type),
+      });
 
       const response = await this.httpClient.post<KeycloakUser>(
         `${this.baseUrl}/users`,
@@ -283,6 +355,7 @@ export class KeycloakAdminClient implements IKeycloakAdminClient {
    * Update user
    */
   async updateUser(userId: string, updates: UpdateUserOptions): Promise<void> {
+    this.ensureBaseUrl();
     const startTime = performance.now();
 
     try {
@@ -313,6 +386,7 @@ export class KeycloakAdminClient implements IKeycloakAdminClient {
    * Delete user
    */
   async deleteUser(userId: string): Promise<void> {
+    this.ensureBaseUrl();
     const startTime = performance.now();
 
     try {
@@ -382,6 +456,7 @@ export class KeycloakAdminClient implements IKeycloakAdminClient {
    * Get user's realm roles
    */
   async getUserRealmRoles(userId: string): Promise<KeycloakRole[]> {
+    this.ensureBaseUrl();
     const startTime = performance.now();
 
     try {
@@ -621,6 +696,12 @@ export class KeycloakAdminClient implements IKeycloakAdminClient {
   }
 
   // Private utility methods
+
+  private ensureBaseUrl(): void {
+    if (!this.baseUrl) {
+      this.baseUrl = this.buildAdminApiUrl();
+    }
+  }
 
   private buildAdminApiUrl(): string {
     const discoveryDoc = this.keycloakClient.getDiscoveryDocument();

@@ -527,6 +527,9 @@ export interface KeycloakConnectionOptions {
   readonly realm: string;
   readonly clientId: string;
   readonly clientSecret?: string;
+  readonly jwksEndpoint?: string;
+  readonly issuer?: string;
+  readonly enableJwtValidation?: boolean;
 }
 
 /**

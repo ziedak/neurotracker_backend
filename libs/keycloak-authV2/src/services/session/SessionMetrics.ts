@@ -137,6 +137,7 @@ export class SessionMetrics {
     string,
     SessionOperationMetrics
   >();
+  private readonly metricTimers: NodeJS.Timeout[] = [];
 
   private sessionStats: MutableSessionStats = {
     activeSessions: 0,
@@ -742,19 +743,25 @@ export class SessionMetrics {
 
   private startPeriodicTasks(): void {
     // Aggregate metrics every minute
-    setInterval(() => {
-      this.aggregateMetrics();
-    }, 60 * 1000);
+    this.metricTimers.push(
+      setInterval(() => {
+        this.aggregateMetrics();
+      }, 60 * 1000)
+    );
 
     // Cleanup old metrics every hour
-    setInterval(() => {
-      this.cleanupOldMetrics();
-    }, 60 * 60 * 1000);
+    this.metricTimers.push(
+      setInterval(() => {
+        this.cleanupOldMetrics();
+      }, 60 * 60 * 1000)
+    );
 
     // Reset daily counters at midnight
-    setInterval(() => {
-      this.resetDailyCounters();
-    }, 24 * 60 * 60 * 1000);
+    this.metricTimers.push(
+      setInterval(() => {
+        this.resetDailyCounters();
+      }, 24 * 60 * 60 * 1000)
+    );
   }
 
   private aggregateMetrics(): void {
@@ -855,6 +862,10 @@ export class SessionMetrics {
    * Cleanup resources
    */
   async cleanup(): Promise<void> {
+    // Clear all timers
+    this.metricTimers.forEach((timer) => clearInterval(timer));
+    this.metricTimers.length = 0;
+
     this.metricBuffer.clear();
     this.aggregatedMetrics.clear();
     this.operationMetrics.clear();

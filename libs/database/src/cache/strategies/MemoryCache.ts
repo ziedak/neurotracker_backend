@@ -207,20 +207,38 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
       let data = entryData;
       if (entry.compressed) {
         try {
+          this.logger.debug("🔓 Attempting to decompress cached data", {
+            key,
+            dataType: typeof entry.data,
+            isArray: Array.isArray(entry.data),
+            isBuffer: Buffer.isBuffer(entry.data),
+            hasKeys:
+              entry.data && typeof entry.data === "object"
+                ? Object.keys(entry.data).slice(0, 10)
+                : [],
+          });
+
           const { data: decompressedData } = await decompress(
             entry.data,
             DEFAULT_DECOMPRESSION_CONFIG
           );
           data = decompressedData as T;
+
+          this.logger.debug("✅ Successfully decompressed data", {
+            key,
+            decompressedType: typeof data,
+            hasAccessToken:
+              data && typeof data === "object" && "access_token" in data,
+          });
         } catch (error) {
-          this.logger.warn(
-            "Failed to decompress cache entry, returning raw data",
-            {
-              key,
-              error: error instanceof Error ? error.message : String(error),
-            }
-          );
-          // Return raw data as fallback
+          this.logger.error("Failed to decompress cache entry", {
+            key,
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            dataType: typeof entry.data,
+          });
+          // Return null on decompression failure to force re-fetch
+          return null;
         }
       }
 
@@ -253,6 +271,8 @@ export class MemoryCache extends BaseCache<MemoryCacheConfig> {
           DEFAULT_COMPRESSION_CONFIG
         );
         if (compressionResult.compressed) {
+          // Store the entire compressed data object, not just the data field
+          // This is required for decompression to work properly
           finalData = compressionResult.data as T;
           compressed = true;
           compressionAlgorithm = compressionResult.algorithm;

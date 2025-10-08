@@ -452,7 +452,10 @@ export class KeycloakClient implements IKeycloakClient {
 
       return HttpStatus.isSuccess(response.status);
     } catch (error) {
-      this.logger.debug("Client credentials validation failed", { clientId, error });
+      this.logger.debug("Client credentials validation failed", {
+        clientId,
+        error,
+      });
       return false;
     }
   }
@@ -463,13 +466,15 @@ export class KeycloakClient implements IKeycloakClient {
    * @param sessionId - Optional session ID (used as refresh token for revocation)
    * @returns Promise that resolves when logout notification is complete
    */
-  //TODO review this function 
+  //TODO review this function
   async logout(userId: string, sessionId?: string): Promise<void> {
     if (sessionId) {
       await this.revokingRefreshToken(sessionId);
       this.logger.info("User logged out via token revocation", { userId });
     } else {
-      this.logger.warn("Logout called without sessionId, cannot revoke token", { userId });
+      this.logger.warn("Logout called without sessionId, cannot revoke token", {
+        userId,
+      });
       // In SSO scenarios, additional logout notifications could be implemented here if needed
     }
   }
@@ -549,10 +554,27 @@ export class KeycloakClient implements IKeycloakClient {
 
     try {
       if (!this.options.realm.clientSecret) {
+        this.logger.error("❌ Client secret missing", {
+          hasSecret: !!this.options.realm.clientSecret,
+        });
         throw new Error("Client secret required for client credentials flow");
       }
 
+      this.logger.info("🔍 Checking discovery document", {
+        hasDiscoveryDocument: !!this.discoveryDocument,
+        hasTokenEndpoint: !!this.discoveryDocument?.token_endpoint,
+        initializationState: this.initializationState,
+        discoveryDocumentKeys: this.discoveryDocument
+          ? Object.keys(this.discoveryDocument)
+          : [],
+      });
+
       if (!this.discoveryDocument?.token_endpoint) {
+        this.logger.error("❌ Token endpoint not available", {
+          hasDiscoveryDocument: !!this.discoveryDocument,
+          hasTokenEndpoint: !!this.discoveryDocument?.token_endpoint,
+          initializationState: this.initializationState,
+        });
         throw new Error("Token endpoint not available");
       }
 
@@ -565,9 +587,21 @@ export class KeycloakClient implements IKeycloakClient {
         scope: requestScopes.join(" "),
       });
 
+      const bodyString = params.toString();
+
+      this.logger.info("🔐 Attempting client credentials authentication", {
+        endpoint: this.discoveryDocument.token_endpoint,
+        clientId: this.options.realm.clientId,
+        scopes: requestScopes,
+        hasClientSecret: !!this.options.realm.clientSecret,
+        bodyType: typeof bodyString,
+        bodyLength: bodyString.length,
+        bodyPreview: bodyString.substring(0, 100),
+      });
+
       const tokenResponse = await this.httpClient.post<KeycloakTokenResponse>(
         this.discoveryDocument.token_endpoint,
-        params.toString(),
+        bodyString,
         {
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -575,6 +609,12 @@ export class KeycloakClient implements IKeycloakClient {
           },
         }
       );
+
+      this.logger.debug("Token response received", {
+        status: tokenResponse.status,
+        statusText: tokenResponse.statusText,
+        hasData: !!tokenResponse.data,
+      });
 
       if (!HttpStatus.isSuccess(tokenResponse.status)) {
         throw new Error(
@@ -594,6 +634,22 @@ export class KeycloakClient implements IKeycloakClient {
 
       return tokenResponse.data;
     } catch (error) {
+      this.logger.error(
+        "Client credentials authentication failed with detailed error",
+        {
+          error,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorStack: error instanceof Error ? error.stack : undefined,
+          errorData:
+            typeof error === "object" && error !== null && "data" in error
+              ? error.data
+              : undefined,
+          errorStatus:
+            typeof error === "object" && error !== null && "status" in error
+              ? error.status
+              : undefined,
+        }
+      );
       this.metrics?.recordCounter("keycloak.auth.client_credentials_error", 1);
       throw new Error(this.sanitizeError(error, "Authentication failed"));
     }
@@ -1207,7 +1263,23 @@ export class KeycloakClient implements IKeycloakClient {
       return result;
     } catch (error) {
       this.metrics?.recordCounter("keycloak.auth.password_grant_error", 1);
-      this.logger.error("Password authentication failed", { error, username });
+      this.logger.error("Password authentication failed", {
+        error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorData:
+          typeof error === "object" && error !== null && "data" in error
+            ? error.data
+            : undefined,
+        errorStatus:
+          typeof error === "object" && error !== null && "status" in error
+            ? error.status
+            : undefined,
+        errorResponse:
+          typeof error === "object" && error !== null && "response" in error
+            ? error.response
+            : undefined,
+        username,
+      });
 
       return {
         success: false,
@@ -1502,11 +1574,11 @@ export class KeycloakClient implements IKeycloakClient {
 
     return this.httpClient.post<KeycloakTokenResponse>(
       this.discoveryDocument.token_endpoint,
+      params.toString(),
       {
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
         },
-        data: params.toString(),
       }
     );
   }
@@ -1532,7 +1604,7 @@ export class KeycloakClient implements IKeycloakClient {
   }
 
   private async discoverEndpoints(): Promise<void> {
-    const discoveryUrl = `${this.options.realm.serverUrl}/realms/${this.options.realm.realm}/.well-known/openid_configuration`;
+    const discoveryUrl = `${this.options.realm.serverUrl}/realms/${this.options.realm.realm}/.well-known/openid-configuration`;
 
     // Check cache first
     if (this.cacheService) {

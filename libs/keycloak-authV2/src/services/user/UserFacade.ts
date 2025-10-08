@@ -164,9 +164,9 @@ export class UserFacade {
       const localUser = await this.localUserRepository.create(localUserData);
       this.logger.info("User created in local DB", { userId: localUser.id });
 
-      // 3. Queue user creation in Keycloak asynchronously
-      // This provides better performance and automatic retry on failure
+      // 3. Create user in Keycloak (synchronously if no sync service, async otherwise)
       if (this.syncService) {
+        // Async queue for production (better performance, automatic retry)
         try {
           await this.syncService.queueUserCreate(localUser.id, localUserData);
           this.logger.info("User create queued for Keycloak sync", {
@@ -184,12 +184,62 @@ export class UserFacade {
           this.recordCounter("queue_create_warning");
         }
       } else {
-        this.logger.debug(
-          "Sync service not available, skipping Keycloak queue",
+        // Synchronous creation for testing/simple deployments
+        this.logger.info(
+          "Sync service not available, creating user synchronously in Keycloak",
           {
             userId: localUser.id,
           }
         );
+        try {
+          const createOptions: {
+            username: string;
+            email: string;
+            password: string;
+            enabled: boolean;
+            emailVerified: boolean;
+            firstName?: string;
+            lastName?: string;
+          } = {
+            username: data.username,
+            email: data.email,
+            password: data.password,
+            enabled: true,
+            emailVerified: false,
+          };
+
+          if (data.firstName) {
+            createOptions.firstName = data.firstName;
+          }
+          if (data.lastName) {
+            createOptions.lastName = data.lastName;
+          }
+
+          const keycloakUserId = await this.keycloakUserService.createUser(
+            createOptions
+          );
+          this.logger.info("User created in Keycloak", {
+            userId: localUser.id,
+            keycloakUserId,
+          });
+
+          // Update local user with Keycloak ID
+          await this.localUserRepository.updateById(localUser.id, {
+            keycloakId: keycloakUserId,
+          });
+          localUser.keycloakId = keycloakUserId; // Update in-memory object
+          this.logger.info("User updated with Keycloak ID", {
+            userId: localUser.id,
+            keycloakUserId,
+          });
+        } catch (keycloakError) {
+          this.logger.error("Failed to create user in Keycloak", {
+            error: keycloakError,
+            userId: localUser.id,
+          });
+          // Don't throw - user exists in local DB, Keycloak creation can be retried
+          this.recordCounter("keycloak_create_error");
+        }
       }
 
       this.recordMetrics("register_user", performance.now() - startTime);

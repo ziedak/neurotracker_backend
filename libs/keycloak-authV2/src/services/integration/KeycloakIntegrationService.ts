@@ -205,11 +205,15 @@ export class KeycloakIntegrationService implements IIntegrationService {
       this.keycloakClient,
       {
         ...baseConfig,
+        // Pass JWT configuration from keycloakOptions
+        jwksEndpoint: this.keycloakOptions.jwksEndpoint,
+        issuer: this.keycloakOptions.issuer,
+        enableJwtValidation: this.keycloakOptions.enableJwtValidation,
         session: {
           ...baseConfig.session,
           enforceUserAgentConsistency: false,
         },
-      },
+      } as any, // Type assertion needed as AuthV2Config doesn't include these fields yet
       undefined,
       metrics
     );
@@ -281,6 +285,11 @@ export class KeycloakIntegrationService implements IIntegrationService {
 
   // IResourceManager implementation
   async initialize(): Promise<void> {
+    // Initialize KeycloakClient first to fetch discovery document
+    await this.keycloakClient.initialize();
+    this.logger.info("KeycloakClient initialized successfully");
+
+    // Then initialize resource manager
     return this.resourceManager.initialize();
   }
 
@@ -1600,18 +1609,66 @@ export class KeycloakIntegrationService implements IIntegrationService {
     error?: string;
   }> {
     try {
-      // TODO: Implement when Keycloak Admin API is integrated
-      // Build query params using bracket notation for index signatures
-      // const queryParams: Record<string, any> = {};
-      // if (filters.username) queryParams['username'] = filters.username;
-      // ... etc
-      // const users = await this.keycloakClient.searchUsers(queryParams);
+      // Build search options, only including defined values
+      const searchOptions: {
+        username?: string;
+        email?: string;
+        firstName?: string;
+        lastName?: string;
+        max?: number;
+        first?: number;
+      } = {};
 
-      this.logger.warn("searchUsersAdvanced not yet implemented", { filters });
+      if (filters.username !== undefined) {
+        searchOptions.username = filters.username;
+      }
+      if (filters.email !== undefined) {
+        searchOptions.email = filters.email;
+      }
+      if (filters.firstName !== undefined) {
+        searchOptions.firstName = filters.firstName;
+      }
+      if (filters.lastName !== undefined) {
+        searchOptions.lastName = filters.lastName;
+      }
+      if (filters.limit !== undefined) {
+        searchOptions.max = filters.limit;
+      } else {
+        searchOptions.max = 10;
+      }
+      if (filters.offset !== undefined) {
+        searchOptions.first = filters.offset;
+      } else {
+        searchOptions.first = 0;
+      }
+
+      // Use KeycloakUserService searchUsers method
+      const users = await this.userService.searchUsers(searchOptions);
+
+      // Apply additional filters that Keycloak doesn't support directly
+      let filteredUsers = users;
+
+      if (filters.enabled !== undefined) {
+        filteredUsers = filteredUsers.filter(
+          (u) => u.enabled === filters.enabled
+        );
+      }
+
+      if (filters.emailVerified !== undefined) {
+        filteredUsers = filteredUsers.filter(
+          (u) => u.emailVerified === filters.emailVerified
+        );
+      }
+
+      this.logger.info("Advanced user search completed", {
+        resultCount: filteredUsers.length,
+        filters,
+      });
+
       return {
-        success: false,
-        error:
-          "Method not yet implemented - requires Keycloak Admin API integration",
+        success: true,
+        users: filteredUsers,
+        totalCount: filteredUsers.length,
       };
     } catch (error) {
       this.logger.error("Advanced user search failed", { error, filters });

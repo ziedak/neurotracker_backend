@@ -67,17 +67,17 @@ interface ClientCredentialsConfig {
 }
 
 /**
- * Default admin scopes for Keycloak Admin API
+ * Default scopes for client credentials flow
+ * NOTE: These are OAuth scopes, not Keycloak admin role names.
+ * Admin permissions should be assigned to the service account via Keycloak admin console.
+ *
+ * For accessing Keycloak Admin API, the service account needs realm-management client roles assigned:
+ * - manage-users, view-users, query-users (for user management)
+ * - manage-realm, view-realm (for realm management)
+ * - manage-clients (for client management)
+ * - query-groups (for group management)
  */
-export const DEFAULT_ADMIN_SCOPES = [
-  "manage-users",
-  "manage-realm",
-  "view-users",
-  "view-realm",
-  "manage-clients",
-  "query-users",
-  "query-groups",
-];
+export const DEFAULT_ADMIN_SCOPES = ["openid", "profile", "email"];
 
 /**
  * Interface for admin token management (replaces IAdminTokenManager)
@@ -178,18 +178,39 @@ export class ClientCredentialsTokenProvider
   async getValidToken(): Promise<string> {
     const startTime = performance.now();
 
+    this.logger.info("🎯 getValidToken called", {
+      cachingEnabled: this.config.enableCaching,
+    });
+
     try {
       // Check secure cache (handles multi-layer: memory + Redis)
       if (this.config.enableCaching) {
+        this.logger.info("🔍 Checking cache for token");
         const cachedToken = await this.getCachedToken();
         if (cachedToken) {
-          this.metrics?.recordCounter("client_credentials.cache_hit", 1);
-          return cachedToken.access_token;
+          this.logger.info("✅ Found cached token", {
+            hasAccessToken: !!cachedToken.access_token,
+            accessTokenLength: cachedToken.access_token?.length,
+            accessTokenType: typeof cachedToken.access_token,
+            expiresIn: cachedToken.expires_in,
+            tokenKeys: Object.keys(cachedToken),
+          });
+          if (!cachedToken.access_token) {
+            this.logger.error(
+              "❌ CRITICAL: Cached token has no access_token field!"
+            );
+          } else {
+            this.metrics?.recordCounter("client_credentials.cache_hit", 1);
+            return cachedToken.access_token;
+          }
         }
+        this.logger.info("❌ No cached token found");
       }
 
       // Acquire new token (with thread-safety)
+      this.logger.info("🔐 Acquiring new token");
       const token = await this.acquireToken();
+      this.logger.info("✅ Token acquired successfully");
 
       this.metrics?.recordCounter("client_credentials.token_acquired", 1);
       this.metrics?.recordTimer(
@@ -200,8 +221,9 @@ export class ClientCredentialsTokenProvider
       return token.access_token;
     } catch (error) {
       this.metrics?.recordCounter("client_credentials.acquisition_error", 1);
-      this.logger.error("Failed to get valid admin token", {
+      this.logger.error("❌ Failed to get valid admin token", {
         error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
         scopes: this.config.requiredScopes,
       });
       throw new Error(
@@ -269,16 +291,22 @@ export class ClientCredentialsTokenProvider
    */
   private async getCachedToken(): Promise<KeycloakTokenResponse | null> {
     try {
+      this.logger.info("📦 getCachedToken: Starting cache lookup");
       const cached = await this.cacheManager.get<KeycloakTokenResponse>(
         "admin_token",
         this.cacheKey
       );
 
+      this.logger.info("📦 getCachedToken: Cache lookup result", {
+        hit: cached.hit,
+        hasData: !!cached.data,
+      });
+
       if (cached.hit && cached.data) {
         // Verify cached token is not expired
         const expiryTime = this.calculateExpiry(cached.data);
         if (new Date() >= expiryTime) {
-          this.logger.debug("Cached token expired", {
+          this.logger.info("⏰ Cached token expired", {
             expiresAt: expiryTime.toISOString(),
           });
           return null;
@@ -286,6 +314,7 @@ export class ClientCredentialsTokenProvider
 
         // Comprehensive JWT validation if enabled
         if (this.config.enableJwtValidation && this.jwtValidator) {
+          this.logger.info("🔐 Validating cached token JWT");
           const validationResult = await this.validateTokenJWT(
             cached.data.access_token
           );
@@ -303,12 +332,17 @@ export class ClientCredentialsTokenProvider
           );
         }
 
+        this.logger.info("✅ getCachedToken: Returning valid cached token");
         return cached.data;
       }
 
+      this.logger.info("❌ getCachedToken: No valid cached token found");
       return null;
     } catch (error) {
-      this.logger.warn("Failed to get cached token", { error });
+      this.logger.error("❌ getCachedToken: Error during cache lookup", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       return null;
     }
   }
@@ -415,30 +449,49 @@ export class ClientCredentialsTokenProvider
   private async performTokenAcquisition(): Promise<KeycloakTokenResponse> {
     let lastError: Error | undefined;
 
+    this.logger.info("🚀 STARTING performTokenAcquisition", {
+      maxRetries: this.config.maxRetries,
+      scopes: this.config.requiredScopes,
+    });
+
     for (let attempt = 1; attempt <= this.config.maxRetries; attempt++) {
       try {
-        this.logger.debug("Acquiring client credentials token", {
+        this.logger.info("🔄 Attempting token acquisition", {
           attempt,
           maxRetries: this.config.maxRetries,
           scopes: this.config.requiredScopes,
         });
 
+        this.logger.info(
+          "📞 Calling keycloakClient.authenticateClientCredentials"
+        );
         const token = await this.keycloakClient.authenticateClientCredentials(
           this.config.requiredScopes
+        );
+        this.logger.info(
+          "✅ keycloakClient.authenticateClientCredentials returned"
         );
 
         this.logger.info("Client credentials token acquired", {
           expiresIn: token.expires_in,
           scopes: this.config.requiredScopes,
           attempt,
-        });
-
-        // Update cache (multi-layer: memory + Redis)
+          tokenLength: token.access_token?.length,
+          tokenPrefix: token.access_token
+            ? token.access_token.substring(0, 50) + "..."
+            : "NO_TOKEN",
+          hasRefreshToken: !!token.refresh_token,
+        }); // Update cache (multi-layer: memory + Redis)
         await this.updateCache(token);
 
         return token;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
+        this.logger.error("❌ Token acquisition attempt failed", {
+          attempt,
+          error: lastError.message,
+          stack: lastError.stack,
+        });
 
         this.logger.warn("Token acquisition failed", {
           attempt,
