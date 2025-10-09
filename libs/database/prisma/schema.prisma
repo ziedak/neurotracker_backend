@@ -49,7 +49,6 @@ model Store {
   users          User[]
   carts          Cart[]
   products       Product[]
-  sessions       UserSession[]
   recoveryEvents RecoveryEvent[]
   webhooks       Webhook[]
   reports        Report[]
@@ -319,12 +318,9 @@ enum UserStatus {
 }
 
 model UserSession {
-  id                String    @id @default(cuid())
+  id                String    @id @default(cuid()) // Primary session identifier (replaces sessionId)
   userId            String
-  storeId           String
-  sessionId         String    @unique @db.VarChar(128)
-  token             String    @unique @db.VarChar(255) // Better-Auth: session token (required)
-  keycloakSessionId String?   @db.VarChar(255) // Keycloak session ID
+  keycloakSessionId String?   @unique @db.VarChar(255) // Keycloak session ID (optional, for Keycloak sync)
   accessToken       String?   @db.Text // Encrypted access token
   refreshToken      String?   @db.Text // Encrypted refresh token
   idToken           String?   @db.Text // Encrypted ID token
@@ -334,7 +330,7 @@ model UserSession {
   lastAccessedAt    DateTime  @default(now()) // Last access timestamp
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
-  expiresAt         DateTime? // Better-Auth: session expiration (required)
+  expiresAt         DateTime? // Session expiration
   ipAddress         String?
   userAgent         String?
   metadata          Json?
@@ -345,17 +341,14 @@ model UserSession {
   user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   events         UserEvent[]
   logs           SessionLog[]
-  store          Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
   recoveryEvents RecoveryEvent[]
   activities     SessionActivity[]
 
-  @@index([sessionId])
   @@index([userId])
   @@index([keycloakSessionId])
   @@index([expiresAt])
   @@index([lastAccessedAt])
   @@index([isActive, expiresAt])
-  @@index([token])
   @@map("user_sessions")
 }
 

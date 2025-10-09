@@ -299,12 +299,15 @@ export class UserSessionRepository
   }
 
   /**
-   * Find session by session token
+   * Find session by session token (using keycloakSessionId or id)
    */
   async findBySessionToken(sessionToken: string): Promise<UserSession | null> {
     return this.executeOperation("findBySessionToken", async () => {
-      const result = await this.db.userSession.findUnique({
-        where: { sessionId: sessionToken },
+      // Try to find by keycloakSessionId first, then by id
+      const result = await this.db.userSession.findFirst({
+        where: {
+          OR: [{ keycloakSessionId: sessionToken }, { id: sessionToken }],
+        },
       });
       return result as UserSession | null;
     });

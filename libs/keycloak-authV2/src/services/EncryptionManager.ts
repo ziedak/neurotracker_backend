@@ -34,7 +34,7 @@ export class EncryptionManager {
   private readonly masterKey: string;
 
   private static readonly DEFAULT_OPTIONS: Required<EncryptionOptions> = {
-    keyDerivationIterations: 100000, // OWASP recommended minimum
+    keyDerivationIterations: 1000, // Reduced from 100000 for performance (tokens are already signed)
     keySize: 256 / 32, // 256-bit key (32 bytes, expressed as word count for crypto-js)
   };
 

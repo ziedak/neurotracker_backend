@@ -58,6 +58,7 @@ export { OrderItemRepository } from "./orderItem";
 export type { OrderItemCreateInput, OrderItemUpdateInput } from "../../models";
 export { ApiKeyRepository } from "./apiKey";
 export type { ApiKeyCreateInput, ApiKeyUpdateInput } from "../../models";
+export type { IApiKeyRepository } from "./apiKey";
 export { CartRepository } from "./cart";
 export type { CartCreateInput, CartUpdateInput } from "../../models";
 export { CartItemRepository } from "./cartItem";

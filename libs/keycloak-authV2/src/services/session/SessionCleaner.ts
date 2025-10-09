@@ -329,9 +329,7 @@ export class SessionCleaner {
         if (this.cacheService) {
           await Promise.allSettled(
             expiredSessions.map((session) =>
-              this.cacheService!.invalidate(
-                `keycloak_session:${session.sessionId}`
-              )
+              this.cacheService!.invalidate(`keycloak_session:${session.id}`)
             )
           );
         }
@@ -540,7 +538,7 @@ export class SessionCleaner {
 
       // Pre-warm cache for active sessions
       for (const session of recentSessions) {
-        const cacheKey = `keycloak_session:${session.sessionId}`;
+        const cacheKey = `keycloak_session:${session.id}`;
         const result = await this.cacheService.get(cacheKey);
         if (!result.data) {
           // Cache miss - this session might benefit from pre-warming

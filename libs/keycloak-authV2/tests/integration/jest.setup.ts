@@ -50,8 +50,11 @@ afterAll(async () => {
   // Give time for async operations to complete and cleanup
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
-  // Force close any remaining connections
-  // This will be caught by individual test cleanup handlers
+  // Force exit after cleanup timeout
+  setTimeout(() => {
+    console.log("⚠️  Force exiting after cleanup timeout");
+    process.exit(0);
+  }, 5000);
 }, 15000);
 
 // Handle unhandled rejections

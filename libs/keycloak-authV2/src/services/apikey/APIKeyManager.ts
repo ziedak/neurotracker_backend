@@ -35,6 +35,14 @@ import type { ApiKey } from "@libs/database";
 import { ApiKeyRepository } from "@libs/database";
 
 /**
+ * Result type for API key creation including the raw key
+ */
+export interface APIKeyCreationResult {
+  apiKey: ApiKey;
+  rawKey: string;
+}
+
+/**
  * Configuration for the entire API key management system
  */
 export interface APIKeyManagerConfig {
@@ -85,11 +93,15 @@ export class APIKeyManager {
 
     try {
       // Create repository instance
-      const apiKeyRepository = new ApiKeyRepository(this.dbClient.prisma);
+      const apiKeyRepository = new ApiKeyRepository(
+        this.dbClient.prisma,
+        this.metrics,
+        this.cacheService
+      );
 
       // Initialize consolidated components
       this.operations = new APIKeyOperations(
-        this.dbClient,
+        apiKeyRepository,
         undefined, // cacheManager - will be integrated with APIKeyStorage
         this.metrics,
         {
@@ -187,7 +199,9 @@ export class APIKeyManager {
   /**
    * Create a new API key
    */
-  async createAPIKey(request: APIKeyGenerationOptions): Promise<ApiKey> {
+  async createAPIKey(
+    request: APIKeyGenerationOptions
+  ): Promise<APIKeyCreationResult> {
     const startTime = performance.now();
     const operationId = crypto.randomUUID();
 
@@ -211,7 +225,7 @@ export class APIKeyManager {
           .update(keyData)
           .digest("hex")
           .substring(0, 16),
-        keyPreview: keyData.substring(0, 8) + "...",
+        keyPreview: keyData.substring(0, 8),
         userId: request.userId,
         ...(request.storeId && { storeId: request.storeId }),
         ...(request.permissions && { permissions: request.permissions }),
@@ -248,7 +262,11 @@ export class APIKeyManager {
         duration: performance.now() - startTime,
       });
 
-      return createdKey;
+      // Return both the created key and the raw key (only time it's available)
+      return {
+        apiKey: createdKey,
+        rawKey: keyData,
+      };
     } catch (error) {
       this.logger.error("Failed to create API key", {
         operationId,
@@ -352,46 +370,20 @@ export class APIKeyManager {
     const startTime = performance.now();
 
     try {
-      // Use direct database query since repository doesn't have findById
-      const result = await this.dbClient.executeRaw(
-        `SELECT * FROM api_keys WHERE id = $1 AND "isActive" = true`,
-        [keyId]
-      );
+      // Use repository to find by ID
+      const result = await this.storage.getAPIKeyById(keyId);
 
-      if (!result || (result as any[]).length === 0) {
+      if (!result.success || !result.data) {
         return null;
       }
 
-      const record = (result as any[])[0];
-      const apiKey: ApiKey = {
-        id: record.id,
-        name: record.name,
-        keyHash: record.keyHash,
-        keyPreview: record.keyPreview,
-        userId: record.userId,
-        ...(record.storeId && { storeId: record.storeId }),
-        ...(record.permissions && {
-          permissions: JSON.parse(record.permissions),
-        }),
-        scopes: record.scopes || [],
-        ...(record.lastUsedAt && { lastUsedAt: record.lastUsedAt }),
-        usageCount: record.usageCount,
-        isActive: record.isActive,
-        ...(record.expiresAt && { expiresAt: record.expiresAt }),
-        createdAt: record.createdAt,
-        updatedAt: record.updatedAt,
-        ...(record.revokedAt && { revokedAt: record.revokedAt }),
-        ...(record.revokedBy && { revokedBy: record.revokedBy }),
-        ...(record.metadata && { metadata: JSON.parse(record.metadata) }),
-      };
-
+      // Record metrics
       this.metrics.recordTimer(
         "apikey.get_duration",
         performance.now() - startTime
       );
-      this.metrics.recordCounter("apikey.retrieved", 1);
 
-      return apiKey;
+      return result.data;
     } catch (error) {
       this.logger.error("Failed to get API key", { keyId, error });
       this.metrics.recordCounter("apikey.get_error", 1);
@@ -455,42 +447,16 @@ export class APIKeyManager {
     try {
       this.logger.info("Updating API key", { operationId, keyId });
 
-      // For now, use direct database operations until we add an update method to repository
-      await this.dbClient.executeRaw(
-        `UPDATE api_keys SET 
-         "isActive" = $1, 
-         "updatedAt" = NOW()
-         WHERE id = $2`,
-        [updates.isActive ?? true, keyId]
-      );
+      // Use repository to update the API key
+      const result = await this.storage.updateAPIKey(keyId, updates);
 
-      // For simplicity, return a basic success confirmation
-      // In a real implementation, you'd want to fetch and return the updated key
-      const updatedKey: ApiKey = {
-        id: keyId,
-        name: "Updated API Key",
-        keyHash: "",
-        keyIdentifier: "",
-        keyPreview: "updated...",
-        userId: "unknown",
-        permissions: [],
-        scopes: [],
-        usageCount: 0,
-        isActive: updates.isActive ?? true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+      if (!result.success || !result.data) {
+        throw new Error(`Failed to update API key: ${result.error}`);
+      }
 
-      // Invalidate cache to force refresh
-      // Cache invalidation is handled internally by storage component
+      const updatedKey = result.data;
 
-      // Record metrics
-      this.metrics.recordTimer(
-        "apikey.update_duration",
-        performance.now() - startTime
-      );
       this.metrics.recordCounter("apikey.updated", 1);
-
       this.logger.info("API key updated successfully", {
         operationId,
         keyId,

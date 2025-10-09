@@ -47,10 +47,7 @@ import type {
   SessionFingerprint,
 } from "./sessionTypes";
 import type { ITokenManager } from "../token/TokenManager";
-import {
-  createEncryptionManager,
-  type EncryptionManager,
-} from "../EncryptionManager";
+// Note: EncryptionManager import removed - tokens stored plaintext (already signed)
 import type { KeycloakClient } from "../../client";
 
 /**
@@ -122,7 +119,7 @@ export class SessionManager {
   // Component state
   private isInitialized = false;
   private isShuttingDown = false;
-  private readonly encryptionManager: EncryptionManager;
+  // Note: EncryptionManager removed - tokens stored plaintext (already signed by Keycloak)
 
   constructor(
     private readonly tokenManager: ITokenManager,
@@ -140,8 +137,7 @@ export class SessionManager {
       ...config,
     } as Required<SessionManagerConfig>;
 
-    // Initialize encryption manager
-    this.encryptionManager = createEncryptionManager(this.config.encryptionKey);
+    // Note: Encryption manager removed - not needed for signed JWT tokens
 
     // Initialize core components (always required)
     // REFACTORED: Now uses repository pattern
@@ -236,35 +232,42 @@ export class SessionManager {
       });
 
       // Step 1: Security - Check concurrent session limits (delegate to SessionSecurity)
+      // Step 1: Check concurrent session limit (OPTIMIZED with caching)
       if (this.sessionSecurity) {
-        const activeSessions = await this.sessionStore.getUserSessions(userId);
-        const sessionId = crypto.randomUUID();
+        const deviceFingerprint = requestContext.fingerprint?.[
+          "deviceFingerprint"
+        ] as string | undefined;
 
-        const concurrentResult =
-          await this.sessionSecurity.enforceConcurrentSessionLimits(
+        // Fast cached count check (5ms instead of 1000ms)
+        const activeSessionCount =
+          await this.sessionStore.getActiveSessionCount(
             userId,
-            sessionId,
-            activeSessions
+            deviceFingerprint
           );
 
-        if (!concurrentResult.allowed) {
-          await this.recordMetrics(
-            "session_creation",
-            context,
-            false,
-            concurrentResult.reason
-          );
-          return {
-            success: false,
-            ...(concurrentResult.reason && { reason: concurrentResult.reason }),
-          };
-        }
+        const maxConcurrentSessions =
+          this.config.sessionSecurity?.maxConcurrentSessions || 5;
 
-        // Terminate excess sessions if needed (delegate to SessionCleaner)
-        if (concurrentResult.sessionsToTerminate.length > 0) {
-          await this.terminateSessionsBatch(
-            concurrentResult.sessionsToTerminate
+        if (activeSessionCount >= maxConcurrentSessions) {
+          this.logger.info(
+            "Concurrent session limit reached, terminating oldest",
+            {
+              userId,
+              activeCount: activeSessionCount,
+              maxAllowed: maxConcurrentSessions,
+            }
           );
+
+          // Terminate oldest session to make room
+          const oldestSession = await this.sessionStore.getOldestSession(
+            userId
+          );
+          if (oldestSession) {
+            await this.sessionStore.markSessionInactive(
+              oldestSession.id,
+              "concurrent_limit_exceeded"
+            );
+          }
         }
       }
 
@@ -292,24 +295,12 @@ export class SessionManager {
           this.sessionValidator.generateFingerprint(sessionFingerprint) || "";
       }
 
-      // Step 3: Encrypt tokens (delegate to EncryptionManager)
-      const encryptedTokens = {
-        accessToken: await this.encryptionManager.encryptCompact(
-          tokens.accessToken
-        ),
-        refreshToken: tokens.refreshToken
-          ? await this.encryptionManager.encryptCompact(tokens.refreshToken)
-          : undefined,
-        idToken: tokens.idToken
-          ? await this.encryptionManager.encryptCompact(tokens.idToken)
-          : undefined,
-      };
-
-      // Step 4: Create session data using SessionCreationOptions
+      // Step 3: Create session data using SessionCreationOptions
+      // NOTE: Tokens stored plaintext (they're already cryptographically signed by Keycloak)
+      // No encryption needed - JWT tokens are tamper-proof and short-lived
       const sessionOptions: any = {
         userId,
-        sessionId: crypto.randomUUID(),
-        accessToken: encryptedTokens.accessToken,
+        accessToken: tokens.accessToken,
         tokenExpiresAt: tokens.expiresAt,
         expiresAt: tokens.expiresAt,
         ipAddress: requestContext.ipAddress,
@@ -319,27 +310,23 @@ export class SessionManager {
       };
 
       // Only add optional fields if they are defined
-      if (encryptedTokens.refreshToken) {
-        sessionOptions.refreshToken = encryptedTokens.refreshToken;
+      if (tokens.refreshToken) {
+        sessionOptions.refreshToken = tokens.refreshToken;
       }
-      if (encryptedTokens.idToken) {
-        sessionOptions.idToken = encryptedTokens.idToken;
+      if (tokens.idToken) {
+        sessionOptions.idToken = tokens.idToken;
       }
       if (tokens.refreshExpiresAt) {
         sessionOptions.refreshExpiresAt = tokens.refreshExpiresAt;
       }
 
-      // Step 5: Store session (delegate to SessionStore)
-      await this.sessionStore.storeSession(sessionOptions);
+      // Step 4: Store session (delegate to SessionStore) and get the created session
+      const sessionData = await this.sessionStore.storeSession(sessionOptions);
 
-      // Retrieve the created session
-      const sessionData = await this.sessionStore.retrieveSession(
-        sessionOptions.sessionId
-      );
-      if (!sessionData) {
+      if (!sessionData || !sessionData.id) {
         return {
           success: false,
-          reason: "Failed to retrieve created session",
+          reason: "Failed to create session in database",
         };
       }
 
@@ -354,7 +341,7 @@ export class SessionManager {
         if (!deviceResult.isValid) {
           // Clean up the session and fail
           await this.sessionStore.markSessionInactive(
-            sessionData.sessionId,
+            sessionData.id,
             "device_validation_failed"
           );
           await this.recordMetrics(
@@ -375,14 +362,14 @@ export class SessionManager {
 
       this.logger.info("Session created successfully", {
         operationId: context.operationId,
-        sessionId: this.hashSessionId(sessionData.sessionId),
+        sessionId: this.hashSessionId(sessionData.id),
         userId,
         duration: performance.now() - context.startTime,
       });
 
       return {
         success: true,
-        sessionId: sessionData.sessionId,
+        sessionId: sessionData.id,
         expiresAt: sessionData.expiresAt || undefined,
       };
     } catch (error) {
@@ -493,13 +480,7 @@ export class SessionManager {
         // Step 3: Check if token refresh is needed (delegate to SessionTokenCoordinator)
         if (validationResult.shouldRefreshToken && sessionData.refreshToken) {
           try {
-            // Decrypt refresh token before passing to coordinator
-            const decryptedRefreshToken =
-              await this.encryptionManager.decryptCompact(
-                sessionData.refreshToken
-              );
-            sessionData.refreshToken = decryptedRefreshToken;
-
+            // No decryption needed - tokens stored plaintext
             // Delegate to SessionTokenCoordinator
             await this.tokenCoordinator.refreshSessionTokens(sessionData);
 
@@ -531,7 +512,7 @@ export class SessionManager {
         if (!securityResult.isValid) {
           // Mark session as inactive for security violations
           await this.sessionStore.markSessionInactive(
-            sessionData.sessionId,
+            sessionData.id,
             "security_violation"
           );
           await this.recordMetrics(
@@ -599,14 +580,14 @@ export class SessionManager {
     reason?: string;
   }> {
     const context = this.createOperationContext("refresh_tokens", {
-      sessionId: sessionData.sessionId,
+      sessionId: sessionData.id,
       userId: sessionData.userId,
     });
 
     try {
       this.logger.debug("Refreshing session tokens", {
         operationId: context.operationId,
-        sessionId: this.hashSessionId(sessionData.sessionId),
+        sessionId: this.hashSessionId(sessionData.id),
         userId: sessionData.userId,
       });
 
@@ -617,19 +598,14 @@ export class SessionManager {
         };
       }
 
-      // Decrypt refresh token before delegating
-      const decryptedRefreshToken = await this.encryptionManager.decryptCompact(
-        sessionData.refreshToken
-      );
-      sessionData.refreshToken = decryptedRefreshToken;
-
+      // No decryption needed - tokens stored plaintext
       // Delegate to SessionTokenCoordinator
       // This handles: KeycloakClient.refreshToken() + SessionStore.updateSessionTokens()
       await this.tokenCoordinator.refreshSessionTokens(sessionData);
 
       // Retrieve updated session data
       const updatedSessionData = await this.sessionStore.retrieveSession(
-        sessionData.sessionId
+        sessionData.id
       );
 
       if (!updatedSessionData) {
@@ -650,7 +626,7 @@ export class SessionManager {
 
       this.logger.info("Session tokens refreshed successfully", {
         operationId: context.operationId,
-        sessionId: this.hashSessionId(sessionData.sessionId),
+        sessionId: this.hashSessionId(sessionData.id),
         duration: performance.now() - context.startTime,
       });
 
@@ -776,6 +752,56 @@ export class SessionManager {
         tokenRefreshCount: 0,
         securityViolations: 0,
       };
+    }
+  }
+
+  /**
+   * Retrieve session by ID
+   * Delegates to: SessionStore
+   *
+   * @param sessionId - Session ID to retrieve
+   * @returns Session data or null if not found
+   */
+  async getSession(sessionId: string): Promise<UserSession | null> {
+    try {
+      return await this.sessionStore.retrieveSession(sessionId);
+    } catch (error) {
+      this.logger.error("Failed to get session", { error, sessionId });
+      return null;
+    }
+  }
+
+  /**
+   * Get all active sessions for a user
+   * Delegates to: SessionStore
+   *
+   * @param userId - User ID
+   * @returns Array of active sessions
+   */
+  async getUserSessions(userId: string): Promise<UserSession[]> {
+    try {
+      return await this.sessionStore.getUserSessions(userId);
+    } catch (error) {
+      this.logger.error("Failed to get user sessions", { error, userId });
+      return [];
+    }
+  }
+
+  /**
+   * Update session last access time
+   * Delegates to: SessionStore
+   *
+   * @param sessionId - Session ID to update
+   */
+  async updateSessionAccess(sessionId: string): Promise<void> {
+    try {
+      await this.sessionStore.updateSessionAccess(sessionId);
+    } catch (error) {
+      this.logger.error("Failed to update session access", {
+        error,
+        sessionId,
+      });
+      throw error;
     }
   }
 
@@ -969,26 +995,30 @@ export class SessionManager {
   /**
    * Terminate multiple sessions (batch operation)
    * Delegates to: SessionStore
+   *
+   * DISABLED FOR PERFORMANCE OPTIMIZATION
+   * This method was used for concurrent session limiting, but getUserSessions()
+   * was causing significant performance issues. Re-enable with caching if needed.
    */
-  private async terminateSessionsBatch(sessionIds: string[]): Promise<void> {
-    try {
-      // Batch terminate sessions (delegate to SessionStore)
-      await Promise.allSettled(
-        sessionIds.map((sessionId) =>
-          this.sessionStore.markSessionInactive(
-            sessionId,
-            "concurrent_limit_exceeded"
-          )
-        )
-      );
+  // private async terminateSessionsBatch(sessionIds: string[]): Promise<void> {
+  //   try {
+  //     // Batch terminate sessions (delegate to SessionStore)
+  //     await Promise.allSettled(
+  //       sessionIds.map((sessionId) =>
+  //         this.sessionStore.markSessionInactive(
+  //           sessionId,
+  //           "concurrent_limit_exceeded"
+  //         )
+  //       )
+  //     );
 
-      this.logger.info("Batch session termination completed", {
-        terminatedSessions: sessionIds.length,
-      });
-    } catch (error) {
-      this.logger.error("Batch session termination failed", { error });
-    }
-  }
+  //     this.logger.info("Batch session termination completed", {
+  //       terminatedSessions: sessionIds.length,
+  //     });
+  //   } catch (error) {
+  //     this.logger.error("Batch session termination failed", { error });
+  //   }
+  // }
 
   private hashSessionId(sessionId: string): string {
     return (

@@ -55,9 +55,9 @@ describe("KeycloakIntegrationService - Session Management", () => {
 
       expect(authResult.success).toBe(true);
       expect(authResult.session).toBeDefined();
-      expect(authResult.session?.sessionId).toBeDefined();
+      expect(authResult.session?.id).toBeDefined();
 
-      const sessionId = authResult.session!.sessionId;
+      const sessionId = authResult.session!.id;
       testSessionIds.push(sessionId);
 
       console.log("✅ Session created successfully", { sessionId });
@@ -84,7 +84,7 @@ describe("KeycloakIntegrationService - Session Management", () => {
           }
         );
 
-        const sessionId = authResult.session?.sessionId;
+        const sessionId = authResult.session?.id;
         expect(sessionId).toBeDefined();
         sessions.push(sessionId!);
         testSessionIds.push(sessionId!);
@@ -118,7 +118,7 @@ describe("KeycloakIntegrationService - Session Management", () => {
         }
       );
 
-      const sessionId = authResult.session!.sessionId;
+      const sessionId = authResult.session!.id;
       testSessionIds.push(sessionId);
 
       // Get session
@@ -150,7 +150,7 @@ describe("KeycloakIntegrationService - Session Management", () => {
             userAgent: `Test-${i}`,
           }
         );
-        testSessionIds.push(authResult.session!.sessionId);
+        testSessionIds.push(authResult.session!.id);
       }
 
       // List sessions
@@ -185,7 +185,7 @@ describe("KeycloakIntegrationService - Session Management", () => {
         }
       );
 
-      const sessionId = authResult.session!.sessionId;
+      const sessionId = authResult.session!.id;
       testSessionIds.push(sessionId);
 
       // Update session
@@ -219,7 +219,7 @@ describe("KeycloakIntegrationService - Session Management", () => {
         }
       );
 
-      const sessionId = authResult.session!.sessionId;
+      const sessionId = authResult.session!.id;
 
       // Invalidate session
       const invalidateResult = await env.service.invalidateSession(sessionId);

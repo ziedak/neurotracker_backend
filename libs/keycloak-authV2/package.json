@@ -5,11 +5,11 @@
   "types": "../../dist/libs/keycloak-authV2/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "jest",
-    "test:unit": "jest --config jest.config.js",
-    "test:integration": "jest --config jest.integration.config.js",
+    "test": "jest --forceExit",
+    "test:unit": "jest --config jest.config.js --forceExit",
+    "test:integration": "jest --config jest.integration.config.js --forceExit",
     "test:integration:watch": "jest --config jest.integration.config.js --watch",
-    "test:integration:coverage": "jest --config jest.integration.config.js --coverage",
+    "test:integration:coverage": "jest --config jest.integration.config.js --coverage --forceExit",
     "test:all": "pnpm test:unit && pnpm test:integration",
     "lint": "eslint src/**/*.ts"
   },

@@ -26,12 +26,15 @@ import type {
 } from "@libs/database";
 import type { HealthCheckResult } from "./sessionTypes";
 import {
-  SessionIdSchema,
   UserIdSchema,
   SessionCreationOptions,
   toUserSessionCreateInput,
   UserSessionSchema,
 } from "./sessionTypes";
+import { z } from "zod";
+
+// Session ID validation (CUID format from Prisma @default(cuid()))
+const SessionIdSchema = z.string().min(1, "Session ID must not be empty");
 
 /**
  * @deprecated Using UserSession type from @libs/database instead
@@ -85,23 +88,24 @@ export class SessionStore {
    * Store session data in database and cache
    * REFACTORED: Now uses repository pattern with upsert logic
    * Accepts either full UserSession or SessionCreationOptions
+   * Returns the created/updated session
    */
   async storeSession(
     sessionData: UserSession | SessionCreationOptions
-  ): Promise<void> {
+  ): Promise<UserSession> {
     const startTime = performance.now();
     const operationId = crypto.randomUUID();
 
-    try {
-      // Determine if we have a full UserSession or just creation options
-      const isFullSession = "id" in sessionData && "createdAt" in sessionData;
-      const sessionId = isFullSession
-        ? (sessionData as UserSession).sessionId
-        : (sessionData as SessionCreationOptions).sessionId;
+    // Determine if we have a full UserSession or just creation options
+    const isFullSession = "id" in sessionData && "createdAt" in sessionData;
+    const sessionId = isFullSession
+      ? (sessionData as UserSession).id
+      : undefined;
 
+    try {
       this.logger.debug("Storing session", {
         operationId,
-        sessionId: this.hashSessionId(sessionId),
+        sessionId: sessionId ? this.hashSessionId(sessionId) : "new-session",
         userId: sessionData.userId,
       });
 
@@ -143,80 +147,51 @@ export class SessionStore {
         }
 
         await this.userSessionRepo.updateById(session.id, updateData);
+
+        // Return the updated session
+        return session;
       } else {
-        // Handle creation options
+        // Handle creation options - create new session
         const options = sessionData as SessionCreationOptions;
 
-        // Check if session exists (upsert logic)
-        const existing = await this.userSessionRepo.findBySessionToken(
-          options.sessionId
+        // Create new session
+        const createInput = toUserSessionCreateInput(options);
+        const createdSession = await this.userSessionRepo.create(createInput);
+
+        // Invalidate session count cache (session created)
+        await this.invalidateSessionCountCache(
+          options.userId,
+          options.fingerprint
         );
 
-        if (existing) {
-          // Update existing session - only include defined fields
-          const updateData: any = {
-            lastAccessedAt: new Date(),
-            isActive: true,
-          };
+        // Record metrics
+        this.metrics?.recordTimer(
+          "session.store.duration",
+          performance.now() - startTime
+        );
+        this.metrics?.recordCounter("session.stored", 1);
 
-          if (options.accessToken) updateData.accessToken = options.accessToken;
-          if (options.refreshToken)
-            updateData.refreshToken = options.refreshToken;
-          if (options.tokenExpiresAt)
-            updateData.tokenExpiresAt = options.tokenExpiresAt;
-          if (options.refreshExpiresAt)
-            updateData.refreshExpiresAt = options.refreshExpiresAt;
-          if (options.metadata) updateData.metadata = options.metadata;
+        this.logger.debug("Session stored successfully", {
+          operationId,
+          sessionId: createdSession.id
+            ? this.hashSessionId(createdSession.id)
+            : "new-session",
+          duration: performance.now() - startTime,
+        });
 
-          await this.userSessionRepo.updateById(existing.id, updateData);
-        } else {
-          // Create new session
-          const createInput = toUserSessionCreateInput(options);
-          await this.userSessionRepo.create(createInput);
-        }
+        // Return the created session
+        return createdSession as UserSession;
       }
-
-      // Store in cache if available and configured
-      if (this.cacheService && this.config.cacheEnabled) {
-        const cacheKey = this.buildSessionCacheKey(sessionId);
-        const session = isFullSession
-          ? (sessionData as UserSession)
-          : await this.userSessionRepo.findBySessionToken(sessionId);
-
-        if (session) {
-          const expiresAt = session.expiresAt || new Date(Date.now() + 3600000);
-          const ttl = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
-
-          if (ttl > 0) {
-            await this.cacheService.set(cacheKey, session, ttl);
-          }
-        }
-      }
-
-      // Record metrics
-      this.metrics?.recordTimer(
-        "session.store.duration",
-        performance.now() - startTime
-      );
-      this.metrics?.recordCounter("session.stored", 1);
-
-      this.logger.debug("Session stored successfully", {
-        operationId,
-        sessionId: this.hashSessionId(sessionId),
-        duration: performance.now() - startTime,
-      });
     } catch (error) {
       this.logger.error("Failed to store session", {
         operationId,
         error,
-        sessionId: this.hashSessionId(
-          "sessionId" in sessionData
-            ? sessionData.sessionId
-            : (sessionData as any).id || "unknown"
-        ),
+        sessionId: isFullSession
+          ? this.hashSessionId((sessionData as UserSession).id)
+          : "new-session",
       });
       this.metrics?.recordCounter("session.store.error", 1);
-      throw error;
+      throw error; // Re-throw to let caller handle it
     }
   }
 
@@ -253,9 +228,27 @@ export class SessionStore {
       }
 
       // Fallback to database using repository
+      this.logger.debug("Querying database for session", {
+        operationId,
+        sessionId: this.hashSessionId(sessionId),
+      });
+
       const session = await this.userSessionRepo.findBySessionToken(sessionId);
 
+      this.logger.debug("Database query result", {
+        operationId,
+        sessionId: this.hashSessionId(sessionId),
+        found: !!session,
+        isActive: session?.isActive,
+      });
+
       if (!session || !session.isActive) {
+        this.logger.warn("Session not found or inactive", {
+          operationId,
+          sessionId: this.hashSessionId(sessionId),
+          found: !!session,
+          isActive: session?.isActive,
+        });
         this.metrics?.recordCounter("session.not_found", 1);
         return null;
       }
@@ -504,6 +497,12 @@ export class SessionStore {
         await this.userSessionRepo.updateById(session.id, {
           isActive: false,
         });
+
+        // Invalidate session count cache (session terminated)
+        await this.invalidateSessionCountCache(
+          session.userId,
+          session.fingerprint || undefined
+        );
       }
 
       // Clear from cache
@@ -673,6 +672,113 @@ export class SessionStore {
         totalSessions: 0,
         cacheEnabled: false,
       };
+    }
+  }
+
+  /**
+   * Get active session count for user (CACHED for performance)
+   * Used for concurrent session limiting without slow queries
+   *
+   * @param userId - User ID to count sessions for
+   * @param deviceFingerprint - Optional device fingerprint to filter by
+   * @returns Number of active sessions
+   */
+  async getActiveSessionCount(
+    userId: string,
+    deviceFingerprint?: string
+  ): Promise<number> {
+    const cacheKey = `session:count:${userId}:${deviceFingerprint || "all"}`;
+
+    try {
+      // Try cache first (5ms)
+      if (this.cacheService && this.config.cacheEnabled) {
+        const cached = await this.cacheService.get<number>(cacheKey);
+        if (cached.data !== null) {
+          this.metrics?.recordCounter("session.count.cache_hit", 1);
+          return cached.data;
+        }
+      }
+
+      // Cache miss - query database (1000ms)
+      this.metrics?.recordCounter("session.count.cache_miss", 1);
+      const count = await this.userSessionRepo.count({
+        where: {
+          userId,
+          isActive: true,
+          expiresAt: { gt: new Date() },
+          ...(deviceFingerprint && { fingerprint: deviceFingerprint }),
+        },
+      });
+
+      // Cache for 30 seconds (balance freshness vs performance)
+      if (this.cacheService && this.config.cacheEnabled) {
+        await this.cacheService.set(cacheKey, count, 30);
+      }
+
+      return count;
+    } catch (error) {
+      this.logger.error("Failed to get active session count", {
+        userId,
+        error,
+      });
+      return 0;
+    }
+  }
+
+  /**
+   * Get oldest session for user (for concurrent limit enforcement)
+   *
+   * @param userId - User ID to get oldest session for
+   * @returns Oldest active session or null
+   */
+  async getOldestSession(userId: string): Promise<UserSession | null> {
+    try {
+      const sessions = await this.userSessionRepo.findMany({
+        where: {
+          userId,
+          isActive: true,
+          expiresAt: { gt: new Date() },
+        },
+        orderBy: {
+          createdAt: "asc", // Oldest first
+        },
+        take: 1,
+      });
+
+      return sessions[0] || null;
+    } catch (error) {
+      this.logger.error("Failed to get oldest session", { userId, error });
+      return null;
+    }
+  }
+
+  /**
+   * Invalidate session count cache when creating/terminating sessions
+   *
+   * @param userId - User ID to invalidate cache for
+   * @param deviceFingerprint - Optional device fingerprint
+   */
+  private async invalidateSessionCountCache(
+    userId: string,
+    deviceFingerprint?: string
+  ): Promise<void> {
+    if (!this.cacheService || !this.config.cacheEnabled) {
+      return;
+    }
+
+    try {
+      const patterns = [
+        `session:count:${userId}:all`,
+        `session:count:${userId}:${deviceFingerprint || "*"}`,
+      ];
+
+      await this.cacheService.mInvalidate(patterns);
+      this.metrics?.recordCounter("session.count.cache_invalidated", 1);
+    } catch (error) {
+      this.logger.error("Failed to invalidate session count cache", {
+        userId,
+        error,
+      });
     }
   }
 

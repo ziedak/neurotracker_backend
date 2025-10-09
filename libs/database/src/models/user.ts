@@ -112,9 +112,6 @@ export interface User {
 export interface UserSession {
   id: string;
   userId: string;
-  storeId: string;
-  sessionId: string;
-
   keycloakSessionId?: string | null;
   accessToken?: string | null;
   refreshToken?: string | null;
@@ -134,7 +131,6 @@ export interface UserSession {
   user?: User;
   events?: UserEvent[];
   logs?: SessionLog[];
-  store?: Store;
   recoveryEvents?: RecoveryEvent[];
   activities?: SessionActivity[];
 }
@@ -338,8 +334,6 @@ export const RolePermissionUpdateInputSchema = z.object({
 export const UserSessionCreateInputSchema = z.object({
   id: z.string().uuid().optional(),
   userId: z.string().uuid(),
-  storeId: z.string().uuid(),
-  sessionId: z.string().min(1).max(255),
   keycloakSessionId: z.string().max(255).nullable().optional(),
   accessToken: z.string().nullable().optional(),
   refreshToken: z.string().nullable().optional(),
@@ -360,7 +354,6 @@ export const UserSessionCreateInputSchema = z.object({
 });
 
 export const UserSessionUpdateInputSchema = z.object({
-  sessionId: z.string().min(1).max(255).optional(),
   keycloakSessionId: z.string().max(255).nullable().optional(),
   accessToken: z.string().nullable().optional(),
   refreshToken: z.string().nullable().optional(),

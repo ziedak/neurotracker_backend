@@ -73,7 +73,7 @@ describe("MemoryCache", () => {
       const { LRUCache: MockLRUCache } = require("lru-cache");
       expect(MockLRUCache).toHaveBeenCalledWith({
         max: DEFAULT_MEMORY_CACHE_CONFIG.maxMemoryCacheSize,
-        ttl: DEFAULT_MEMORY_CACHE_CONFIG.defaultTTL * 1000,
+        ttl: DEFAULT_MEMORY_CACHE_CONFIG.defaultTtl * 1000,
       });
       expect(memoryCache).toBeDefined();
     });
@@ -225,7 +225,7 @@ describe("MemoryCache", () => {
       expect(mockLRUCache.set).toHaveBeenCalledWith(
         testKey,
         expect.objectContaining({
-          ttl: DEFAULT_MEMORY_CACHE_CONFIG.defaultTTL,
+          ttl: DEFAULT_MEMORY_CACHE_CONFIG.defaultTtl,
         })
       );
     });

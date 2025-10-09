@@ -53,7 +53,7 @@ export class SessionTokenCoordinator {
 
     try {
       this.logger.debug("Validating session token", {
-        sessionId: sessionData.sessionId,
+        sessionId: sessionData.id,
       });
 
       if (!sessionData.accessToken) {
@@ -80,7 +80,7 @@ export class SessionTokenCoordinator {
     } catch (error) {
       this.logger.error("Token validation failed", {
         error,
-        sessionId: sessionData.sessionId,
+        sessionId: sessionData.id,
       });
 
       this.metrics?.recordCounter("session.token_validation.error", 1);
@@ -103,7 +103,7 @@ export class SessionTokenCoordinator {
 
     try {
       this.logger.debug("Refreshing session tokens", {
-        sessionId: sessionData.sessionId,
+        sessionId: sessionData.id,
       });
 
       if (!sessionData.refreshToken) {
@@ -122,7 +122,7 @@ export class SessionTokenCoordinator {
         : undefined;
 
       // Delegate to SessionStore (just implemented)
-      await this.sessionStore.updateSessionTokens(sessionData.sessionId, {
+      await this.sessionStore.updateSessionTokens(sessionData.id, {
         accessToken: newTokens.access_token,
         ...(newTokens.refresh_token && {
           refreshToken: newTokens.refresh_token,
@@ -132,10 +132,10 @@ export class SessionTokenCoordinator {
       });
 
       // Schedule automatic refresh for the new token
-      await this.scheduleAutomaticRefresh(sessionData.sessionId, expiresAt);
+      await this.scheduleAutomaticRefresh(sessionData.id, expiresAt);
 
       this.logger.info("Session tokens refreshed successfully", {
-        sessionId: sessionData.sessionId,
+        sessionId: sessionData.id,
         expiresAt: expiresAt.toISOString(),
       });
 
@@ -147,7 +147,7 @@ export class SessionTokenCoordinator {
     } catch (error) {
       this.logger.error("Token refresh failed", {
         error,
-        sessionId: sessionData.sessionId,
+        sessionId: sessionData.id,
       });
 
       this.metrics?.recordCounter("session.token_refresh.error", 1);
@@ -216,7 +216,7 @@ export class SessionTokenCoordinator {
 
     if (needsRefresh) {
       this.logger.debug("Token refresh needed", {
-        sessionId: sessionData.sessionId,
+        sessionId: sessionData.id,
         timeUntilExpiry: Math.floor(timeUntilExpiry / 1000) + "s",
         threshold: thresholdSeconds + "s",
       });
@@ -238,7 +238,7 @@ export class SessionTokenCoordinator {
 
         // Get updated session data
         const updatedSession = await this.sessionStore.retrieveSession(
-          sessionData.sessionId
+          sessionData.id
         );
 
         if (!updatedSession) {
@@ -255,7 +255,7 @@ export class SessionTokenCoordinator {
           "Token refresh failed, attempting validation anyway",
           {
             error,
-            sessionId: sessionData.sessionId,
+            sessionId: sessionData.id,
           }
         );
         // Fall through to validation with existing token

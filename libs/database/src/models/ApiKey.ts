@@ -59,8 +59,8 @@ export const ApiKeyCreateInputSchema = z.object({
   keyHash: z.string().min(1),
   keyIdentifier: z.string().min(1).max(100),
   keyPreview: z.string().min(1).max(10),
-  userId: z.string().uuid(),
-  storeId: z.string().uuid().nullable().optional(),
+  userId: z.string().min(1), // Changed from uuid() to accept CUIDs
+  storeId: z.string().min(1).nullable().optional(), // Changed from uuid()
   permissions: z.unknown().nullable().optional(),
   scopes: z.array(z.string()).optional().default([]),
   lastUsedAt: z.date().nullable().optional(),
@@ -68,7 +68,7 @@ export const ApiKeyCreateInputSchema = z.object({
   isActive: z.boolean().optional().default(true),
   expiresAt: z.date().nullable().optional(),
   revokedAt: z.date().nullable().optional(),
-  revokedBy: z.string().uuid().nullable().optional(),
+  revokedBy: z.string().min(1).nullable().optional(), // Changed from uuid()
   metadata: z.unknown().nullable().optional(),
 });
 
@@ -77,8 +77,8 @@ export const ApiKeyUpdateInputSchema = z.object({
   keyHash: z.string().min(1).optional(),
   keyIdentifier: z.string().min(1).max(100).optional(),
   keyPreview: z.string().min(1).max(10).optional(),
-  userId: z.string().uuid().optional(),
-  storeId: z.string().uuid().nullable().optional(),
+  userId: z.string().min(1).optional(), // Changed from uuid()
+  storeId: z.string().min(1).nullable().optional(), // Changed from uuid()
   permissions: z.unknown().optional(),
   scopes: z.array(z.string()).optional(),
   lastUsedAt: z.date().nullable().optional(),
@@ -86,6 +86,6 @@ export const ApiKeyUpdateInputSchema = z.object({
   isActive: z.boolean().optional(),
   expiresAt: z.date().nullable().optional(),
   revokedAt: z.date().nullable().optional(),
-  revokedBy: z.string().uuid().nullable().optional(),
+  revokedBy: z.string().min(1).nullable().optional(), // Changed from uuid()
   metadata: z.unknown().optional(),
 });

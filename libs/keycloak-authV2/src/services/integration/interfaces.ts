@@ -25,7 +25,7 @@ export interface AuthenticationResult {
     refresh_expires_in?: number;
   };
   session?: {
-    sessionId: string;
+    id: string;
     sessionData: KeycloakSessionData;
   };
   error?: string;

@@ -133,7 +133,7 @@ export class SessionValidator {
     try {
       this.logger.debug("Validating session", {
         operationId,
-        sessionId: this.hashSessionId(sessionData.sessionId),
+        sessionId: this.hashSessionId(sessionData.id),
         userId: sessionData.userId,
       });
 
@@ -195,7 +195,7 @@ export class SessionValidator {
 
       this.logger.debug("Session validation successful", {
         operationId,
-        sessionId: this.hashSessionId(sessionData.sessionId),
+        sessionId: this.hashSessionId(sessionData.id),
         duration: performance.now() - startTime,
       });
 
@@ -207,7 +207,7 @@ export class SessionValidator {
       this.logger.error("Session validation failed", {
         operationId,
         error,
-        sessionId: this.hashSessionId(sessionData.sessionId),
+        sessionId: this.hashSessionId(sessionData.id),
       });
       this.metrics?.recordCounter("session.validation.error", 1);
       return this.createValidationResult(
@@ -346,7 +346,7 @@ export class SessionValidator {
 
     if (criticalMismatch) {
       this.trackSuspiciousActivity(
-        sessionData.sessionId,
+        sessionData.id,
         "fingerprint_mismatch"
       );
       return {
@@ -365,7 +365,7 @@ export class SessionValidator {
 
     if (minorChanges && !this.config.allowFingerprintRotation) {
       this.logger.warn("Minor fingerprint changes detected", {
-        sessionId: this.hashSessionId(sessionData.sessionId),
+        sessionId: this.hashSessionId(sessionData.id),
         changes: "non-critical components",
       });
     }
@@ -394,12 +394,12 @@ export class SessionValidator {
     }
 
     if (sessionData.ipAddress !== currentIpAddress) {
-      const tracker = this.getActivityTracker(sessionData.sessionId);
+      const tracker = this.getActivityTracker(sessionData.id);
       tracker.ipChanges++;
       tracker.lastIpChange = new Date();
 
       this.logger.info("IP address change detected", {
-        sessionId: this.hashSessionId(sessionData.sessionId),
+        sessionId: this.hashSessionId(sessionData.id),
         previousIp: this.hashIp(sessionData.ipAddress),
         currentIp: this.hashIp(currentIpAddress),
         totalChanges: tracker.ipChanges,
@@ -407,7 +407,7 @@ export class SessionValidator {
 
       if (tracker.ipChanges > this.config.allowedIpChanges) {
         this.trackSuspiciousActivity(
-          sessionData.sessionId,
+          sessionData.id,
           "excessive_ip_changes"
         );
         return {
@@ -447,9 +447,9 @@ export class SessionValidator {
 
     // Allow minor version changes but detect major changes
     if (storedBrowser.name !== currentBrowser.name) {
-      this.trackSuspiciousActivity(sessionData.sessionId, "browser_change");
+      this.trackSuspiciousActivity(sessionData.id, "browser_change");
       this.logger.warn("Browser change detected", {
-        sessionId: this.hashSessionId(sessionData.sessionId),
+        sessionId: this.hashSessionId(sessionData.id),
         previousBrowser: storedBrowser.name,
         currentBrowser: currentBrowser.name,
       });
@@ -469,7 +469,7 @@ export class SessionValidator {
     sessionData: UserSession,
     _currentRequest: { ipAddress: string; userAgent: string }
   ): Promise<SecurityCheckResult> {
-    const tracker = this.getActivityTracker(sessionData.sessionId);
+    const tracker = this.getActivityTracker(sessionData.id);
     const now = new Date();
     const recentThreshold = 5 * 60 * 1000; // 5 minutes
 

@@ -395,7 +395,7 @@ export class KeycloakIntegrationService implements IIntegrationService {
     }
   ): Promise<{
     success: boolean;
-    sessionId?: string;
+    id?: string;
     sessionData?: any;
     error?: string;
   }> {
@@ -411,18 +411,35 @@ export class KeycloakIntegrationService implements IIntegrationService {
         requestContext
       );
 
+      this.logger.debug("Session creation result", {
+        success: result.success,
+        hasSessionId: !!result.sessionId,
+        sessionId: result.sessionId,
+        expiresAt: result.expiresAt,
+      });
+
       if (result.success && result.sessionId) {
-        // Retrieve the full session data
-        const sessionData = await (
-          this.sessionManager as any
-        ).sessionStore.retrieveSession(result.sessionId);
+        // Retrieve the full session data using public API
+        const sessionData = await this.sessionManager.getSession(
+          result.sessionId
+        );
+
+        this.logger.debug("Retrieved session data", {
+          hasSessionData: !!sessionData,
+          sessionDataId: sessionData?.id,
+        });
 
         return {
           success: true,
-          sessionId: result.sessionId,
+          id: result.sessionId,
           sessionData,
         };
       }
+
+      this.logger.warn("Session creation failed or missing sessionId", {
+        success: result.success,
+        sessionId: result.sessionId,
+      });
 
       return {
         success: false,
@@ -447,17 +464,24 @@ export class KeycloakIntegrationService implements IIntegrationService {
     error?: string;
   }> {
     try {
-      // Access the session store through the session manager
-      const session = await (
-        this.sessionManager as any
-      ).sessionStore.retrieveSession(sessionId);
+      this.logger.info("Getting session", { sessionId });
+
+      // Use public SessionManager API instead of accessing private store
+      const session = await this.sessionManager.getSession(sessionId);
 
       if (!session) {
+        this.logger.warn("Session not found or inactive", { sessionId });
         return {
           success: false,
           error: "Session not found",
         };
       }
+
+      this.logger.info("Session retrieved successfully", {
+        sessionId,
+        userId: session.userId,
+        isActive: session.isActive,
+      });
 
       return {
         success: true,
@@ -485,11 +509,9 @@ export class KeycloakIntegrationService implements IIntegrationService {
     try {
       this.logger.info("Updating session", { sessionId, updates });
 
-      // Update last activity through session store
+      // Update last activity through public SessionManager API
       if (updates.lastActivity) {
-        await (this.sessionManager as any).sessionStore.updateSessionAccess(
-          sessionId
-        );
+        await this.sessionManager.updateSessionAccess(sessionId);
       }
 
       // For metadata updates, would need to extend SessionStore
@@ -520,10 +542,8 @@ export class KeycloakIntegrationService implements IIntegrationService {
     try {
       this.logger.info("Refreshing session tokens", { sessionId });
 
-      // Get session data first
-      const session = await (
-        this.sessionManager as any
-      ).sessionStore.retrieveSession(sessionId);
+      // Get session data first using public API
+      const session = await this.sessionManager.getSession(sessionId);
 
       if (!session) {
         return {
@@ -608,9 +628,16 @@ export class KeycloakIntegrationService implements IIntegrationService {
     error?: string;
   }> {
     try {
-      const sessions = await (
-        this.sessionManager as any
-      ).sessionStore.getUserSessions(userId);
+      this.logger.info("Listing user sessions", { userId });
+
+      // Use public SessionManager API instead of accessing private store
+      const sessions = await this.sessionManager.getUserSessions(userId);
+
+      this.logger.info("User sessions retrieved", {
+        userId,
+        count: sessions.length,
+        sessionIds: sessions.map((s: any) => s.id),
+      });
 
       return {
         success: true,
@@ -627,7 +654,20 @@ export class KeycloakIntegrationService implements IIntegrationService {
 
   async getSessionStats(): Promise<any> {
     try {
-      return await this.sessionManager.getSessionStats();
+      const stats = await this.sessionManager.getSessionStats();
+      // Transform to match expected test interface (active/total instead of activeSessions/totalSessions)
+      return {
+        active: stats.activeSessions,
+        total: stats.totalSessions,
+        created: stats.sessionsCreated,
+        expired: stats.sessionsExpired,
+        averageDuration: stats.averageSessionDuration,
+        peak: stats.peakConcurrentSessions,
+        successfulLogins: stats.successfulLogins,
+        failedLogins: stats.failedLogins,
+        tokenRefreshes: stats.tokenRefreshCount,
+        securityViolations: stats.securityViolations,
+      };
     } catch (error) {
       this.logger.error("Failed to get session stats", { error });
       throw error;
@@ -682,22 +722,35 @@ export class KeycloakIntegrationService implements IIntegrationService {
         scopes: options.scopes,
       });
 
-      const apiKey = await this.apiKeyManager.createAPIKey(options);
+      const result = await this.apiKeyManager.createAPIKey(options);
 
       return {
         success: true,
-        apiKey,
-        rawKey: (apiKey as any).rawKey, // The raw key is returned once
+        apiKey: result.apiKey,
+        rawKey: result.rawKey,
       };
     } catch (error) {
-      this.logger.error("Failed to create API key", { error, options });
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      console.error("=== API Key Creation Error ===");
+      console.error("Message:", errorMessage);
+      console.error(
+        "Stack:",
+        error instanceof Error ? error.stack : "No stack"
+      );
+      console.error("Options:", options);
+      this.logger.error("Failed to create API key", {
+        error: errorMessage,
+        stack: error instanceof Error ? error.stack : undefined,
+        options,
+      });
       this.metrics?.recordCounter(
         "keycloak.integration.api_key_create_failed",
         1
       );
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: errorMessage,
       };
     }
   }
@@ -878,12 +931,12 @@ export class KeycloakIntegrationService implements IIntegrationService {
         createOptions.storeId = existingKey.storeId;
       }
 
-      const newKey = await this.apiKeyManager.createAPIKey(createOptions);
+      const result = await this.apiKeyManager.createAPIKey(createOptions);
 
       return {
         success: true,
-        newKey,
-        rawKey: (newKey as any).rawKey,
+        newKey: result.apiKey,
+        rawKey: result.rawKey,
       };
     } catch (error) {
       this.logger.error("Failed to rotate API key", { error, keyId });

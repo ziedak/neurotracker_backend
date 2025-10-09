@@ -146,11 +146,20 @@ export class AuthenticationManager implements IAuthenticationManager {
       );
 
       if (!sessionResult.success || !sessionResult.session) {
+        this.logger.error("Failed to create session", {
+          sessionResultSuccess: sessionResult.success,
+          hasSession: !!sessionResult.session,
+        });
         return {
           success: false,
           error: "Failed to create session",
         };
       }
+
+      this.logger.debug("Session created in authenticateWithPassword", {
+        sessionId: sessionResult.session.id,
+        userId: userInfo.id,
+      });
 
       this.metrics?.recordCounter("keycloak.auth.password_success", 1);
       this.metrics?.recordTimer(
@@ -314,7 +323,7 @@ export class AuthenticationManager implements IAuthenticationManager {
   ): Promise<{
     success: boolean;
     session?: {
-      sessionId: string;
+      id: string;
       sessionData: any;
     };
     error?: string;
@@ -339,22 +348,52 @@ export class AuthenticationManager implements IAuthenticationManager {
         }
       );
 
+      if (!sessionResult.success || !sessionResult.sessionId) {
+        this.logger.error("Session creation returned unsuccessful result", {
+          success: sessionResult.success,
+          hasSessionId: !!sessionResult.sessionId,
+          userId: userInfo.id,
+        });
+        return {
+          success: false,
+          error: "Failed to create session",
+        };
+      }
+
+      this.logger.debug("Session created, attempting to retrieve", {
+        sessionId: sessionResult.sessionId,
+        userId: userInfo.id,
+      });
+
+      // Retrieve the actual session from database to ensure we return real data
+      const session = await this.sessionManager.getSession(
+        sessionResult.sessionId
+      );
+
+      if (!session) {
+        this.logger.error("Session created but could not be retrieved", {
+          sessionId: sessionResult.sessionId,
+          userId: userInfo.id,
+          reason: "getSession returned null",
+        });
+        return {
+          success: false,
+          error: "Session created but could not be retrieved",
+        };
+      }
+
+      this.logger.debug("Session retrieved successfully", {
+        sessionId: session.id,
+        userId: session.userId,
+        isActive: session.isActive,
+      });
+
+      // Return session data structure compatible with the expected interface
       return {
         success: true,
         session: {
-          sessionId: sessionResult.sessionId!,
-          sessionData: {
-            id: sessionResult.sessionId!,
-            userId: userInfo.id,
-            userInfo: userInfo,
-            ipAddress: clientContext.ipAddress,
-            userAgent: clientContext.userAgent,
-            createdAt: new Date(),
-            lastAccessedAt: new Date(),
-            expiresAt: sessionResult.expiresAt!,
-            isActive: true,
-            fingerprint: "",
-          },
+          id: session.id,
+          sessionData: session,
         },
       };
     } catch (error) {

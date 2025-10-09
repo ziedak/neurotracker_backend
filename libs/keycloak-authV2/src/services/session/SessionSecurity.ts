@@ -311,7 +311,7 @@ export class SessionSecurity {
 
       this.logger.debug("Validating device fingerprint", {
         operationId,
-        sessionId: this.hashSessionId(sessionData.sessionId),
+        sessionId: this.hashSessionId(sessionData.id),
         userId: sessionData.userId,
       });
 
@@ -446,7 +446,7 @@ export class SessionSecurity {
     try {
       this.logger.debug("Detecting suspicious activity", {
         operationId,
-        sessionId: this.hashSessionId(sessionData.sessionId),
+        sessionId: this.hashSessionId(sessionData.id),
         userId: sessionData.userId,
       });
 
@@ -464,7 +464,7 @@ export class SessionSecurity {
 
         this.recordSecurityViolation({
           type: SecurityEventType.RATE_LIMIT_EXCEEDED,
-          sessionId: sessionData.sessionId,
+          sessionId: sessionData.id,
           userId: sessionData.userId,
           ipAddress: requestContext.ipAddress,
           userAgent: requestContext.userAgent,
@@ -738,7 +738,7 @@ export class SessionSecurity {
     );
 
     const excessCount = sessions.length - this.config.maxConcurrentSessions + 1;
-    return sorted.slice(0, excessCount).map((s) => s.sessionId);
+    return sorted.slice(0, excessCount).map((s) => s.id);
   }
 
   private generateDeviceFingerprint(requestContext: {

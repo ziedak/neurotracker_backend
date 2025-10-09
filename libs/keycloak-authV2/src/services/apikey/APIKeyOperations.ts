@@ -26,7 +26,7 @@ import { performance } from "perf_hooks";
 import { createLogger } from "@libs/utils";
 import type { ILogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
-import type { PostgreSQLClient } from "@libs/database";
+import type { IApiKeyRepository } from "@libs/database";
 import { EntropyUtils, type EntropyTestResult } from "../../utils/entropy";
 import { APIKeyValidationResult, APIKeyFormatSchema } from "./types";
 // import type { APIKeyCacheManager } from "./APIKeyCacheManager";
@@ -119,7 +119,7 @@ export class APIKeyOperations {
   private readonly config: APIKeyOperationsConfig;
 
   constructor(
-    private readonly dbClient: PostgreSQLClient,
+    private readonly apiKeyRepository: IApiKeyRepository,
     // @ts-expect-error - cacheManager will be integrated in future iterations
     private readonly cacheManager: APIKeyCacheManager,
     private readonly metrics: IMetricsCollector,
@@ -288,26 +288,18 @@ export class APIKeyOperations {
     const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
 
     try {
-      // Execute query with timeout
-      const result = (await Promise.race([
-        this.dbClient.executeRaw(
-          `SELECT ak.id, ak.user_id, ak.name, ak.scopes, ak.permissions, 
-                  ak.expires_at, ak.is_active, ak.created_at, ak.last_used_at,
-                  u.email, u.roles
-           FROM api_keys ak
-           JOIN users u ON ak.user_id = u.id
-           WHERE ak.key_hash = $1 AND ak.is_active = true AND ak.revoked_at IS NULL`,
-          keyHash
-        ),
-        new Promise((_, reject) =>
+      // Use repository to find key by hash with timeout
+      const result = await Promise.race([
+        this.apiKeyRepository.findByKey(keyHash),
+        new Promise<null>((_, reject) =>
           setTimeout(
             () => reject(new Error("Validation timeout")),
             this.config.maxValidationTime
           )
         ),
-      ])) as any;
+      ]);
 
-      if (result.rows.length === 0) {
+      if (!result) {
         // Constant-time delay for invalid keys to prevent timing attacks
         if (this.config.constantTimeSecurity) {
           await this.constantTimeDelay();
@@ -319,10 +311,16 @@ export class APIKeyOperations {
         };
       }
 
-      const keyData = result.rows[0];
+      // Check if key is active and not revoked
+      if (!result.isActive || result.revokedAt) {
+        return {
+          success: false,
+          error: "API key is inactive or revoked",
+        };
+      }
 
       // Check expiration
-      if (keyData.expires_at && new Date(keyData.expires_at) < new Date()) {
+      if (result.expiresAt && result.expiresAt < new Date()) {
         return {
           success: false,
           error: "API key has expired",
@@ -330,17 +328,24 @@ export class APIKeyOperations {
       }
 
       // Update last used timestamp
-      await this.updateLastUsed(keyData.id);
+      await this.updateLastUsed(result.id);
 
-      return {
+      const validationResult: APIKeyValidationResult = {
         success: true,
         user: {
-          userId: keyData.user_id,
-          email: keyData.email,
-          roles: keyData.roles || [],
+          userId: result.userId,
+          email: "", // Will be populated by upper layers if needed
+          roles: [], // Will be populated by upper layers if needed
         },
-        expiresAt: keyData.expires_at,
+        keyData: result, // Include the full API key data
       };
+
+      // Only add expiresAt if it exists and is not null
+      if (result.expiresAt) {
+        validationResult.expiresAt = result.expiresAt;
+      }
+
+      return validationResult;
     } catch (error) {
       this.logger.error("Database validation failed", { error });
       throw error;
@@ -360,10 +365,7 @@ export class APIKeyOperations {
    */
   private async updateLastUsed(keyId: string): Promise<void> {
     try {
-      await this.dbClient.executeRaw(
-        "UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = $1",
-        keyId
-      );
+      await this.apiKeyRepository.updateLastUsed(keyId);
     } catch (error) {
       this.logger.warn("Failed to update last used timestamp", {
         keyId,
@@ -413,18 +415,10 @@ export class APIKeyOperations {
     try {
       const revokedAt = new Date();
 
-      // Update database
-      const result = (await this.dbClient.executeRaw(
-        `UPDATE api_keys 
-         SET is_active = false, revoked_at = $1, revoked_by = $2, revocation_reason = $3
-         WHERE id = $4 AND is_active = true`,
-        revokedAt,
-        request.revokedBy,
-        request.reason || "Manual revocation",
-        request.keyId
-      )) as any;
+      // Check if key exists and is active
+      const existingKey = await this.apiKeyRepository.findById(request.keyId);
 
-      if (result.rowCount === 0) {
+      if (!existingKey || !existingKey.isActive) {
         return {
           success: false,
           keyId: request.keyId,
@@ -432,6 +426,9 @@ export class APIKeyOperations {
           error: "Key not found or already revoked",
         };
       }
+
+      // Update using repository
+      await this.apiKeyRepository.revokeById(request.keyId);
 
       // Clear from cache (TODO: implement cache invalidation)
       this.logger.debug("Cache invalidated for key", { keyId: request.keyId });
@@ -482,27 +479,25 @@ export class APIKeyOperations {
    */
   async analyzeKeySecurity(keyId: string): Promise<SecurityAnalysis> {
     try {
-      // Get key usage data
-      const usageData = (await this.dbClient.executeRaw(
-        `SELECT ak.created_at, ak.last_used_at, ak.user_id,
-                COUNT(al.id) as usage_count,
-                MAX(al.created_at) as last_access
-         FROM api_keys ak
-         LEFT JOIN audit_logs al ON ak.id = al.api_key_id
-         WHERE ak.id = $1
-         GROUP BY ak.id, ak.created_at, ak.last_used_at, ak.user_id`,
-        keyId
-      )) as any;
+      // Get key data from repository
+      const apiKey = await this.apiKeyRepository.findById(keyId);
 
-      if (usageData.rows.length === 0) {
+      if (!apiKey) {
         throw new Error("Key not found");
       }
 
-      const keyData = usageData.rows[0];
       const keyAge = Math.floor(
-        (Date.now() - new Date(keyData.created_at).getTime()) /
-          (1000 * 60 * 60 * 24)
+        (Date.now() - apiKey.createdAt.getTime()) / (1000 * 60 * 60 * 24)
       );
+
+      // Create usage data structure from API key
+      const keyData = {
+        createdAt: apiKey.createdAt,
+        lastUsedAt: apiKey.lastUsedAt,
+        userId: apiKey.userId,
+        usage_count: apiKey.usageCount,
+        last_access: apiKey.lastUsedAt,
+      };
 
       // Analyze threat level
       const threatLevel = this.calculateThreatLevel(keyData, keyAge);
@@ -532,21 +527,23 @@ export class APIKeyOperations {
    */
   private async logSecurityEvent(event: SecurityEvent): Promise<void> {
     try {
-      await this.dbClient.executeRaw(
-        `INSERT INTO security_events 
-         (event_type, key_id, user_id, action_by, reason, metadata, timestamp, severity)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        event.eventType,
-        event.keyId,
-        event.userId || null,
-        event.actionBy,
-        event.reason,
-        JSON.stringify(event.metadata || {}),
-        event.timestamp,
-        event.severity
-      );
+      // Log to application logs
+      this.logger.info("Security event", {
+        eventType: event.eventType,
+        keyId: event.keyId,
+        userId: event.userId,
+        actionBy: event.actionBy,
+        reason: event.reason,
+        metadata: event.metadata,
+        timestamp: event.timestamp,
+        severity: event.severity,
+      });
 
+      // Record metric
       this.metrics?.recordCounter(`security.event.${event.eventType}`);
+
+      // TODO: Implement proper audit log table and repository
+      // For now, we're using application logs as the audit trail
     } catch (error) {
       this.logger.error("Failed to log security event", { event, error });
     }

@@ -28,7 +28,6 @@ export type KeycloakSessionData = import("@libs/database").UserSession;
  */
 export interface SessionCreationOptions {
   userId: string;
-  sessionId: string;
 
   // Keycloak-specific
   keycloakSessionId?: string;
@@ -37,10 +36,6 @@ export interface SessionCreationOptions {
   idToken?: string;
   tokenExpiresAt?: Date;
   refreshExpiresAt?: Date;
-
-  // Store-specific (optional - will use default if not provided)
-  storeId?: string;
-  token?: string; // Session token (will generate if not provided)
 
   // Common fields
   fingerprint?: string;
@@ -51,21 +46,6 @@ export interface SessionCreationOptions {
 }
 
 /**
- * Default values for required DB fields
- */
-export const DEFAULT_STORE_ID = "00000000-0000-0000-0000-000000000000";
-
-/**
- * Generate a unique session token
- * Format: keycloak_<timestamp>_<random>
- */
-function generateSessionToken(): string {
-  const timestamp = Date.now().toString(36);
-  const random = Math.random().toString(36).substring(2, 15);
-  return `keycloak_${timestamp}_${random}`;
-}
-
-/**
  * Converts SessionCreationOptions to UserSessionCreateInput
  * Handles smart defaults for required DB fields
  * Uses Prisma's relation syntax for foreign keys
@@ -73,15 +53,9 @@ function generateSessionToken(): string {
 export function toUserSessionCreateInput(
   options: SessionCreationOptions
 ): import("@libs/database").UserSessionCreateInput {
-  const storeId = options.storeId || DEFAULT_STORE_ID;
-  const token = options.token || generateSessionToken();
-
   const input: import("@libs/database").UserSessionCreateInput = {
     // Use Prisma relation syntax for foreign keys
     user: { connect: { id: options.userId } },
-    store: { connect: { id: storeId } },
-    sessionId: options.sessionId,
-    token,
   };
 
   // Add optional fields only if defined (to satisfy exactOptionalPropertyTypes)
@@ -123,42 +97,28 @@ export function toUserSessionCreateInput(
 }
 
 /**
- * Check if session uses default store
+ * Check if session is a Keycloak session (has Keycloak session ID)
  */
-export function isDefaultStore(storeId: string): boolean {
-  return storeId === DEFAULT_STORE_ID;
-}
-
-/**
- * Check if session is a Keycloak session (vs other types)
- */
-export function isKeycloakSession(token: string): boolean {
-  return token.startsWith("keycloak_");
+export function isKeycloakSession(
+  session: import("@libs/database").UserSession
+): boolean {
+  return (
+    session.keycloakSessionId !== null &&
+    session.keycloakSessionId !== undefined
+  );
 }
 
 /**
  * Zod validation schemas for runtime type checking
  */
 
-// User ID validation schema
-export const UserIdSchema = z.string().uuid("User ID must be a valid UUID");
+// User ID validation schema (CUIDs from Prisma)
+export const UserIdSchema = z.string().min(1, "User ID must not be empty");
 
-// Session ID validation schema
-export const SessionIdSchema = z
-  .string()
-  .min(1, "Session ID cannot be empty")
-  .max(255, "Session ID too long");
-
-// Token validation schema
-export const TokenSchema = z.string().min(10, "Token too short");
-
-// UserSession validation schema (aligned with DB model)
+// UserSession validation schema (aligned with DB model - CUIDs not UUIDs)
 export const UserSessionSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().min(1),
   userId: UserIdSchema,
-  storeId: z.string().uuid(),
-  sessionId: SessionIdSchema,
-  token: z.string().min(1),
   keycloakSessionId: z.string().nullable().optional(),
   accessToken: z.string().nullable().optional(),
   refreshToken: z.string().nullable().optional(),
