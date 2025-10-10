@@ -13,7 +13,7 @@ import { KeycloakClient } from "../../client/KeycloakClient";
 
 // Import focused services
 import { JWTValidator } from "./JWTValidator";
-import { SecureCacheManager } from "./SecureCacheManager";
+import { SecureCacheManager } from "../SecureCacheManager";
 import {
   RefreshTokenManager,
   type RefreshTokenConfig,

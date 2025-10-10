@@ -26,7 +26,7 @@ import { performance } from "perf_hooks";
 import crypto from "crypto";
 import type { ILogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
-import type { PostgreSQLClient } from "@libs/database";
+import type { IApiKeyRepository } from "@libs/database";
 import { EntropyUtils } from "../../utils/entropy";
 
 // ==================== USAGE TRACKING INTERFACES ====================
@@ -208,7 +208,7 @@ export class APIKeyMonitoring {
   private lastHealthCheck?: SystemHealth | undefined;
 
   constructor(
-    private readonly dbClient: PostgreSQLClient,
+    private readonly apiKeyRepo: IApiKeyRepository,
     private readonly metrics?: IMetricsCollector,
     logger?: ILogger,
     config?: Partial<APIKeyMonitoringConfig>
@@ -296,40 +296,11 @@ export class APIKeyMonitoring {
     const startTime = performance.now();
 
     try {
-      const result = (await this.executeWithRetry(async () => {
-        return this.dbClient.executeRaw(
-          `SELECT 
-            ak.usage_count,
-            ak.last_used_at,
-            ak.created_at,
-            COALESCE(daily.count, 0) as daily_usage,
-            COALESCE(weekly.count, 0) as weekly_usage,
-            COALESCE(monthly.count, 0) as monthly_usage
-           FROM api_keys ak
-           LEFT JOIN (
-             SELECT key_id, COUNT(*) as count
-             FROM audit_logs 
-             WHERE key_id = $1 AND created_at >= CURRENT_DATE
-             GROUP BY key_id
-           ) daily ON daily.key_id = ak.id
-           LEFT JOIN (
-             SELECT key_id, COUNT(*) as count
-             FROM audit_logs 
-             WHERE key_id = $1 AND created_at >= CURRENT_DATE - INTERVAL '7 days'
-             GROUP BY key_id
-           ) weekly ON weekly.key_id = ak.id
-           LEFT JOIN (
-             SELECT key_id, COUNT(*) as count
-             FROM audit_logs 
-             WHERE key_id = $1 AND created_at >= CURRENT_DATE - INTERVAL '30 days'
-             GROUP BY key_id
-           ) monthly ON monthly.key_id = ak.id
-           WHERE ak.id = $1`,
-          keyId
-        );
-      })) as any[];
+      const apiKey = await this.executeWithRetry(async () => {
+        return this.apiKeyRepo.getUsageStatsByKeyId(keyId);
+      });
 
-      if (!result || !Array.isArray(result) || result.length === 0) {
+      if (!apiKey) {
         return {
           success: false,
           error: "API key not found",
@@ -337,25 +308,46 @@ export class APIKeyMonitoring {
         };
       }
 
-      const stats = result[0];
       const keyAge = Math.max(
         1,
         Math.floor(
-          (Date.now() - new Date(stats.created_at).getTime()) /
+          (Date.now() - new Date(apiKey.createdAt).getTime()) /
             (1000 * 60 * 60 * 24)
         )
       );
 
+      // Calculate usage trends from the API key data
+      // Since we don't have audit_logs table, we use the total usage count
+      // and estimate based on timestamps
+      const totalUsage = apiKey.usageCount ?? 0;
+      const averageUsagePerDay = totalUsage / keyAge;
+
+      // Estimate daily/weekly/monthly usage based on recent activity
+      const now = Date.now();
+      const oneDayAgo = now - 24 * 60 * 60 * 1000;
+      const oneWeekAgo = now - 7 * 24 * 60 * 60 * 1000;
+      const oneMonthAgo = now - 30 * 24 * 60 * 60 * 1000;
+
+      const lastUsedTime = apiKey.lastUsedAt
+        ? new Date(apiKey.lastUsedAt).getTime()
+        : 0;
+
+      // Estimate based on recent activity - if used recently, assume some daily usage
+      const dailyUsage =
+        lastUsedTime > oneDayAgo ? Math.ceil(averageUsagePerDay) : 0;
+      const weeklyUsage =
+        lastUsedTime > oneWeekAgo ? Math.ceil(averageUsagePerDay * 7) : 0;
+      const monthlyUsage =
+        lastUsedTime > oneMonthAgo ? Math.ceil(averageUsagePerDay * 30) : 0;
+
       const usageStats: UsageStats = {
-        totalUsage: stats.usage_count || 0,
-        dailyUsage: stats.daily_usage || 0,
-        weeklyUsage: stats.weekly_usage || 0,
-        monthlyUsage: stats.monthly_usage || 0,
-        averageUsagePerDay: (stats.usage_count || 0) / keyAge,
-        lastUsedAt: stats.last_used_at
-          ? new Date(stats.last_used_at)
-          : undefined,
-        firstUsedAt: new Date(stats.created_at),
+        totalUsage,
+        dailyUsage,
+        weeklyUsage,
+        monthlyUsage,
+        averageUsagePerDay,
+        lastUsedAt: apiKey.lastUsedAt ? new Date(apiKey.lastUsedAt) : undefined,
+        firstUsedAt: new Date(apiKey.createdAt),
       };
 
       const executionTime = performance.now() - startTime;
@@ -401,106 +393,94 @@ export class APIKeyMonitoring {
     const startTime = performance.now();
 
     try {
-      // Get overall statistics
-      const overallResult = (await this.executeWithRetry(async () => {
-        return this.dbClient.executeRaw(
-          `SELECT 
-            COUNT(*) as total_keys,
-            COUNT(*) FILTER (WHERE is_active = true) as active_keys,
-            COUNT(*) FILTER (WHERE last_used_at >= CURRENT_DATE) as keys_used_today,
-            COUNT(*) FILTER (WHERE last_used_at >= CURRENT_DATE - INTERVAL '7 days') as keys_used_week,
-            COUNT(*) FILTER (WHERE last_used_at >= CURRENT_DATE - INTERVAL '30 days') as keys_used_month,
-            COALESCE(SUM(usage_count), 0) as total_usage
-           FROM api_keys
-           WHERE revoked_at IS NULL`
-        );
-      })) as any[];
+      // Use repository methods for analytics
+      const [summary, mostUsedKeys, leastUsedKeys] = await Promise.all([
+        this.executeWithRetry(async () => {
+          return this.apiKeyRepo.getUsageAnalyticsSummary();
+        }),
+        this.executeWithRetry(async () => {
+          return this.apiKeyRepo.getMostUsedKeys(limit);
+        }),
+        this.executeWithRetry(async () => {
+          return this.apiKeyRepo.getLeastUsedKeys(limit);
+        }),
+      ]);
 
-      const overallStats = overallResult?.[0];
+      // Calculate date-based usage counts from the keys we have
+      const now = Date.now();
+      const oneDayAgo = now - 24 * 60 * 60 * 1000;
+      const oneWeekAgo = now - 7 * 24 * 60 * 60 * 1000;
+      const oneMonthAgo = now - 30 * 24 * 60 * 60 * 1000;
 
-      // Get most and least used keys in parallel
-      const [mostUsedResult, leastUsedResult, trendsResult] = await Promise.all(
-        [
-          this.executeWithRetry(async () => {
-            return this.dbClient.executeRaw(
-              `SELECT id as key_id, name, user_id, usage_count, last_used_at, created_at
-             FROM api_keys 
-             WHERE is_active = true AND revoked_at IS NULL
-             ORDER BY usage_count DESC 
-             LIMIT $1`,
-              limit
-            );
-          }) as Promise<any[]>,
-          this.executeWithRetry(async () => {
-            return this.dbClient.executeRaw(
-              `SELECT id as key_id, name, user_id, usage_count, last_used_at, created_at
-             FROM api_keys 
-             WHERE is_active = true AND revoked_at IS NULL AND usage_count > 0
-             ORDER BY usage_count ASC 
-             LIMIT $1`,
-              limit
-            );
-          }) as Promise<any[]>,
-          this.executeWithRetry(async () => {
-            return this.dbClient.executeRaw(
-              `SELECT 
-              DATE(created_at) as day,
-              COUNT(*) as usage_count
-             FROM audit_logs
-             WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
-             GROUP BY DATE(created_at)
-             ORDER BY day DESC
-             LIMIT 30`
-            );
-          }) as Promise<any[]>,
-        ]
-      );
+      // Get all keys for trend calculation (we need to query this separately)
+      const allActiveKeys = await this.apiKeyRepo.findMany({
+        where: {
+          isActive: true,
+          revokedAt: null,
+        },
+      });
+
+      const keysUsedToday = allActiveKeys.filter((key) => {
+        const lastUsed = key.lastUsedAt
+          ? new Date(key.lastUsedAt).getTime()
+          : 0;
+        return lastUsed > oneDayAgo;
+      }).length;
+
+      const keysUsedThisWeek = allActiveKeys.filter((key) => {
+        const lastUsed = key.lastUsedAt
+          ? new Date(key.lastUsedAt).getTime()
+          : 0;
+        return lastUsed > oneWeekAgo;
+      }).length;
+
+      const keysUsedThisMonth = allActiveKeys.filter((key) => {
+        const lastUsed = key.lastUsedAt
+          ? new Date(key.lastUsedAt).getTime()
+          : 0;
+        return lastUsed > oneMonthAgo;
+      }).length;
 
       const analytics: UsageAnalytics = {
-        totalKeys: overallStats?.total_keys || 0,
-        activeKeys: overallStats?.active_keys || 0,
-        keysUsedToday: overallStats?.keys_used_today || 0,
-        keysUsedThisWeek: overallStats?.keys_used_week || 0,
-        keysUsedThisMonth: overallStats?.keys_used_month || 0,
-        totalUsage: overallStats?.total_usage || 0,
-        averageUsagePerKey:
-          (overallStats?.total_keys || 0) > 0
-            ? (overallStats?.total_usage || 0) / (overallStats?.total_keys || 1)
-            : 0,
-        mostUsedKeys: (mostUsedResult || []).map(
-          (row: any): APIKeyUsageInfo => {
-            const item: APIKeyUsageInfo = {
-              keyId: row.key_id,
-              name: row.name,
-              userId: row.user_id,
-              usageCount: row.usage_count,
-              createdAt: new Date(row.created_at),
-            };
-            if (row.last_used_at) {
-              item.lastUsedAt = new Date(row.last_used_at);
-            }
-            return item;
+        totalKeys: summary.totalKeys,
+        activeKeys: summary.activeKeys,
+        keysUsedToday,
+        keysUsedThisWeek,
+        keysUsedThisMonth,
+        totalUsage: summary.totalUsage,
+        averageUsagePerKey: summary.averageUsagePerKey,
+        mostUsedKeys: mostUsedKeys.map((key): APIKeyUsageInfo => {
+          const info: APIKeyUsageInfo = {
+            keyId: key.id,
+            name: key.name,
+            userId: key.userId,
+            usageCount: key.usageCount ?? 0,
+            createdAt: new Date(key.createdAt),
+          };
+          if (key.lastUsedAt) {
+            info.lastUsedAt = new Date(key.lastUsedAt);
           }
-        ),
-        leastUsedKeys: (leastUsedResult || []).map(
-          (row: any): APIKeyUsageInfo => {
-            const item: APIKeyUsageInfo = {
-              keyId: row.key_id,
-              name: row.name,
-              userId: row.user_id,
-              usageCount: row.usage_count,
-              createdAt: new Date(row.created_at),
-            };
-            if (row.last_used_at) {
-              item.lastUsedAt = new Date(row.last_used_at);
-            }
-            return item;
+          return info;
+        }),
+        leastUsedKeys: leastUsedKeys.map((key): APIKeyUsageInfo => {
+          const info: APIKeyUsageInfo = {
+            keyId: key.id,
+            name: key.name,
+            userId: key.userId,
+            usageCount: key.usageCount ?? 0,
+            createdAt: new Date(key.createdAt),
+          };
+          if (key.lastUsedAt) {
+            info.lastUsedAt = new Date(key.lastUsedAt);
           }
-        ),
+          return info;
+        }),
         usageTrends: {
-          daily: (trendsResult || []).map((row: any) => row.usage_count),
-          weekly: [], // Could be calculated if needed
-          monthly: [], // Could be calculated if needed
+          // Without audit_logs table, we can't provide historical trends
+          // These would require a separate events table to be implemented
+          daily: [],
+          weekly: [],
+          monthly: [],
         },
       };
 
@@ -766,21 +746,14 @@ export class APIKeyMonitoring {
   }
 
   /**
-   * Track usage synchronously (direct database update)
+   * Track usage synchronously (direct database update via repository)
    */
   private async trackUsageSync(
     keyId: string,
     operationId: string
   ): Promise<void> {
     await this.executeWithRetry(async () => {
-      return this.dbClient.executeRaw(
-        `UPDATE api_keys 
-         SET usage_count = usage_count + 1, 
-             last_used_at = CURRENT_TIMESTAMP, 
-             updated_at = CURRENT_TIMESTAMP 
-         WHERE id = $1`,
-        keyId
-      );
+      return this.apiKeyRepo.incrementUsageCount(keyId);
     });
 
     this.logger.debug("Usage updated synchronously", { keyId, operationId });
@@ -799,7 +772,7 @@ export class APIKeyMonitoring {
     const startTime = performance.now();
 
     try {
-      // Group updates by keyId
+      // Group updates by keyId to count increments
       const groupedUpdates = new Map<string, PendingUsageUpdate[]>();
       for (const update of updates) {
         if (!groupedUpdates.has(update.keyId)) {
@@ -808,67 +781,32 @@ export class APIKeyMonitoring {
         groupedUpdates.get(update.keyId)!.push(update);
       }
 
-      // Build batch update query
-      const keyIds = Array.from(groupedUpdates.keys());
-      if (keyIds.length === 0) return;
+      // Build batch update array for repository
+      const batchUpdates = Array.from(groupedUpdates.entries()).map(
+        ([keyId, keyUpdates]) => ({
+          id: keyId,
+          incrementBy: keyUpdates.length,
+        })
+      );
 
-      const caseStatements = keyIds.map((keyId, index) => {
-        const keyUpdates = groupedUpdates.get(keyId)!;
-        const incrementCount = keyUpdates.length;
-        const latestTimestamp = keyUpdates.reduce(
-          (latest, update) =>
-            update.timestamp > latest ? update.timestamp : latest,
-          keyUpdates[0]?.timestamp || new Date()
-        );
+      if (batchUpdates.length === 0) return;
 
-        return {
-          keyId,
-          incrementCount,
-          timestamp: latestTimestamp.toISOString(),
-          paramIndex: index + 1,
-        };
-      });
-
-      const updateQuery = `
-        UPDATE api_keys SET
-          usage_count = usage_count + CASE id
-            ${caseStatements
-              .map(
-                (stmt) => `WHEN $${stmt.paramIndex} THEN ${stmt.incrementCount}`
-              )
-              .join(" ")}
-          END,
-          last_used_at = CASE id
-            ${caseStatements
-              .map(
-                (stmt) =>
-                  `WHEN $${stmt.paramIndex} THEN '${stmt.timestamp}'::timestamp`
-              )
-              .join(" ")}
-          END,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id IN (${caseStatements
-          .map((stmt) => `$${stmt.paramIndex}`)
-          .join(", ")})
-      `;
-
-      const parameters = caseStatements.map((stmt) => stmt.keyId);
-
+      // Use repository batch method
       await this.executeWithRetry(async () => {
-        return this.dbClient.executeRaw(updateQuery, ...parameters);
+        return this.apiKeyRepo.batchIncrementUsageCount(batchUpdates);
       });
 
       const duration = performance.now() - startTime;
       this.logger.info("Batch usage updates processed", {
         batchSize: updates.length,
-        uniqueKeys: keyIds.length,
+        uniqueKeys: batchUpdates.length,
         duration,
       });
 
       this.metrics?.recordTimer("apikey.monitoring.batch_duration", duration);
       this.metrics?.recordCounter(
         "apikey.monitoring.batch_updates",
-        keyIds.length
+        batchUpdates.length
       );
     } catch (error) {
       this.logger.error("Batch usage updates failed", {
@@ -928,7 +866,8 @@ export class APIKeyMonitoring {
     const startTime = performance.now();
 
     try {
-      await this.dbClient.executeRaw("SELECT 1");
+      // Use repository count as health check
+      await this.apiKeyRepo.count();
       const responseTime = performance.now() - startTime;
 
       const status: "healthy" | "degraded" | "unhealthy" =

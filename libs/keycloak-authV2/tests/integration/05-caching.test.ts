@@ -112,7 +112,7 @@ describe("KeycloakIntegrationService - Caching", () => {
         }
       );
 
-      const sessionId = authResult.session!.sessionId;
+      const sessionId = authResult.session!.id;
 
       // First retrieval (cache miss)
       const start1 = performance.now();

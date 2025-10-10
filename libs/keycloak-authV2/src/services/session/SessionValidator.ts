@@ -44,7 +44,7 @@ export interface SessionValidatorConfig {
 const DEFAULT_VALIDATOR_CONFIG: SessionValidatorConfig = {
   sessionTimeout: 24 * 60 * 60 * 1000, // 24 hours
   maxIdleTime: 4 * 60 * 60 * 1000, // 4 hours
-  requireFingerprint: true,
+  requireFingerprint: false, // Optional by default - enable in production if fingerprint collection is implemented
   allowFingerprintRotation: false,
   maxSessionsPerUser: 5,
   sessionRotationInterval: 8 * 60 * 60 * 1000, // 8 hours
@@ -327,12 +327,22 @@ export class SessionValidator {
     sessionData: UserSession,
     currentRequest: { fingerprint?: SessionFingerprint }
   ): Promise<SecurityCheckResult> {
+    // If fingerprint is not required, skip validation when data is missing
     if (!sessionData.fingerprint || !currentRequest.fingerprint) {
+      if (this.config.requireFingerprint) {
+        // Fingerprint is required but missing - fail validation
+        return {
+          isValid: false,
+          reason: SecurityCheckReason.FINGERPRINT_MISMATCH,
+          message: "Missing required fingerprint data",
+          shouldTerminate: true,
+        };
+      }
+      // Fingerprint is optional and missing - pass validation with warning
       return {
-        isValid: !this.config.requireFingerprint,
-        reason: SecurityCheckReason.FINGERPRINT_MISMATCH,
-        message: "Missing fingerprint data",
-        shouldTerminate: this.config.requireFingerprint,
+        isValid: true,
+        message: "Fingerprint validation skipped (not available)",
+        shouldTerminate: false,
       };
     }
 
@@ -345,10 +355,7 @@ export class SessionValidator {
       storedFingerprint.platform !== currentFingerprint.platform;
 
     if (criticalMismatch) {
-      this.trackSuspiciousActivity(
-        sessionData.id,
-        "fingerprint_mismatch"
-      );
+      this.trackSuspiciousActivity(sessionData.id, "fingerprint_mismatch");
       return {
         isValid: false,
         reason: SecurityCheckReason.FINGERPRINT_MISMATCH,
@@ -406,10 +413,7 @@ export class SessionValidator {
       });
 
       if (tracker.ipChanges > this.config.allowedIpChanges) {
-        this.trackSuspiciousActivity(
-          sessionData.id,
-          "excessive_ip_changes"
-        );
+        this.trackSuspiciousActivity(sessionData.id, "excessive_ip_changes");
         return {
           isValid: false,
           reason: SecurityCheckReason.IP_VIOLATION,

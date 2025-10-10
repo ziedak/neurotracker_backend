@@ -483,6 +483,7 @@ export class SessionSecurity {
         sessionData,
         requestContext
       );
+
       if (accessPatternResult.suspicious) {
         suspiciousFactors.push(...accessPatternResult.reasons);
       }
@@ -555,6 +556,11 @@ export class SessionSecurity {
           riskScore: profile.riskScore,
         });
       }
+
+      this.metrics?.recordTimer(
+        "session.security.suspicious_activity.duration",
+        performance.now() - startTime
+      );
 
       return {
         isValid: true,
@@ -858,6 +864,15 @@ export class SessionSecurity {
     requestContext: { ipAddress: string; userAgent: string }
   ): { suspicious: boolean; reasons: string[] } {
     const reasons: string[] = [];
+
+    // DEBUG logging
+    this.logger.info("🔍 Analyzing access pattern", {
+      sessionIp: sessionData.ipAddress,
+      requestIp: requestContext.ipAddress,
+      sessionUA: sessionData.userAgent,
+      requestUA: requestContext.userAgent,
+      lastAccess: sessionData.lastAccessedAt,
+    });
 
     // Check for rapid IP changes
     if (

@@ -51,8 +51,11 @@ const sanitizeInput = (input: string): string => {
 };
 
 // Zod Validation Schemas with Enhanced Sanitization
-const SessionIdSchema = z.string().uuid("Invalid session ID format");
-
+/**
+ * Input validation schemas using Zod
+ */
+// Changed from .uuid() to .min(1) because Prisma uses CUID format, not UUID
+const SessionIdSchema = z.string().min(1, "Session ID must not be empty");
 const UsernameSchema = z
   .string()
   .trim()

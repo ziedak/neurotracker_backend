@@ -15,7 +15,7 @@ import {
   KeycloakClient,
   type KeycloakTokenResponse,
 } from "../../client/KeycloakClient";
-import type { SecureCacheManager } from "./SecureCacheManager";
+import type { SecureCacheManager } from "../SecureCacheManager";
 import { TokenRefreshScheduler } from "./TokenRefreshScheduler";
 
 /**

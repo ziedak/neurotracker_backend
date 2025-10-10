@@ -78,11 +78,11 @@ describe("KeycloakIntegrationService - Authentication", () => {
       expect(authResult.tokens?.access_token).toBeDefined();
       expect(authResult.tokens?.refresh_token).toBeDefined();
       expect(authResult.session).toBeDefined();
-      expect(authResult.session?.sessionId).toBeDefined();
+      expect(authResult.session?.id).toBeDefined();
 
       console.log("✅ Password authentication successful", {
         userId,
-        sessionId: authResult.session?.sessionId,
+        sessionId: authResult.session?.id,
       });
     }, 30000);
 
@@ -150,7 +150,7 @@ describe("KeycloakIntegrationService - Authentication", () => {
       );
 
       expect(authResult.success).toBe(true);
-      const sessionId = authResult.session?.sessionId;
+      const sessionId = authResult.session?.id;
       expect(sessionId).toBeDefined();
 
       // Validate session
@@ -203,11 +203,13 @@ describe("KeycloakIntegrationService - Authentication", () => {
       );
 
       expect(authResult.success).toBe(true);
-      const sessionId = authResult.session?.sessionId;
+      const sessionId = authResult.session?.id;
       const originalAccessToken = authResult.tokens?.access_token;
 
       // Refresh tokens
-      const refreshResult = await getEnv().service.refreshSessionTokens(sessionId!);
+      const refreshResult = await getEnv().service.refreshSessionTokens(
+        sessionId!
+      );
 
       expect(refreshResult.success).toBe(true);
       expect(refreshResult.tokens).toBeDefined();
@@ -241,7 +243,7 @@ describe("KeycloakIntegrationService - Authentication", () => {
         }
       );
 
-      const sessionId = authResult.session?.sessionId;
+      const sessionId = authResult.session?.id;
       expect(sessionId).toBeDefined();
 
       // Logout

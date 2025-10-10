@@ -106,35 +106,9 @@ export const APIKeyGenerationOptionsSchema = z.object({
   metadata: MetadataSchema,
 });
 
-export const APIKeySchema = z.object({
-  id: KeyIdSchema,
-  name: z.string(),
-  keyHash: z.string(),
-  keyPreview: z.string(),
-  userId: UserIdSchema,
-  storeId: StoreIdSchema,
-  permissions: z.array(PermissionSchema).optional(),
-  scopes: z.array(z.string()),
-  lastUsedAt: z.date().optional(),
-  usageCount: z.number().int().min(0),
-  isActive: z.boolean(),
-  expiresAt: z.date().optional(),
-  createdAt: z.date(),
-  updatedAt: z.date(),
-  revokedAt: z.date().optional(),
-  revokedBy: z.string().optional(),
-  metadata: MetadataSchema,
-});
 
-export const APIKeyManagerStatsSchema = z.object({
-  totalKeys: z.number().int().min(0),
-  activeKeys: z.number().int().min(0),
-  expiredKeys: z.number().int().min(0),
-  revokedKeys: z.number().int().min(0),
-  validationsToday: z.number().int().min(0),
-  cacheHitRate: z.number().min(0).max(1),
-  lastResetAt: z.date(),
-});
+
+
 
 /**
  * Core interfaces

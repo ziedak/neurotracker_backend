@@ -146,7 +146,7 @@ export class APIKeyManager {
         this.config.features.enableHealthMonitoring
       ) {
         this.monitoring = new APIKeyMonitoring(
-          this.dbClient,
+          apiKeyRepository,
           this.metrics,
           this.logger,
           {

@@ -332,8 +332,8 @@ export const RolePermissionUpdateInputSchema = z.object({
 });
 
 export const UserSessionCreateInputSchema = z.object({
-  id: z.string().uuid().optional(),
-  userId: z.string().uuid(),
+  id: z.string().min(1).optional(), // CUID from Prisma
+  userId: z.string().min(1), // CUID from Prisma
   keycloakSessionId: z.string().max(255).nullable().optional(),
   accessToken: z.string().nullable().optional(),
   refreshToken: z.string().nullable().optional(),
@@ -370,9 +370,37 @@ export const UserSessionUpdateInputSchema = z.object({
   endedAt: z.date().nullable().optional(),
 });
 
+// Full UserSession validation schema (for retrieved data from database)
+export const UserSessionSchema = z.object({
+  id: z.string().min(1), // CUID from Prisma
+  userId: z.string().min(1), // CUID from Prisma
+  keycloakSessionId: z.string().max(255).nullable().optional(),
+  accessToken: z.string().nullable().optional(),
+  refreshToken: z.string().nullable().optional(),
+  idToken: z.string().nullable().optional(),
+  tokenExpiresAt: z.date().nullable().optional(),
+  refreshExpiresAt: z.date().nullable().optional(),
+  fingerprint: z.string().max(64).nullable().optional(),
+  lastAccessedAt: z.date(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+  expiresAt: z.date().nullable().optional(),
+  ipAddress: z.string().nullable().optional(),
+  userAgent: z.string().nullable().optional(),
+  metadata: z.unknown().nullable().optional(),
+  isActive: z.boolean(),
+  endedAt: z.date().nullable().optional(),
+  // Optional relations (not always populated)
+  user: z.any().optional(),
+  events: z.array(z.any()).optional(),
+  logs: z.array(z.any()).optional(),
+  recoveryEvents: z.array(z.any()).optional(),
+  activities: z.array(z.any()).optional(),
+});
+
 export const SessionLogCreateInputSchema = z.object({
-  id: z.string().uuid().optional(),
-  sessionId: z.string().uuid(),
+  id: z.string().min(1).optional(), // CUID from Prisma
+  sessionId: z.string().min(1), // CUID from Prisma
   event: z.string().min(1).max(100),
   timestamp: z
     .date()
@@ -388,9 +416,9 @@ export const SessionLogUpdateInputSchema = z.object({
 });
 
 export const UserEventCreateInputSchema = z.object({
-  id: z.string().uuid().optional(),
-  userId: z.string().uuid(),
-  sessionId: z.string().uuid().nullable().optional(),
+  id: z.string().min(1).optional(), // CUID from Prisma
+  userId: z.string().min(1), // CUID from Prisma
+  sessionId: z.string().min(1).nullable().optional(), // CUID from Prisma
   eventType: z.string().min(1).max(100),
   timestamp: z
     .date()
@@ -405,7 +433,7 @@ export const UserEventCreateInputSchema = z.object({
 });
 
 export const UserEventUpdateInputSchema = z.object({
-  sessionId: z.string().uuid().nullable().optional(),
+  sessionId: z.string().min(1).nullable().optional(), // CUID from Prisma
   eventType: z.string().min(1).max(100).optional(),
   timestamp: z.date().optional(),
   metadata: z.unknown().optional(),

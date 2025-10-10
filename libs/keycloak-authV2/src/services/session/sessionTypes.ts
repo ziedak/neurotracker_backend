@@ -20,6 +20,15 @@ export type {
   SessionLogUpdateInput,
 } from "@libs/database";
 
+// Re-export validation schemas from database models (single source of truth)
+export {
+  UserSessionSchema,
+  UserSessionCreateInputSchema,
+  UserSessionUpdateInputSchema,
+  SessionLogCreateInputSchema,
+  SessionLogUpdateInputSchema,
+} from "@libs/database";
+
 // Type aliases for backward compatibility
 export type KeycloakSessionData = import("@libs/database").UserSession;
 
@@ -110,32 +119,13 @@ export function isKeycloakSession(
 
 /**
  * Zod validation schemas for runtime type checking
+ * Note: Core validation schemas are imported from @libs/database
+ * Only custom session-service-specific schemas are defined here
  */
 
-// User ID validation schema (CUIDs from Prisma)
+// Simple ID validation for parameters (CUID format from Prisma)
+export const SessionIdSchema = z.string().min(1, "Session ID must not be empty");
 export const UserIdSchema = z.string().min(1, "User ID must not be empty");
-
-// UserSession validation schema (aligned with DB model - CUIDs not UUIDs)
-export const UserSessionSchema = z.object({
-  id: z.string().min(1),
-  userId: UserIdSchema,
-  keycloakSessionId: z.string().nullable().optional(),
-  accessToken: z.string().nullable().optional(),
-  refreshToken: z.string().nullable().optional(),
-  idToken: z.string().nullable().optional(),
-  tokenExpiresAt: z.date().nullable().optional(),
-  refreshExpiresAt: z.date().nullable().optional(),
-  fingerprint: z.string().nullable().optional(),
-  lastAccessedAt: z.date(),
-  createdAt: z.date(),
-  updatedAt: z.date(),
-  expiresAt: z.date().nullable().optional(),
-  ipAddress: z.string().nullable().optional(),
-  userAgent: z.string().nullable().optional(),
-  metadata: z.unknown().nullable().optional(),
-  isActive: z.boolean(),
-  endedAt: z.date().nullable().optional(),
-});
 
 /**
  * Session validation result interface

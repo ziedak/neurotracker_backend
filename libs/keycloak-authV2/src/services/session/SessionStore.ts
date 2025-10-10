@@ -37,6 +37,48 @@ import { z } from "zod";
 const SessionIdSchema = z.string().min(1, "Session ID must not be empty");
 
 /**
+ * Normalize session data - ensures all Date fields are Date objects, not strings
+ * This is needed because data from cache or serialization may have Date fields as ISO strings
+ */
+function normalizeSessionDates(session: UserSession): UserSession {
+  return {
+    ...session,
+    lastAccessedAt:
+      session.lastAccessedAt instanceof Date
+        ? session.lastAccessedAt
+        : new Date(session.lastAccessedAt),
+    createdAt:
+      session.createdAt instanceof Date
+        ? session.createdAt
+        : new Date(session.createdAt),
+    updatedAt:
+      session.updatedAt instanceof Date
+        ? session.updatedAt
+        : new Date(session.updatedAt),
+    tokenExpiresAt: session.tokenExpiresAt
+      ? session.tokenExpiresAt instanceof Date
+        ? session.tokenExpiresAt
+        : new Date(session.tokenExpiresAt)
+      : null,
+    refreshExpiresAt: session.refreshExpiresAt
+      ? session.refreshExpiresAt instanceof Date
+        ? session.refreshExpiresAt
+        : new Date(session.refreshExpiresAt)
+      : null,
+    expiresAt: session.expiresAt
+      ? session.expiresAt instanceof Date
+        ? session.expiresAt
+        : new Date(session.expiresAt)
+      : null,
+    endedAt: session.endedAt
+      ? session.endedAt instanceof Date
+        ? session.endedAt
+        : new Date(session.endedAt)
+      : null,
+  };
+}
+
+/**
  * @deprecated Using UserSession type from @libs/database instead
  * Database row interface - no longer used after repository refactoring
  */
@@ -223,7 +265,8 @@ export class SessionStore {
             operationId,
             sessionId: this.hashSessionId(sessionId),
           });
-          return result.data;
+          // Normalize dates from cache (may be serialized as strings)
+          return normalizeSessionDates(result.data);
         }
       }
 
@@ -276,7 +319,8 @@ export class SessionStore {
         duration: performance.now() - startTime,
       });
 
-      return session;
+      // Normalize dates from database (Prisma may return Date objects, but ensure consistency)
+      return normalizeSessionDates(session);
     } catch (error) {
       this.logger.error("Failed to retrieve session", {
         operationId,

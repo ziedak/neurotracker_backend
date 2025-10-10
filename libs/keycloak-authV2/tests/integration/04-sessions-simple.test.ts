@@ -1,4 +1,4 @@
-import { setupTestEnvironment, cleanupTestEnvironment } from "./setup";
+import { setupTestEnvironment } from "./setup";
 import type { TestEnvironment } from "./setup";
 
 describe("Simple Session Test", () => {
@@ -9,7 +9,7 @@ describe("Simple Session Test", () => {
   }, 30000);
 
   afterAll(async () => {
-    await cleanupTestEnvironment(env);
+    await env.cleanup();
   }, 15000);
 
   it("should create and retrieve session", async () => {

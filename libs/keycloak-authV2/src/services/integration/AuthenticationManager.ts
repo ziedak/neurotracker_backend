@@ -392,7 +392,7 @@ export class AuthenticationManager implements IAuthenticationManager {
       return {
         success: true,
         session: {
-          id: session.id,
+          id: sessionResult.sessionId, // Session ID (CUID from database)
           sessionData: session,
         },
       };

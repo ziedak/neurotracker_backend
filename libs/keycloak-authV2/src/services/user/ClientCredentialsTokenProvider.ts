@@ -36,7 +36,7 @@ import type {
   KeycloakClient,
   KeycloakTokenResponse,
 } from "../../client/KeycloakClient";
-import { SecureCacheManager } from "../token/SecureCacheManager";
+import { SecureCacheManager } from "../SecureCacheManager";
 import { JWTValidator } from "../token/JWTValidator";
 import { RETRY_CONFIG } from "./constants";
 

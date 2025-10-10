@@ -69,8 +69,8 @@ describe("KeycloakIntegrationService - System Health", () => {
 
       // Session stats
       expect(stats.session).toBeDefined();
-      expect(typeof stats.session.active).toBe("number");
-      expect(typeof stats.session.total).toBe("number");
+      expect(typeof stats.session.activeSessions).toBe("number");
+      expect(typeof stats.session.totalSessions).toBe("number");
 
       // Client stats
       expect(stats.client).toBeDefined();

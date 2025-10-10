@@ -9,7 +9,7 @@ import type { AuthResult } from "../../types";
 import { jwtVerify, createRemoteJWKSet } from "jose";
 import { z } from "zod";
 import { ClaimsExtractor } from "./ClaimsExtractor";
-import type { SecureCacheManager } from "./SecureCacheManager";
+import type { SecureCacheManager } from "../SecureCacheManager";
 
 // Token validation schema
 const TokenSchema = z
