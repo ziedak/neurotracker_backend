@@ -23,15 +23,17 @@ import type {
   CacheService,
   UserSessionRepository,
   UserSession,
+  PrismaClient,
 } from "@libs/database";
 import type { HealthCheckResult } from "./sessionTypes";
 import {
   UserIdSchema,
   SessionCreationOptions,
-  toUserSessionCreateInput,
   UserSessionSchema,
+  UserSessionWithTokens,
 } from "./sessionTypes";
 import { z } from "zod";
+import { AccountService } from "../account/AccountService";
 
 // Session ID validation (CUID format from Prisma @default(cuid()))
 const SessionIdSchema = z.string().min(1, "Session ID must not be empty");
@@ -39,6 +41,7 @@ const SessionIdSchema = z.string().min(1, "Session ID must not be empty");
 /**
  * Normalize session data - ensures all Date fields are Date objects, not strings
  * This is needed because data from cache or serialization may have Date fields as ISO strings
+ * NOTE: Token fields (tokenExpiresAt, refreshExpiresAt) removed - now in Account vault
  */
 function normalizeSessionDates(session: UserSession): UserSession {
   return {
@@ -55,16 +58,6 @@ function normalizeSessionDates(session: UserSession): UserSession {
       session.updatedAt instanceof Date
         ? session.updatedAt
         : new Date(session.updatedAt),
-    tokenExpiresAt: session.tokenExpiresAt
-      ? session.tokenExpiresAt instanceof Date
-        ? session.tokenExpiresAt
-        : new Date(session.tokenExpiresAt)
-      : null,
-    refreshExpiresAt: session.refreshExpiresAt
-      ? session.refreshExpiresAt instanceof Date
-        ? session.refreshExpiresAt
-        : new Date(session.refreshExpiresAt)
-      : null,
     expiresAt: session.expiresAt
       ? session.expiresAt instanceof Date
         ? session.expiresAt
@@ -108,9 +101,11 @@ const DEFAULT_STORE_CONFIG: SessionStoreConfig = {
 export class SessionStore {
   private readonly logger: ILogger;
   private readonly config: SessionStoreConfig;
+  private readonly accountService: AccountService;
 
   constructor(
     private readonly userSessionRepo: UserSessionRepository,
+    prisma: PrismaClient,
     private readonly cacheService?: CacheService,
     logger?: ILogger,
     private readonly metrics?: IMetricsCollector,
@@ -118,6 +113,7 @@ export class SessionStore {
   ) {
     this.logger = logger || createLogger("SessionStore");
     this.config = { ...DEFAULT_STORE_CONFIG, ...config };
+    this.accountService = new AccountService(prisma, metrics);
 
     this.logger.info("SessionStore initialized with repository pattern", {
       cacheEnabled: this.config.cacheEnabled && !!this.cacheService,
@@ -155,35 +151,14 @@ export class SessionStore {
         // Validate full UserSession
         UserSessionSchema.parse(sessionData);
 
-        // Update existing session
+        // Update existing session (metadata only - tokens are in vault)
         const session = sessionData as UserSession;
         const updateData: any = {
           lastAccessedAt: session.lastAccessedAt,
           isActive: session.isActive,
         };
 
-        // Only add fields that are not undefined/null
-        if (session.accessToken !== undefined && session.accessToken !== null) {
-          updateData.accessToken = session.accessToken;
-        }
-        if (
-          session.refreshToken !== undefined &&
-          session.refreshToken !== null
-        ) {
-          updateData.refreshToken = session.refreshToken;
-        }
-        if (
-          session.tokenExpiresAt !== undefined &&
-          session.tokenExpiresAt !== null
-        ) {
-          updateData.tokenExpiresAt = session.tokenExpiresAt;
-        }
-        if (
-          session.refreshExpiresAt !== undefined &&
-          session.refreshExpiresAt !== null
-        ) {
-          updateData.refreshExpiresAt = session.refreshExpiresAt;
-        }
+        // Only add metadata fields that are defined
         if (session.metadata !== undefined && session.metadata !== null) {
           updateData.metadata = session.metadata;
         }
@@ -196,9 +171,80 @@ export class SessionStore {
         // Handle creation options - create new session
         const options = sessionData as SessionCreationOptions;
 
-        // Create new session
-        const createInput = toUserSessionCreateInput(options);
+        this.logger.debug("Creating new session with token vault", {
+          operationId,
+          userId: options.userId,
+          hasTokens: !!(options.accessToken && options.refreshToken),
+        });
+
+        // 1. Store tokens in vault (if provided)
+        let accountId: string | undefined;
+        if (options.accessToken && options.refreshToken) {
+          const tokenVaultInput: import("../account/AccountService").TokenVaultInput =
+            {
+              userId: options.userId,
+              keycloakUserId: options.keycloakSessionId || options.userId,
+              accessToken: options.accessToken,
+              refreshToken: options.refreshToken,
+              accessTokenExpiresAt:
+                options.tokenExpiresAt || new Date(Date.now() + 3600000),
+            };
+
+          // Only add optional fields if defined
+          if (options.idToken) {
+            tokenVaultInput.idToken = options.idToken;
+          }
+          if (options.refreshExpiresAt) {
+            tokenVaultInput.refreshTokenExpiresAt = options.refreshExpiresAt;
+          }
+
+          accountId = await this.accountService.storeTokens(tokenVaultInput);
+
+          this.logger.debug("Tokens stored in vault", {
+            operationId,
+            accountId,
+            userId: options.userId,
+          });
+        }
+
+        // 2. Create session metadata (NO TOKENS in database)
+        // Using UserSessionCreateInput (based on UncheckedCreateInput) to set accountId directly
+        const createInput: import("@libs/database").UserSessionCreateInput = {
+          userId: options.userId,
+        };
+
+        // Add accountId if tokens were stored
+        if (accountId) {
+          createInput.accountId = accountId;
+        }
+
+        // Add optional metadata fields
+        if (options.keycloakSessionId !== undefined) {
+          createInput.keycloakSessionId = options.keycloakSessionId;
+        }
+        if (options.fingerprint !== undefined) {
+          createInput.fingerprint = options.fingerprint;
+        }
+        if (options.expiresAt !== undefined) {
+          createInput.expiresAt = options.expiresAt;
+        }
+        if (options.ipAddress !== undefined) {
+          createInput.ipAddress = options.ipAddress;
+        }
+        if (options.userAgent !== undefined) {
+          createInput.userAgent = options.userAgent;
+        }
+        if (options.metadata !== undefined) {
+          createInput.metadata = options.metadata as any;
+        }
+
+        // DO NOT add token fields to database!
+        // They are now in the Account vault
+
         const createdSession = await this.userSessionRepo.create(createInput);
+
+        // Cache metadata only (no tokens)
+        await this.cacheSessionMetadata(createdSession);
 
         // Invalidate session count cache (session created)
         await this.invalidateSessionCountCache(
@@ -211,13 +257,14 @@ export class SessionStore {
           "session.store.duration",
           performance.now() - startTime
         );
-        this.metrics?.recordCounter("session.stored", 1);
+        this.metrics?.recordCounter("session.stored_with_vault", 1);
 
-        this.logger.debug("Session stored successfully", {
+        this.logger.info("Session created with token vault", {
           operationId,
           sessionId: createdSession.id
             ? this.hashSessionId(createdSession.id)
             : "new-session",
+          accountId,
           duration: performance.now() - startTime,
         });
 
@@ -239,9 +286,14 @@ export class SessionStore {
 
   /**
    * Retrieve session data from cache or database
-   * REFACTORED: Now returns UserSession directly from database
+   * UPDATED: Now supports includeTokens parameter for token vault integration
+   * @param sessionId - Session ID to retrieve
+   * @param includeTokens - If true, fetch tokens from vault (default: false)
    */
-  async retrieveSession(sessionId: string): Promise<UserSession | null> {
+  async retrieveSession(
+    sessionId: string,
+    includeTokens = false
+  ): Promise<UserSession | null> {
     const startTime = performance.now();
     const operationId = crypto.randomUUID();
 
@@ -249,19 +301,20 @@ export class SessionStore {
       this.logger.debug("Retrieving session", {
         operationId,
         sessionId: this.hashSessionId(sessionId),
+        includeTokens,
       });
 
       // Validate input
       SessionIdSchema.parse(sessionId);
 
-      // Check cache first if available
-      if (this.cacheService && this.config.cacheEnabled) {
+      // Check cache first if available (only if NOT requesting tokens)
+      if (!includeTokens && this.cacheService && this.config.cacheEnabled) {
         const cacheKey = this.buildSessionCacheKey(sessionId);
         const result = await this.cacheService.get<UserSession>(cacheKey);
 
         if (result.data) {
           this.metrics?.recordCounter("session.cache_hit", 1);
-          this.logger.debug("Session retrieved from cache", {
+          this.logger.debug("Session metadata retrieved from cache", {
             operationId,
             sessionId: this.hashSessionId(sessionId),
           });
@@ -285,6 +338,7 @@ export class SessionStore {
         isActive: session?.isActive,
       });
 
+      // Valid "not found" case - return null
       if (!session || !session.isActive) {
         this.logger.warn("Session not found or inactive", {
           operationId,
@@ -296,15 +350,31 @@ export class SessionStore {
         return null;
       }
 
-      // Update cache with retrieved data
-      if (this.cacheService && this.config.cacheEnabled) {
-        const cacheKey = this.buildSessionCacheKey(sessionId);
-        const expiresAt = session.expiresAt || new Date(Date.now() + 3600000);
-        const ttl = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
+      // Fetch tokens from vault if requested
+      if (includeTokens && session.accountId) {
+        const tokens = await this.accountService.getTokens(session.accountId);
+        if (tokens) {
+          // Attach tokens to session (for backward compatibility)
+          const sessionWithTokens = session as UserSessionWithTokens;
+          sessionWithTokens.accessToken = tokens.accessToken ?? undefined;
+          sessionWithTokens.refreshToken = tokens.refreshToken ?? undefined;
+          sessionWithTokens.idToken = tokens.idToken ?? undefined;
+          sessionWithTokens.tokenExpiresAt =
+            tokens.accessTokenExpiresAt ?? undefined;
+          sessionWithTokens.refreshTokenExpiresAt =
+            tokens.refreshTokenExpiresAt ?? undefined;
 
-        if (ttl > 0) {
-          await this.cacheService.set(cacheKey, session, ttl);
+          this.logger.debug("Tokens retrieved from vault", {
+            operationId,
+            sessionId: this.hashSessionId(sessionId),
+            accountId: session.accountId,
+          });
         }
+      }
+
+      // Update cache with retrieved metadata (no tokens)
+      if (!includeTokens) {
+        await this.cacheSessionMetadata(session);
       }
 
       this.metrics?.recordCounter("session.cache_miss", 1);
@@ -316,19 +386,25 @@ export class SessionStore {
       this.logger.debug("Session retrieved from database", {
         operationId,
         sessionId: this.hashSessionId(sessionId),
+        includeTokens,
         duration: performance.now() - startTime,
       });
 
       // Normalize dates from database (Prisma may return Date objects, but ensure consistency)
       return normalizeSessionDates(session);
     } catch (error) {
-      this.logger.error("Failed to retrieve session", {
+      // Database error - fail loudly (don't return null)
+      this.logger.error("Database error retrieving session", {
         operationId,
         error,
         sessionId: this.hashSessionId(sessionId),
       });
-      this.metrics?.recordCounter("session.retrieve.error", 1);
-      return null;
+      this.metrics?.recordCounter("session.retrieve.database_error", 1);
+      throw new Error(
+        `Failed to retrieve session: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     }
   }
 
@@ -379,7 +455,8 @@ export class SessionStore {
 
   /**
    * Update session tokens after refresh
-   * Used by SessionTokenCoordinator after calling KeycloakClient.refreshToken()
+   * Used by RefreshTokenManager after calling KeycloakClient.refreshToken()
+   * UPDATED: Now updates tokens in vault via AccountService instead of database
    */
   async updateSessionTokens(
     sessionId: string,
@@ -394,7 +471,7 @@ export class SessionStore {
     const operationId = crypto.randomUUID();
 
     try {
-      this.logger.debug("Updating session tokens", {
+      this.logger.debug("Updating session tokens in vault", {
         operationId,
         sessionId: this.hashSessionId(sessionId),
       });
@@ -402,45 +479,38 @@ export class SessionStore {
       // Validate input
       SessionIdSchema.parse(sessionId);
 
-      // Retrieve current session
-      const session = await this.retrieveSession(sessionId);
+      // Retrieve current session to get accountId
+      const session = await this.retrieveSession(sessionId, false);
       if (!session) {
         throw new Error(`Session not found: ${sessionId}`);
       }
 
-      // Update session with new tokens
-      const updateData: any = {
-        accessToken: newTokens.accessToken,
-        tokenExpiresAt: newTokens.expiresAt,
+      const accountId = session.accountId;
+      if (!accountId) {
+        throw new Error(
+          `Session ${sessionId} has no accountId (not linked to vault)`
+        );
+      }
+
+      // Update tokens in vault via AccountService
+      const updateInput: import("../account/AccountService").TokenUpdateInput =
+        {
+          accountId,
+          accessToken: newTokens.accessToken,
+          refreshToken: newTokens.refreshToken || "",
+          accessTokenExpiresAt: newTokens.expiresAt,
+        };
+
+      if (newTokens.refreshExpiresAt) {
+        updateInput.refreshTokenExpiresAt = newTokens.refreshExpiresAt;
+      }
+
+      await this.accountService.updateTokens(updateInput);
+
+      // Update session metadata (lastAccessedAt only)
+      await this.userSessionRepo.updateById(session.id, {
         lastAccessedAt: new Date(),
-      };
-
-      // Handle nullable fields properly
-      if (
-        newTokens.refreshToken !== undefined &&
-        newTokens.refreshToken !== null
-      ) {
-        updateData.refreshToken = newTokens.refreshToken;
-      } else if (newTokens.refreshToken === null) {
-        // Explicitly set to null if provided as null
-        updateData.refreshToken = null;
-      } else {
-        // Keep existing refresh token if not provided
-        updateData.refreshToken = session.refreshToken;
-      }
-
-      if (
-        newTokens.refreshExpiresAt !== undefined &&
-        newTokens.refreshExpiresAt !== null
-      ) {
-        updateData.refreshExpiresAt = newTokens.refreshExpiresAt;
-      } else if (newTokens.refreshExpiresAt === null) {
-        updateData.refreshExpiresAt = null;
-      } else {
-        updateData.refreshExpiresAt = session.refreshExpiresAt;
-      }
-
-      await this.userSessionRepo.updateById(session.id, updateData);
+      });
 
       // Invalidate cache
       if (this.cacheService && this.config.cacheEnabled) {
@@ -448,24 +518,25 @@ export class SessionStore {
         await this.cacheService.invalidate(cacheKey);
       }
 
-      this.logger.info("Session tokens updated successfully", {
+      this.logger.info("Session tokens updated in vault successfully", {
         operationId,
         sessionId: this.hashSessionId(sessionId),
+        accountId,
         expiresAt: newTokens.expiresAt.toISOString(),
       });
 
-      this.metrics?.recordCounter("session.tokens_updated", 1);
+      this.metrics?.recordCounter("session.vault_tokens_updated", 1);
       this.metrics?.recordTimer(
-        "session.update_tokens.duration",
+        "session.update_vault_tokens.duration",
         performance.now() - startTime
       );
     } catch (error) {
-      this.logger.error("Failed to update session tokens", {
+      this.logger.error("Failed to update session tokens in vault", {
         operationId,
         error,
         sessionId: this.hashSessionId(sessionId),
       });
-      this.metrics?.recordCounter("session.update_tokens.error", 1);
+      this.metrics?.recordCounter("session.update_vault_tokens.error", 1);
       throw error; // Critical operation - throw to caller
     }
   }
@@ -505,13 +576,21 @@ export class SessionStore {
 
       return sessions;
     } catch (error) {
-      this.logger.error("Failed to retrieve user sessions", {
+      // Database error - fail loudly (don't return empty array)
+      this.logger.error("Database error retrieving user sessions", {
         operationId,
         error,
         userId,
       });
-      this.metrics?.recordCounter("session.get_user_sessions.error", 1);
-      return [];
+      this.metrics?.recordCounter(
+        "session.get_user_sessions.database_error",
+        1
+      );
+      throw new Error(
+        `Failed to retrieve user sessions: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     }
   }
 
@@ -538,6 +617,28 @@ export class SessionStore {
       // Find and update session using repository
       const session = await this.userSessionRepo.findBySessionToken(sessionId);
       if (session) {
+        // Clear tokens from vault before marking session inactive
+        if (session.accountId) {
+          try {
+            await this.accountService.clearTokens(session.accountId);
+            this.logger.info(
+              "Tokens cleared from vault on session termination",
+              {
+                sessionId: this.hashSessionId(sessionId),
+                accountId: session.accountId,
+                reason,
+              }
+            );
+          } catch (error) {
+            this.logger.error("Failed to clear tokens from vault", {
+              error,
+              sessionId: this.hashSessionId(sessionId),
+              accountId: session.accountId,
+            });
+            // Continue to mark session inactive even if vault cleanup fails
+          }
+        }
+
         await this.userSessionRepo.updateById(session.id, {
           isActive: false,
         });
@@ -633,6 +734,43 @@ export class SessionStore {
           sessionId: this.hashSessionId(sessionId),
         });
       }
+    }
+  }
+
+  /**
+   * Cache session metadata only (NO TOKENS)
+   * Part of centralized token vault architecture
+   */
+  private async cacheSessionMetadata(session: UserSession): Promise<void> {
+    if (!this.cacheService || !this.config.cacheEnabled) {
+      return;
+    }
+
+    const cacheKey = this.buildSessionCacheKey(session.id);
+    const expiresAt = session.expiresAt || new Date(Date.now() + 3600000);
+    const ttl = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
+
+    if (ttl > 0) {
+      // Cache metadata ONLY (no tokens!)
+      const metadata = {
+        id: session.id,
+        userId: session.userId,
+        accountId: session.accountId,
+        keycloakSessionId: session.keycloakSessionId,
+        expiresAt: session.expiresAt,
+        lastAccessedAt: session.lastAccessedAt,
+        isActive: session.isActive,
+        fingerprint: session.fingerprint,
+        ipAddress: session.ipAddress,
+        userAgent: session.userAgent,
+        // NO TOKENS!
+      };
+
+      await this.cacheService.set(cacheKey, metadata, ttl);
+      this.logger.debug("Session metadata cached (no tokens)", {
+        sessionId: this.hashSessionId(session.id),
+        ttl,
+      });
     }
   }
 
@@ -761,11 +899,18 @@ export class SessionStore {
 
       return count;
     } catch (error) {
-      this.logger.error("Failed to get active session count", {
+      // CRITICAL: Database error - fail secure (don't return 0)
+      // Returning 0 would bypass concurrent session limits
+      this.logger.error("Database error getting active session count", {
         userId,
         error,
       });
-      return 0;
+      this.metrics?.recordCounter("session.count.database_error", 1);
+      throw new Error(
+        `Failed to get active session count: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     }
   }
 
@@ -791,8 +936,16 @@ export class SessionStore {
 
       return sessions[0] || null;
     } catch (error) {
-      this.logger.error("Failed to get oldest session", { userId, error });
-      return null;
+      // Database error - fail loudly (used for security control)
+      this.logger.error("Database error getting oldest session", {
+        userId,
+        error,
+      });
+      throw new Error(
+        `Failed to get oldest session: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     }
   }
 
