@@ -47,14 +47,8 @@ beforeAll(async () => {
 afterAll(async () => {
   console.log("\n✅ Integration tests completed\n");
 
-  // Give time for async operations to complete and cleanup
-  await new Promise((resolve) => setTimeout(resolve, 2000));
-
-  // Force exit after cleanup timeout
-  setTimeout(() => {
-    console.log("⚠️  Force exiting after cleanup timeout");
-    process.exit(0);
-  }, 5000);
+  // Give Jest time to finish its own cleanup
+  await new Promise((resolve) => setTimeout(resolve, 1000));
 }, 15000);
 
 // Handle unhandled rejections

@@ -40,6 +40,7 @@ import { StoreSettingsRepository } from "./storeSettings";
 import { UserEventRepository } from "./userEvent";
 import { UserSessionRepository } from "./userSession";
 import { WebhookRepository } from "./webhook";
+import { AccountRepository } from "./account";
 
 // Individual repositories
 export { UserRepository } from "./user";
@@ -133,6 +134,8 @@ export type {
 } from "../../models";
 export { WebhookRepository } from "./webhook";
 export type { WebhookCreateInput, WebhookUpdateInput } from "../../models";
+export { AccountRepository } from "./account";
+export type { AccountCreateInput, AccountUpdateInput } from "../../models";
 
 // Repository types for dependency injection
 export type RepositoryTypes = {
@@ -165,4 +168,5 @@ export type RepositoryTypes = {
   userEvent: InstanceType<typeof UserEventRepository>;
   userSession: InstanceType<typeof UserSessionRepository>;
   webhook: InstanceType<typeof WebhookRepository>;
+  account: InstanceType<typeof AccountRepository>;
 };

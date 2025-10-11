@@ -3,10 +3,13 @@
  * Configures test environment with real Keycloak and PostgreSQL from Docker Compose
  */
 
-import { PostgreSQLClient, CacheService } from "@libs/database";
+import { PostgreSQLClient, CacheService, RedisClient } from "@libs/database";
 import { createLogger } from "@libs/utils";
 import { KeycloakIntegrationServiceBuilder } from "../../src/services/integration/IntegrationServiceBuilder";
 import type { KeycloakIntegrationService } from "../../src/services/integration/KeycloakIntegrationService";
+import { UserSyncService } from "../../src/services/user/sync/UserSyncService";
+import { KeycloakUserService } from "../../src/services/user/KeycloakUserService";
+import { KeycloakClient } from "../../src/client/KeycloakClient";
 import { createMockMetricsCollector } from "./mocks";
 
 const logger = createLogger("IntegrationTestSetup");
@@ -15,6 +18,8 @@ export interface TestEnvironment {
   service: KeycloakIntegrationService;
   dbClient: PostgreSQLClient;
   cacheService?: CacheService;
+  redisClient?: RedisClient;
+  syncService?: UserSyncService;
   cleanup: () => Promise<void>;
 }
 
@@ -59,7 +64,7 @@ export async function setupTestEnvironment(
   options: {
     withCache?: boolean;
     withMetrics?: boolean;
-    withSync?: boolean;
+    withSync?: boolean; // Enable async sync service for performance
   } = {}
 ): Promise<TestEnvironment> {
   logger.info("Setting up integration test environment", options);
@@ -78,7 +83,90 @@ export async function setupTestEnvironment(
     logger.info("Cache service initialized");
   }
 
-  // 3. Build Integration Service
+  // 3. Initialize Sync Service with REAL Redis (for real-world scenarios)
+  let syncService: UserSyncService | undefined;
+  let redisClient: RedisClient | undefined;
+
+  if (options.withSync) {
+    try {
+      logger.info(
+        "Initializing sync service with real Redis for performance..."
+      );
+
+      // Create real Redis client for sync operations
+      redisClient = RedisClient.create(
+        {
+          // Parse Redis URL or use defaults
+          host: TEST_CONFIG.redis.url.includes("://")
+            ? new URL(TEST_CONFIG.redis.url).hostname
+            : "localhost",
+          port: TEST_CONFIG.redis.url.includes("://")
+            ? parseInt(new URL(TEST_CONFIG.redis.url).port || "6379")
+            : 6379,
+          db: 1, // Use DB 1 for tests (separate from production DB 0)
+          lazyConnect: false,
+          enableOfflineQueue: false,
+          maxRetriesPerRequest: 3,
+        },
+        createMockMetricsCollector()
+      );
+
+      // Create Keycloak client for sync service
+      const keycloakClient = new KeycloakClient({
+        serverUrl: TEST_CONFIG.keycloak.serverUrl,
+        realm: TEST_CONFIG.keycloak.realm,
+        clientId: TEST_CONFIG.keycloak.clientId,
+        clientSecret: TEST_CONFIG.keycloak.clientSecret,
+        enableJwtValidation: false, // Simplified for tests
+      });
+
+      // Create Keycloak user service
+      const keycloakUserService = KeycloakUserService.create(
+        keycloakClient,
+        dbClient.prisma,
+        cacheService,
+        createMockMetricsCollector()
+      );
+
+      // Create sync service with test-optimized settings
+      syncService = new UserSyncService(
+        redisClient,
+        keycloakUserService,
+        {
+          batchSize: 10, // Process 10 users at a time
+          batchInterval: 50, // Very fast for tests (50ms)
+          maxRetries: 2, // Quick retries
+          retryDelay: 100, // Short retry delay (100ms)
+          workerConcurrency: 2, // 2 workers for parallel processing
+          workerPollInterval: 100, // Check queue every 100ms
+          enableHealthCheck: false, // Skip health checks in tests
+          enableMetrics: false, // Skip metrics in tests
+        },
+        logger,
+        createMockMetricsCollector()
+      );
+
+      // Start the sync worker
+      await syncService.start();
+
+      logger.info(
+        "✅ Sync service initialized with real Redis - async mode enabled!"
+      );
+    } catch (error) {
+      logger.warn(
+        "Failed to initialize sync service, falling back to synchronous mode",
+        { error }
+      );
+      // Cleanup Redis if it was created
+      if (redisClient) {
+        await redisClient.disconnect();
+        redisClient = undefined;
+      }
+      syncService = undefined;
+    }
+  }
+
+  // 4. Build Integration Service
   const builder = new KeycloakIntegrationServiceBuilder()
     .withKeycloakConfig({
       serverUrl: TEST_CONFIG.keycloak.serverUrl,
@@ -96,18 +184,38 @@ export async function setupTestEnvironment(
     builder.withCache(cacheService);
   }
 
+  if (syncService) {
+    builder.withSync(syncService);
+    logger.info("✅ Sync service enabled - Keycloak operations will be async!");
+  } else {
+    logger.warn(
+      "⚠️  Sync service NOT enabled - Keycloak operations will be synchronous (slower)"
+    );
+  }
+
   const service = builder.build();
   await service.initialize();
   logger.info("KeycloakIntegrationService initialized");
 
-  // 4. Return environment with cleanup function
+  // 5. Return environment with cleanup function
   return {
     service,
     dbClient,
     cacheService,
+    redisClient,
+    syncService,
     cleanup: async () => {
       logger.info("Cleaning up test environment");
       try {
+        if (syncService) {
+          logger.info("Stopping sync service...");
+          await syncService.stop();
+          await syncService.dispose();
+        }
+        if (redisClient) {
+          logger.info("Disconnecting Redis...");
+          await redisClient.disconnect();
+        }
         await service.cleanup();
         await dbClient.disconnect();
         if (cacheService) {

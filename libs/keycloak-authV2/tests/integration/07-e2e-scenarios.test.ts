@@ -42,7 +42,7 @@ describe("KeycloakIntegrationService - E2E Scenarios", () => {
       testUserIds.push(userId);
 
       // Wait for Keycloak sync
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Performance optimization: Removed unnecessary 2s delay
 
       // 2. Authenticate user
       console.log("2️⃣ Authenticating user...");
@@ -236,7 +236,7 @@ describe("KeycloakIntegrationService - E2E Scenarios", () => {
       const userId = users.results[0]?.data?.id!;
       testUserIds.push(userId);
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Performance optimization: Removed unnecessary 2s delay
 
       // Create 3 sessions from different devices
       const sessions: string[] = [];

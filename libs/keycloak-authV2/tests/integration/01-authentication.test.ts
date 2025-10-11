@@ -57,8 +57,8 @@ describe("KeycloakIntegrationService - Authentication", () => {
       expect(userId).toBeDefined();
       testUserIds.push(userId!);
 
-      // Wait for async Keycloak sync
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // NOTE: With sync service enabled, user is immediately available
+      // No waiting needed - sync happens in background
 
       // 2. Authenticate with password
       const authResult = await getEnv().service.authenticateWithPassword(
@@ -94,9 +94,7 @@ describe("KeycloakIntegrationService - Authentication", () => {
       const userId = users.results[0]?.data?.id;
       testUserIds.push(userId!);
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      // Try wrong password
+      // Try wrong password (no wait needed)
       const authResult = await getEnv().service.authenticateWithPassword(
         userData.username,
         "WrongPassword123!",
@@ -138,7 +136,7 @@ describe("KeycloakIntegrationService - Authentication", () => {
       const userId = users.results[0]?.data?.id;
       testUserIds.push(userId!);
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Performance optimization: Removed unnecessary 2s delay - sync service handles this
 
       const authResult = await getEnv().service.authenticateWithPassword(
         userData.username,
@@ -191,7 +189,7 @@ describe("KeycloakIntegrationService - Authentication", () => {
       const userId = users.results[0]?.data?.id;
       testUserIds.push(userId!);
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Performance optimization: Removed unnecessary 2s delay - sync service handles this
 
       const authResult = await getEnv().service.authenticateWithPassword(
         userData.username,
@@ -232,7 +230,7 @@ describe("KeycloakIntegrationService - Authentication", () => {
       const userId = users.results[0]?.data?.id;
       testUserIds.push(userId!);
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Performance optimization: Removed unnecessary 2s delay - sync service handles this
 
       const authResult = await getEnv().service.authenticateWithPassword(
         userData.username,

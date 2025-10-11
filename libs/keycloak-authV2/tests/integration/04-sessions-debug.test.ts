@@ -54,7 +54,7 @@ describe("Session Debug Test", () => {
     console.log("✅ User registered:", userId);
 
     console.log("⏳ Waiting 2 seconds for Keycloak sync...");
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // Performance optimization: Removed unnecessary 2s delay
     console.log("✅ Wait complete");
 
     console.log("🔐 Attempting authentication...");

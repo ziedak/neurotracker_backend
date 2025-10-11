@@ -13,7 +13,7 @@ import type {
   AccountCreateInput,
   AccountUpdateInput,
   AccountFilters,
-} from "../../models/auth";
+} from "../../models/account";
 
 /**
  * Account Repository Class
@@ -246,5 +246,128 @@ export class AccountRepository {
         },
       },
     }) as Promise<Account[]>;
+  }
+
+  /**
+   * Upsert Keycloak account (create or update)
+   * For centralized token vault pattern
+   */
+  async upsertKeycloakAccount(data: {
+    userId: string;
+    keycloakUserId: string;
+    accessToken: string;
+    refreshToken: string;
+    idToken?: string | null;
+    accessTokenExpiresAt: Date;
+    refreshTokenExpiresAt?: Date | null;
+    scope?: string | null;
+  }): Promise<Account> {
+    // Try to find existing Keycloak account
+    const existing = await this.prisma.account.findFirst({
+      where: {
+        userId: data.userId,
+        providerId: "keycloak",
+      },
+    });
+
+    if (existing) {
+      // Update existing account
+      return this.prisma.account.update({
+        where: { id: existing.id },
+        data: {
+          accessToken: data.accessToken,
+          refreshToken: data.refreshToken,
+          idToken: data.idToken ?? null,
+          accessTokenExpiresAt: data.accessTokenExpiresAt,
+          refreshTokenExpiresAt: data.refreshTokenExpiresAt ?? null,
+          scope: data.scope ?? null,
+        },
+      }) as Promise<Account>;
+    }
+
+    // Create new account
+    return this.prisma.account.create({
+      data: {
+        userId: data.userId,
+        accountId: data.keycloakUserId,
+        providerId: "keycloak",
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        idToken: data.idToken ?? null,
+        accessTokenExpiresAt: data.accessTokenExpiresAt,
+        refreshTokenExpiresAt: data.refreshTokenExpiresAt ?? null,
+        scope: data.scope ?? null,
+      },
+    }) as Promise<Account>;
+  }
+
+  /**
+   * Get tokens from vault
+   */
+  async getTokens(accountId: string): Promise<{
+    accessToken: string | null;
+    refreshToken: string | null;
+    idToken: string | null;
+    accessTokenExpiresAt: Date | null;
+    refreshTokenExpiresAt: Date | null;
+  } | null> {
+    const account = await this.prisma.account.findUnique({
+      where: { id: accountId },
+      select: {
+        accessToken: true,
+        refreshToken: true,
+        idToken: true,
+        accessTokenExpiresAt: true,
+        refreshTokenExpiresAt: true,
+      },
+    });
+
+    return account;
+  }
+
+  /**
+   * Clear tokens from vault (for logout)
+   */
+  async clearTokens(accountId: string): Promise<void> {
+    await this.prisma.account.update({
+      where: { id: accountId },
+      data: {
+        accessToken: null,
+        refreshToken: null,
+        idToken: null,
+        accessTokenExpiresAt: null,
+        refreshTokenExpiresAt: null,
+      },
+    });
+  }
+
+  /**
+   * Get Keycloak account for user
+   */
+  async getKeycloakAccount(userId: string): Promise<Account | null> {
+    return this.prisma.account.findFirst({
+      where: {
+        userId,
+        providerId: "keycloak",
+      },
+    }) as Promise<Account | null>;
+  }
+
+  /**
+   * Check if tokens are expired
+   */
+  async areTokensExpired(accountId: string): Promise<boolean> {
+    const account = await this.prisma.account.findUnique({
+      where: { id: accountId },
+      select: {
+        accessTokenExpiresAt: true,
+      },
+    });
+
+    if (!account?.accessTokenExpiresAt) {
+      return true; // Assume expired if not found or no expiration set
+    }
+
+    return account.accessTokenExpiresAt < new Date();
   }
 }

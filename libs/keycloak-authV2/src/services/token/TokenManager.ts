@@ -22,6 +22,7 @@ import {
   type StoredTokenInfo,
 } from "./RefreshTokenManager";
 import { RolePermissionExtractor } from "./RolePermissionExtractor";
+import type { SessionStore } from "../session/SessionStore";
 
 // Zod schemas for validation
 const AuthorizationHeaderSchema = z
@@ -117,7 +118,8 @@ export class TokenManager implements ITokenManager {
    */
   async initialize(
     refreshConfig: Partial<RefreshTokenConfig> = {},
-    refreshEventHandlers: RefreshTokenEventHandlers = {}
+    refreshEventHandlers: RefreshTokenEventHandlers = {},
+    sessionStore?: SessionStore
   ): Promise<void> {
     if (this.initialized) {
       return;
@@ -131,7 +133,8 @@ export class TokenManager implements ITokenManager {
     // Start initialization
     this.initializationPromise = this.doInitialize(
       refreshConfig,
-      refreshEventHandlers
+      refreshEventHandlers,
+      sessionStore
     );
 
     try {
@@ -146,7 +149,8 @@ export class TokenManager implements ITokenManager {
    */
   private async doInitialize(
     refreshConfig: Partial<RefreshTokenConfig>,
-    refreshEventHandlers: RefreshTokenEventHandlers
+    refreshEventHandlers: RefreshTokenEventHandlers,
+    sessionStore?: SessionStore
   ): Promise<void> {
     try {
       // Initialize JWT validator with proper configuration
@@ -165,8 +169,8 @@ export class TokenManager implements ITokenManager {
         this.cacheManager
       );
 
-      // Initialize refresh token manager if configuration provided
-      if (Object.keys(refreshConfig).length > 0) {
+      // Initialize refresh token manager if configuration provided and sessionStore available
+      if (Object.keys(refreshConfig).length > 0 && sessionStore) {
         const defaultRefreshConfig: RefreshTokenConfig = {
           refreshBuffer: 300,
           enableEncryption: true,
@@ -176,6 +180,7 @@ export class TokenManager implements ITokenManager {
 
         this._refreshTokenManager = new RefreshTokenManager(
           this.keycloakClient,
+          sessionStore,
           this.cacheManager,
           defaultRefreshConfig,
           refreshEventHandlers,
@@ -574,8 +579,16 @@ export class TokenManager implements ITokenManager {
 
   configureRefreshTokens(
     config: Partial<RefreshTokenConfig>,
-    eventHandlers: RefreshTokenEventHandlers = {}
+    eventHandlers: RefreshTokenEventHandlers = {},
+    sessionStore?: SessionStore
   ): void {
+    if (!sessionStore) {
+      this.logger.warn(
+        "Cannot configure refresh tokens without SessionStore (needed for token vault)"
+      );
+      return;
+    }
+
     const defaultRefreshConfig: RefreshTokenConfig = {
       refreshBuffer: 300,
       enableEncryption: true,
@@ -585,6 +598,7 @@ export class TokenManager implements ITokenManager {
 
     this._refreshTokenManager = new RefreshTokenManager(
       this.keycloakClient,
+      sessionStore,
       this.cacheManager,
       defaultRefreshConfig,
       eventHandlers,

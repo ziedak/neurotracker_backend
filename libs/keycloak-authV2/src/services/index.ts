@@ -4,6 +4,12 @@
 
 export * from "./apikey";
 
+// Encryption Services (for token vault)
+export * from "./encryption";
+
+// Account Service (centralized token vault)
+export * from "./account";
+
 // User Management - Modular SOLID Architecture (Recommended)
 export * from "./user";
 
@@ -14,7 +20,6 @@ export {
   type AuthenticationResult,
   type SearchUsersOptions,
 } from "./user/UserFacade";
-
 
 export { UserFacade as UserManagementService } from "./user/UserFacade";
 

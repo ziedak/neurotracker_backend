@@ -19,6 +19,7 @@ import type { UserSession } from "@libs/database";
 import type { AuthResult } from "../../types";
 import { TokenRefreshScheduler } from "../token/TokenRefreshScheduler";
 import type { SchedulerConfig } from "../token/TokenRefreshScheduler";
+import type { UserSessionWithTokens } from "./sessionTypes";
 
 /**
  * Simple coordinator - delegates all operations
@@ -47,6 +48,7 @@ export class SessionTokenCoordinator {
   /**
    * Validate session token
    * Delegates to: KeycloakClient.validateToken()
+   * NOTE: Fetches tokens from vault as they're no longer in UserSession
    */
   async validateSessionToken(sessionData: UserSession): Promise<AuthResult> {
     const startTime = performance.now();
@@ -56,16 +58,33 @@ export class SessionTokenCoordinator {
         sessionId: sessionData.id,
       });
 
-      if (!sessionData.accessToken) {
+      // Check if session is linked to token vault
+      if (!sessionData.accountId) {
+        this.logger.warn("Session not linked to token vault", {
+          sessionId: sessionData.id,
+        });
         return {
           success: false,
-          error: "No access token in session",
+          error: "Session not linked to token vault (legacy session)",
+        };
+      }
+
+      // Fetch session with tokens from vault
+      const sessionWithTokens = (await this.sessionStore.retrieveSession(
+        sessionData.id,
+        true // includeTokens=true to fetch from vault
+      )) as UserSessionWithTokens | null;
+
+      if (!sessionWithTokens || !sessionWithTokens.accessToken) {
+        return {
+          success: false,
+          error: "No access token in session vault",
         };
       }
 
       // Delegate to KeycloakClient (already implemented)
       const result = await this.keycloakClient.validateToken(
-        sessionData.accessToken
+        sessionWithTokens.accessToken
       );
 
       this.metrics?.recordCounter("session.token_validated", 1, {
@@ -97,6 +116,7 @@ export class SessionTokenCoordinator {
    * Refresh session tokens
    * Delegates to: KeycloakClient.refreshToken() + SessionStore.updateSessionTokens()
    * Also schedules automatic refresh for the new token
+   * NOTE: Fetches tokens from vault as they're no longer in UserSession
    */
   async refreshSessionTokens(sessionData: UserSession): Promise<void> {
     const startTime = performance.now();
@@ -106,13 +126,28 @@ export class SessionTokenCoordinator {
         sessionId: sessionData.id,
       });
 
-      if (!sessionData.refreshToken) {
-        throw new Error("No refresh token available");
+      // Check if session is linked to token vault
+      if (!sessionData.accountId) {
+        const error = `Session ${sessionData.id} not linked to token vault (legacy session)`;
+        this.logger.error(error, {
+          sessionId: sessionData.id,
+        });
+        throw new Error(error);
+      }
+
+      // Fetch session with tokens from vault
+      const sessionWithTokens = (await this.sessionStore.retrieveSession(
+        sessionData.id,
+        true // includeTokens=true to fetch from vault
+      )) as UserSessionWithTokens | null;
+
+      if (!sessionWithTokens || !sessionWithTokens.refreshToken) {
+        throw new Error("No refresh token available in vault");
       }
 
       // Delegate to KeycloakClient (already implemented)
       const newTokens = await this.keycloakClient.refreshToken(
-        sessionData.refreshToken
+        sessionWithTokens.refreshToken
       );
 
       // Calculate expiration times
@@ -197,18 +232,36 @@ export class SessionTokenCoordinator {
 
   /**
    * Check if token needs refresh
-   * Pure logic - no external calls
+   * NOTE: Now async because it needs to fetch token expiry from vault
    */
-  checkTokenRefreshNeeded(
+  async checkTokenRefreshNeeded(
     sessionData: UserSession,
     thresholdSeconds: number = 300 // Default: 5 minutes
-  ): boolean {
-    if (!sessionData.tokenExpiresAt) {
+  ): Promise<boolean> {
+    // Check if session is linked to token vault
+    if (!sessionData.accountId) {
+      this.logger.warn(
+        "Session not linked to token vault, cannot check refresh",
+        {
+          sessionId: sessionData.id,
+        }
+      );
+      return false;
+    }
+
+    // Fetch session with tokens from vault to get expiry
+    const sessionWithTokens = (await this.sessionStore.retrieveSession(
+      sessionData.id,
+      true // includeTokens=true
+    )) as UserSessionWithTokens | null;
+
+    const tokenExpiresAt = sessionWithTokens?.tokenExpiresAt;
+    if (!tokenExpiresAt) {
       return false;
     }
 
     const now = new Date();
-    const expiresAt = sessionData.tokenExpiresAt;
+    const expiresAt = new Date(tokenExpiresAt);
     const timeUntilExpiry = expiresAt.getTime() - now.getTime();
     const thresholdMs = thresholdSeconds * 1000;
 
@@ -231,8 +284,10 @@ export class SessionTokenCoordinator {
   async validateAndRefreshIfNeeded(
     sessionData: UserSession
   ): Promise<AuthResult> {
-    // Check if refresh is needed
-    if (this.checkTokenRefreshNeeded(sessionData)) {
+    // Check if refresh is needed (now async)
+    const needsRefresh = await this.checkTokenRefreshNeeded(sessionData);
+
+    if (needsRefresh) {
       try {
         await this.refreshSessionTokens(sessionData);
 

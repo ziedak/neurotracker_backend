@@ -42,7 +42,7 @@ describe("KeycloakIntegrationService - Session Management", () => {
       const userId = users.results[0]?.data?.id!;
       testUserIds.push(userId);
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Performance optimization: Removed unnecessary 2s delay
 
       const authResult = await env.service.authenticateWithPassword(
         userData.username,
@@ -70,7 +70,7 @@ describe("KeycloakIntegrationService - Session Management", () => {
       const userId = users.results[0]?.data?.id!;
       testUserIds.push(userId);
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Performance optimization: Removed unnecessary 2s delay
 
       // Create multiple sessions
       const sessions: string[] = [];
@@ -107,7 +107,7 @@ describe("KeycloakIntegrationService - Session Management", () => {
       const userId = users.results[0]?.data?.id!;
       testUserIds.push(userId);
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Performance optimization: Removed unnecessary 2s delay
 
       const authResult = await env.service.authenticateWithPassword(
         userData.username,
@@ -138,7 +138,7 @@ describe("KeycloakIntegrationService - Session Management", () => {
       const userId = users.results[0]?.data?.id!;
       testUserIds.push(userId);
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Performance optimization: Removed unnecessary 2s delay
 
       // Create 2 sessions
       for (let i = 0; i < 2; i++) {
@@ -174,7 +174,7 @@ describe("KeycloakIntegrationService - Session Management", () => {
       const userId = users.results[0]?.data?.id!;
       testUserIds.push(userId);
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Performance optimization: Removed unnecessary 2s delay
 
       const authResult = await env.service.authenticateWithPassword(
         userData.username,
@@ -208,7 +208,7 @@ describe("KeycloakIntegrationService - Session Management", () => {
       const userId = users.results[0]?.data?.id!;
       testUserIds.push(userId);
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Performance optimization: Removed unnecessary 2s delay
 
       const authResult = await env.service.authenticateWithPassword(
         userData.username,

@@ -101,7 +101,7 @@ describe("KeycloakIntegrationService - Caching", () => {
       const userId = users.results[0]?.data?.id!;
       testUserIds.push(userId);
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Performance optimization: Removed unnecessary 2s delay
 
       const authResult = await env.service.authenticateWithPassword(
         userData.username,

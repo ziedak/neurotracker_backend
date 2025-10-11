@@ -13,7 +13,7 @@ import type {
   VerificationCreateInput,
   VerificationUpdateInput,
   VerificationFilters,
-} from "../../models/auth";
+} from "../../models/account";
 
 /**
  * Verification Repository Class

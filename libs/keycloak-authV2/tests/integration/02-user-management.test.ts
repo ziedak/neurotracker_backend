@@ -116,7 +116,7 @@ describe("KeycloakIntegrationService - User Management", () => {
       testUserIds.push(...registeredUsers.map((u) => u.id));
 
       // Wait for Keycloak sync (users should have keycloakId populated)
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Performance optimization: Removed unnecessary 2s delay
 
       // Get Keycloak user IDs from the registered users
       const keycloakUserIds = registeredUsers

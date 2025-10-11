@@ -234,6 +234,7 @@ export class KeycloakIntegrationService implements IIntegrationService {
       sessionLogRepo,
       sessionActivityRepo,
       this.keycloakClient,
+      this.dbClient.prisma,
       this.cacheService, // Use injected cache service (optional)
       this.metrics
     );
@@ -288,6 +289,19 @@ export class KeycloakIntegrationService implements IIntegrationService {
     // Initialize KeycloakClient first to fetch discovery document
     await this.keycloakClient.initialize();
     this.logger.info("KeycloakClient initialized successfully");
+
+    // Initialize TokenManager with SessionStore for token vault access
+    const sessionStore = this.sessionManager.getSessionStore();
+    await this.tokenManager.initialize(
+      {
+        refreshBuffer: 300,
+        enableEncryption: true,
+        cleanupInterval: 300000,
+      },
+      {}, // eventHandlers
+      sessionStore // Pass SessionStore for vault integration
+    );
+    this.logger.info("TokenManager initialized with token vault integration");
 
     // Then initialize resource manager
     return this.resourceManager.initialize();
@@ -555,28 +569,34 @@ export class KeycloakIntegrationService implements IIntegrationService {
       // Refresh tokens through session manager
       const result = await this.sessionManager.refreshSessionTokens(session);
 
-      if (
-        result.success &&
-        result.sessionData?.accessToken &&
-        result.sessionData?.expiresAt
-      ) {
-        const tokens: {
-          accessToken: string;
-          refreshToken?: string;
-          expiresAt: Date;
-        } = {
-          accessToken: result.sessionData.accessToken,
-          expiresAt: result.sessionData.expiresAt,
-        };
+      if (result.success && result.sessionData) {
+        // Fetch refreshed tokens from vault
+        const sessionWithTokens = await this.sessionManager
+          .getSessionStore()
+          .retrieveSession(result.sessionData.id, true); // includeTokens=true
 
-        if (result.sessionData.refreshToken) {
-          tokens.refreshToken = result.sessionData.refreshToken;
+        if (sessionWithTokens) {
+          const tokens: {
+            accessToken: string;
+            refreshToken?: string;
+            expiresAt: Date;
+          } = {
+            accessToken: (sessionWithTokens as any).accessToken,
+            expiresAt:
+              (sessionWithTokens as any).tokenExpiresAt ||
+              new Date(Date.now() + 3600000),
+          };
+
+          const refreshToken = (sessionWithTokens as any).refreshToken;
+          if (refreshToken) {
+            tokens.refreshToken = refreshToken;
+          }
+
+          return {
+            success: true,
+            tokens,
+          };
         }
-
-        return {
-          success: true,
-          tokens,
-        };
       }
 
       return {

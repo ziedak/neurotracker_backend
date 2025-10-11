@@ -134,17 +134,25 @@ export class SessionValidator implements ISessionValidator {
         const session = validation.sessionData;
 
         // Logout from Keycloak if requested and tokens available
-        if (options?.logoutFromKeycloak && session.refreshToken) {
+        if (options?.logoutFromKeycloak) {
           try {
-            await this.keycloakClient.logout(session.refreshToken);
-            keycloakLogout = true;
-            this.logger.info("User logged out from Keycloak", {
-              userId: session.userId,
-            });
-            this.metrics?.recordCounter(
-              "keycloak.session.keycloak_logout_success",
-              1
-            );
+            // Fetch session with tokens from vault
+            const sessionWithTokens = await this.sessionManager
+              .getSessionStore()
+              .retrieveSession(session.id, true); // includeTokens=true
+
+            const refreshToken = (sessionWithTokens as any)?.refreshToken;
+            if (refreshToken) {
+              await this.keycloakClient.logout(refreshToken);
+              keycloakLogout = true;
+              this.logger.info("User logged out from Keycloak", {
+                userId: session.userId,
+              });
+              this.metrics?.recordCounter(
+                "keycloak.session.keycloak_logout_success",
+                1
+              );
+            }
           } catch (logoutError) {
             keycloakLogoutError =
               logoutError instanceof Error

@@ -320,12 +320,14 @@ enum UserStatus {
 model UserSession {
   id                String    @id @default(cuid()) // Primary session identifier (replaces sessionId)
   userId            String
+  accountId         String? // Link to Account (token vault) - NEW
   keycloakSessionId String?   @unique @db.VarChar(255) // Keycloak session ID (optional, for Keycloak sync)
-  accessToken       String?   @db.Text // Encrypted access token
-  refreshToken      String?   @db.Text // Encrypted refresh token
-  idToken           String?   @db.Text // Encrypted ID token
-  tokenExpiresAt    DateTime? // When access token expires
-  refreshExpiresAt  DateTime? // When refresh token expires
+  // TOKENS REMOVED - Now stored in Account table (token vault)
+  // accessToken       String?   @db.Text // REMOVED - Use Account.accessToken
+  // refreshToken      String?   @db.Text // REMOVED - Use Account.refreshToken
+  // idToken           String?   @db.Text // REMOVED - Use Account.idToken
+  // tokenExpiresAt    DateTime? // REMOVED - Use Account.accessTokenExpiresAt
+  // refreshExpiresAt  DateTime? // REMOVED - Use Account.refreshTokenExpiresAt
   fingerprint       String?   @db.VarChar(64) // Session security fingerprint
   lastAccessedAt    DateTime  @default(now()) // Last access timestamp
   createdAt         DateTime  @default(now())
@@ -339,12 +341,14 @@ model UserSession {
 
   // Relations
   user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account        Account?          @relation(fields: [accountId], references: [id], onDelete: SetNull) // NEW - Link to token vault
   events         UserEvent[]
   logs           SessionLog[]
   recoveryEvents RecoveryEvent[]
   activities     SessionActivity[]
 
   @@index([userId])
+  @@index([accountId]) // NEW - Index for token vault lookups
   @@index([keycloakSessionId])
   @@index([expiresAt])
   @@index([lastAccessedAt])
@@ -353,27 +357,34 @@ model UserSession {
 }
 
 // Better-Auth: Account model for OAuth providers
+// NOW ALSO: Token Vault for centralized token storage
 model Account {
   id                    String    @id @default(cuid())
   accountId             String    @db.VarChar(255) // Provider account ID
-  providerId            String    @db.VarChar(255) // Provider name (google, github, etc.)
+  providerId            String    @db.VarChar(255) // Provider name (google, github, keycloak, etc.)
   userId                String
-  accessToken           String?   @db.Text
-  refreshToken          String?   @db.Text
-  idToken               String?   @db.Text
-  accessTokenExpiresAt  DateTime?
-  refreshTokenExpiresAt DateTime?
-  scope                 String?   @db.Text
+  // ENCRYPTED TOKENS (Single Source of Truth for session tokens)
+  accessToken           String?   @db.Text // Encrypted access token
+  refreshToken          String?   @db.Text // Encrypted refresh token
+  idToken               String?   @db.Text // Encrypted ID token
+  accessTokenExpiresAt  DateTime? // Access token expiration
+  refreshTokenExpiresAt DateTime? // Refresh token expiration
+  scope                 String?   @db.Text // OAuth scope
+  tokenType             String?   @default("Bearer") @db.VarChar(50) // Token type (usually Bearer)
   password              String?   @db.VarChar(255) // For email/password provider
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
+  lastTokenRefresh      DateTime? // Track when tokens were last refreshed - NEW
 
   // Relations
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions UserSession[] // NEW - One account can have multiple sessions (token vault)
 
   @@unique([providerId, accountId])
   @@index([userId])
   @@index([providerId])
+  @@index([userId, providerId]) // NEW - Composite index for faster Keycloak account lookups
+  @@index([accessTokenExpiresAt]) // NEW - Index for token expiration checks
   @@map("accounts")
 }
 

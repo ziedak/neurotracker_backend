@@ -127,6 +127,7 @@ export class SessionManager {
     private readonly sessionLogRepo: SessionLogRepository,
     private readonly sessionActivityRepo: SessionActivityRepository,
     private readonly keycloakClient: KeycloakClient,
+    private readonly prisma: import("@libs/database").PrismaClient,
     private readonly cacheService?: CacheService,
     private readonly metrics?: IMetricsCollector,
     config: Partial<SessionManagerConfig> = {}
@@ -143,6 +144,7 @@ export class SessionManager {
     // REFACTORED: Now uses repository pattern
     this.sessionStore = new SessionStore(
       this.userSessionRepo,
+      this.prisma,
       this.cacheService,
       this.logger.child({ component: "SessionStore" }),
       this.metrics,
@@ -201,6 +203,14 @@ export class SessionManager {
     });
 
     this.isInitialized = true;
+  }
+
+  /**
+   * Get SessionStore instance for token vault integration
+   * Used by TokenManager to access the centralized token vault
+   */
+  getSessionStore(): SessionStore {
+    return this.sessionStore;
   }
 
   /**
@@ -478,10 +488,10 @@ export class SessionManager {
         }
 
         // Step 3: Check if token refresh is needed (delegate to SessionTokenCoordinator)
-        if (validationResult.shouldRefreshToken && sessionData.refreshToken) {
+        // NOTE: Tokens are now in vault, SessionTokenCoordinator will fetch them when needed
+        if (validationResult.shouldRefreshToken) {
           try {
-            // No decryption needed - tokens stored plaintext
-            // Delegate to SessionTokenCoordinator
+            // Delegate to SessionTokenCoordinator (it will fetch tokens from vault)
             await this.tokenCoordinator.refreshSessionTokens(sessionData);
 
             // Retrieve updated session
@@ -591,14 +601,7 @@ export class SessionManager {
         userId: sessionData.userId,
       });
 
-      if (!sessionData.refreshToken) {
-        return {
-          success: false,
-          reason: "No refresh token available",
-        };
-      }
-
-      // No decryption needed - tokens stored plaintext
+      // NOTE: Tokens are now in vault, SessionTokenCoordinator will fetch them
       // Delegate to SessionTokenCoordinator
       // This handles: KeycloakClient.refreshToken() + SessionStore.updateSessionTokens()
       await this.tokenCoordinator.refreshSessionTokens(sessionData);

@@ -2,6 +2,7 @@ import { UserStatus } from "./types";
 import type { Store, RecoveryEvent, SessionActivity } from "./store";
 import type { Cart, Order } from "./commerce";
 import type { ApiKey } from "./ApiKey";
+import type { Account } from "./account"; // Import Account from account.ts
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 
@@ -113,11 +114,8 @@ export interface UserSession {
   id: string;
   userId: string;
   keycloakSessionId?: string | null;
-  accessToken?: string | null;
-  refreshToken?: string | null;
-  idToken?: string | null;
-  tokenExpiresAt?: Date | null;
-  refreshExpiresAt?: Date | null;
+  accountId?: string | null; // NEW - Link to Account (token vault)
+  // Token fields removed - now stored in Account table (vault)
   fingerprint?: string | null;
   lastAccessedAt: Date;
   createdAt: Date;
@@ -129,6 +127,7 @@ export interface UserSession {
   isActive: boolean;
   endedAt?: Date | null;
   user?: User;
+  account?: Account; // Access to token vault (imported from account.ts)
   events?: UserEvent[];
   logs?: SessionLog[];
   recoveryEvents?: RecoveryEvent[];
@@ -179,8 +178,10 @@ export type RolePermissionCreateInput = Omit<
 
 export type RolePermissionUpdateInput = Prisma.RolePermissionUpdateInput;
 
+// UserSession uses Unchecked input to allow direct accountId scalar assignment
+// This is needed because accountId can be set directly without using relation syntax
 export type UserSessionCreateInput = Omit<
-  Prisma.UserSessionCreateInput,
+  Prisma.UserSessionUncheckedCreateInput,
   "id" | "createdAt" | "updatedAt"
 > & {
   id?: string;
@@ -335,11 +336,8 @@ export const UserSessionCreateInputSchema = z.object({
   id: z.string().min(1).optional(), // CUID from Prisma
   userId: z.string().min(1), // CUID from Prisma
   keycloakSessionId: z.string().max(255).nullable().optional(),
-  accessToken: z.string().nullable().optional(),
-  refreshToken: z.string().nullable().optional(),
-  idToken: z.string().nullable().optional(),
-  tokenExpiresAt: z.date().nullable().optional(),
-  refreshExpiresAt: z.date().nullable().optional(),
+  accountId: z.string().min(1).nullable().optional(), // NEW - Link to token vault
+  // Token fields removed - now in Account table
   fingerprint: z.string().max(255).nullable().optional(),
   lastAccessedAt: z
     .date()
@@ -355,11 +353,8 @@ export const UserSessionCreateInputSchema = z.object({
 
 export const UserSessionUpdateInputSchema = z.object({
   keycloakSessionId: z.string().max(255).nullable().optional(),
-  accessToken: z.string().nullable().optional(),
-  refreshToken: z.string().nullable().optional(),
-  idToken: z.string().nullable().optional(),
-  tokenExpiresAt: z.date().nullable().optional(),
-  refreshExpiresAt: z.date().nullable().optional(),
+  accountId: z.string().min(1).nullable().optional(), // NEW - Link to token vault
+  // Token fields removed - now in Account table
   fingerprint: z.string().max(255).nullable().optional(),
   lastAccessedAt: z.date().optional(),
   expiresAt: z.date().nullable().optional(),
@@ -375,11 +370,8 @@ export const UserSessionSchema = z.object({
   id: z.string().min(1), // CUID from Prisma
   userId: z.string().min(1), // CUID from Prisma
   keycloakSessionId: z.string().max(255).nullable().optional(),
-  accessToken: z.string().nullable().optional(),
-  refreshToken: z.string().nullable().optional(),
-  idToken: z.string().nullable().optional(),
-  tokenExpiresAt: z.date().nullable().optional(),
-  refreshExpiresAt: z.date().nullable().optional(),
+  accountId: z.string().min(1).nullable().optional(), // NEW - Link to token vault
+  // Token fields removed - now in Account table
   fingerprint: z.string().max(64).nullable().optional(),
   lastAccessedAt: z.date(),
   createdAt: z.date(),
@@ -392,6 +384,7 @@ export const UserSessionSchema = z.object({
   endedAt: z.date().nullable().optional(),
   // Optional relations (not always populated)
   user: z.any().optional(),
+  account: z.any().optional(), // NEW - Account relation
   events: z.array(z.any()).optional(),
   logs: z.array(z.any()).optional(),
   recoveryEvents: z.array(z.any()).optional(),

@@ -6,7 +6,6 @@
 import { z } from "zod";
 import { createLogger } from "@libs/utils";
 import type { IMetricsCollector } from "@libs/monitoring";
-import { decodeJwt } from "jose";
 import {
   EncryptionManager,
   createEncryptionManager,
@@ -17,6 +16,8 @@ import {
 } from "../../client/KeycloakClient";
 import type { SecureCacheManager } from "../SecureCacheManager";
 import { TokenRefreshScheduler } from "./TokenRefreshScheduler";
+import { AccountService } from "../account/AccountService";
+import type { SessionStore } from "../session/SessionStore";
 
 /**
  * Zod schemas for validation
@@ -78,50 +79,11 @@ export type RefreshTokenConfig = z.infer<typeof RefreshTokenConfigSchema>;
 export type TokenRefreshParams = z.infer<typeof TokenRefreshParamsSchema>;
 
 /**
- * Encrypted token data structure
- */
-interface EncryptedTokenData {
-  __encrypted: true;
-  data: string;
-}
-
-/**
- * Union type for token storage data (encrypted or plain)
- */
-type TokenStorageData = StoredTokenInfo | EncryptedTokenData;
-
-/**
- * Deserialized token data from JSON (may have string dates)
- */
-interface DeserializedTokenData
-  extends Omit<
-    StoredTokenInfo,
-    "expiresAt" | "refreshExpiresAt" | "createdAt" | "lastRefreshedAt"
-  > {
-  expiresAt: string | Date;
-  refreshExpiresAt?: string | Date;
-  createdAt: string | Date;
-  lastRefreshedAt?: string | Date;
-}
-
-/**
  * Constants for magic numbers and configuration
  */
-const MIN_CACHE_TTL = 300; // 5 minutes
-const ENCRYPTION_TIME_METRIC = "refresh_token_manager.encryption_time";
-const DECRYPTION_TIME_METRIC = "refresh_token_manager.decryption_time";
 const REFRESH_SUCCESS_METRIC = "refresh_token_manager.refresh_success";
 const REFRESH_ERROR_METRIC = "refresh_token_manager.refresh_error";
 const ACTIVE_TIMERS_METRIC = "refresh_token_manager.active_timers";
-
-/**
- * Type guard for encrypted token data
- */
-function isEncryptedTokenData(
-  data: TokenStorageData
-): data is EncryptedTokenData {
-  return "__encrypted" in data && data.__encrypted === true;
-}
 
 /**
  * Refresh Result
@@ -194,11 +156,13 @@ export interface RefreshTokenStats {
 export class RefreshTokenManager {
   private readonly logger = createLogger("RefreshTokenManager");
   private readonly scheduler: TokenRefreshScheduler;
+  private readonly accountService: AccountService;
   private encryptionManager: EncryptionManager | undefined;
   private cleanupTimer: NodeJS.Timeout | undefined;
 
   constructor(
     private readonly keycloakClient: KeycloakClient,
+    private readonly sessionStore: SessionStore,
     private readonly cacheManager: SecureCacheManager,
     private readonly config: RefreshTokenConfig,
     private readonly eventHandlers: RefreshTokenEventHandlers = {},
@@ -213,6 +177,14 @@ export class RefreshTokenManager {
       { refreshBuffer: config.refreshBuffer },
       metrics
     );
+
+    // Initialize AccountService for token vault operations
+    this.accountService = (sessionStore as any).accountService;
+    if (!this.accountService) {
+      throw new Error(
+        "SessionStore must have AccountService for token vault operations"
+      );
+    }
 
     // Initialize encryption manager if enabled
     if (config.enableEncryption) {
@@ -233,146 +205,11 @@ export class RefreshTokenManager {
   }
 
   /**
-   * Calculate cache TTL based on refresh token expiration or cleanup interval
-   */
-  private calculateCacheTtl(
-    refreshExpiresAt: Date | undefined,
-    now: Date
-  ): number {
-    // Use the shorter of: refresh token TTL or cleanup interval
-    const refreshTokenTtl = refreshExpiresAt
-      ? Math.floor((refreshExpiresAt.getTime() - now.getTime()) / 1000)
-      : Math.floor(this.config.cleanupInterval / 1000);
-
-    return Math.min(
-      refreshTokenTtl,
-      Math.floor(this.config.cleanupInterval / 1000)
-    );
-  }
-
-  /**
    * Validate user ID and session ID format
    */
   private validateUserSession(userId: string, sessionId: string): void {
     UserIdSchema.parse(userId);
     SessionIdSchema.parse(sessionId);
-  }
-
-  /**
-   * Generate cache key for refresh token storage
-   * Uses '#' delimiter to avoid conflicts with user IDs containing ':'
-   */
-  private generateRefreshCacheKey(userId: string, sessionId: string): string {
-    // Use # as safe delimiter (validated by Zod schemas)
-    return `refresh_tokens#${userId}#${sessionId}`;
-  }
-
-  /**
-   * Encrypt token info for secure storage
-   */
-  private encryptTokenInfo(tokenInfo: StoredTokenInfo): TokenStorageData {
-    if (!this.encryptionManager) {
-      return tokenInfo;
-    }
-
-    const startTime = Date.now();
-    try {
-      const serialized = JSON.stringify(tokenInfo, (key, value) => {
-        if (key.endsWith("At") && value instanceof Date) {
-          return { __type: "Date", value: value.toISOString() };
-        }
-        return value;
-      });
-
-      const encrypted = this.encryptionManager.encryptCompact(serialized);
-
-      const encryptionTime = Date.now() - startTime;
-      this.metrics?.recordTimer(ENCRYPTION_TIME_METRIC, encryptionTime);
-
-      return {
-        __encrypted: true,
-        data: encrypted,
-      };
-    } catch (error) {
-      this.logger.error("Failed to encrypt token info", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return tokenInfo;
-    }
-  }
-
-  /**
-   * Decrypt token info from storage
-   */
-  private decryptTokenInfo(encryptedData: TokenStorageData): StoredTokenInfo {
-    if (!isEncryptedTokenData(encryptedData) || !this.encryptionManager) {
-      return this.deserializeTokenInfo(encryptedData as DeserializedTokenData);
-    }
-
-    const startTime = Date.now();
-    try {
-      const decrypted = this.encryptionManager.decryptCompact(
-        encryptedData.data
-      );
-
-      const tokenInfo = JSON.parse(decrypted, (_key, value) => {
-        if (value && typeof value === "object" && value.__type === "Date") {
-          return new Date(value.value);
-        }
-        return value;
-      });
-
-      const decryptionTime = Date.now() - startTime;
-      this.metrics?.recordTimer(DECRYPTION_TIME_METRIC, decryptionTime);
-
-      return this.deserializeTokenInfo(tokenInfo);
-    } catch (error) {
-      this.logger.error("Failed to decrypt token info", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw new Error("Token decryption failed");
-    }
-  }
-
-  /**
-   * Deserialize token info (convert date strings to Date objects)
-   * Validates the result to ensure data integrity
-   */
-  private deserializeTokenInfo(data: DeserializedTokenData): StoredTokenInfo {
-    const tokenInfo = {
-      ...data,
-      expiresAt:
-        typeof data.expiresAt === "string"
-          ? new Date(data.expiresAt)
-          : data.expiresAt,
-      refreshExpiresAt: data.refreshExpiresAt
-        ? typeof data.refreshExpiresAt === "string"
-          ? new Date(data.refreshExpiresAt)
-          : data.refreshExpiresAt
-        : undefined,
-      createdAt:
-        typeof data.createdAt === "string"
-          ? new Date(data.createdAt)
-          : data.createdAt,
-      lastRefreshedAt: data.lastRefreshedAt
-        ? typeof data.lastRefreshedAt === "string"
-          ? new Date(data.lastRefreshedAt)
-          : data.lastRefreshedAt
-        : undefined,
-    };
-
-    // Validate deserialized data for security
-    try {
-      return StoredTokenInfoSchema.parse(tokenInfo);
-    } catch (validationError) {
-      this.logger.error("Deserialized token info failed validation", {
-        error:
-          validationError instanceof Error
-            ? validationError.message
-            : String(validationError),
-      });
-      throw new Error("Invalid token data from cache");
-    }
   }
 
   /**
@@ -401,7 +238,7 @@ export class RefreshTokenManager {
   }
 
   /**
-   * Get stored tokens
+   * Get stored tokens from vault via SessionStore
    */
   async getStoredTokens(
     userId: string,
@@ -410,37 +247,42 @@ export class RefreshTokenManager {
     this.validateUserSession(userId, sessionId);
 
     try {
-      const cacheKey = this.generateRefreshCacheKey(userId, sessionId);
-      const cachedResult = await this.cacheManager.get(
-        "stored_tokens",
-        cacheKey
-      );
+      // Fetch session with tokens from vault (includeTokens=true)
+      const session = await this.sessionStore.retrieveSession(sessionId, true);
 
-      if (!cachedResult.hit || !cachedResult.data) {
-        return null;
-      }
-
-      // Parse JSON with error handling
-      let encryptedInfo: TokenStorageData;
-      try {
-        encryptedInfo = JSON.parse(cachedResult.data as unknown as string);
-      } catch (parseError) {
-        this.logger.error("Failed to parse cached token data", {
+      if (!session || session.userId !== userId) {
+        this.logger.warn("Session not found or user mismatch", {
           userId,
           sessionId,
-          error:
-            parseError instanceof Error
-              ? parseError.message
-              : String(parseError),
         });
-        // Invalidate corrupted cache entry
-        await this.cacheManager.invalidate("stored_tokens", cacheKey);
         return null;
       }
 
-      return this.decryptTokenInfo(encryptedInfo);
+      // Extract token info from session (tokens attached from vault)
+      const accessToken = (session as any).accessToken;
+      const refreshToken = (session as any).refreshToken;
+      const expiresAt = (session as any).tokenExpiresAt;
+      const refreshExpiresAt = (session as any).refreshTokenExpiresAt;
+
+      if (!accessToken || !refreshToken) {
+        this.logger.warn("No tokens found in session", { userId, sessionId });
+        return null;
+      }
+
+      return {
+        accessToken,
+        refreshToken,
+        expiresAt: expiresAt || new Date(Date.now() + 3600000), // Default 1 hour
+        refreshExpiresAt,
+        tokenType: "Bearer",
+        scope: "",
+        userId,
+        sessionId,
+        createdAt: session.createdAt,
+        refreshCount: 0, // Could track separately if needed
+      };
     } catch (error) {
-      this.logger.error("Failed to get stored tokens", {
+      this.logger.error("Failed to get stored tokens from vault", {
         userId,
         sessionId,
         error: error instanceof Error ? error.message : String(error),
@@ -451,6 +293,8 @@ export class RefreshTokenManager {
 
   /**
    * Store tokens with refresh token support
+   * Note: Tokens are now stored in Account vault by SessionStore
+   * This method only schedules automatic refresh
    */
   async storeTokensWithRefresh(
     userId: string,
@@ -470,50 +314,14 @@ export class RefreshTokenManager {
       refreshExpiresIn,
     });
 
-    // Parse access token to get expiration info
-    let decodedToken: Record<string, unknown> = {};
-    try {
-      const payload = decodeJwt(accessToken);
-      decodedToken = payload;
-    } catch (error) {
-      this.logger.warn("Could not parse access token payload", { error });
-    }
-
     const now = new Date();
     const expiresAt = new Date(now.getTime() + expiresIn * 1000);
     const refreshExpiresAt = refreshExpiresIn
       ? new Date(now.getTime() + refreshExpiresIn * 1000)
       : undefined;
 
-    const tokenInfo: StoredTokenInfo = {
-      accessToken,
-      refreshToken,
-      expiresAt,
-      tokenType: "Bearer",
-      scope: (decodedToken["scope"] as string) || "",
-      userId,
-      sessionId,
-      createdAt: now,
-      refreshCount: 0,
-      ...(refreshExpiresAt && { refreshExpiresAt }),
-    };
-
-    // Validate token info before storing
-    StoredTokenInfoSchema.parse(tokenInfo);
-    const cacheKey = this.generateRefreshCacheKey(userId, sessionId);
-    const encryptedInfo = this.encryptTokenInfo(tokenInfo);
-
-    // Calculate TTL based on refresh token expiration or cleanup interval
-    const cacheTtl = this.calculateCacheTtl(refreshExpiresAt, now);
-
-    await this.cacheManager.set(
-      "stored_tokens",
-      cacheKey,
-      JSON.stringify(encryptedInfo),
-      Math.max(cacheTtl, MIN_CACHE_TTL)
-    );
-
     // Schedule automatic refresh
+    // Note: Tokens are stored in vault by SessionStore, not here
     this.scheduleTokenRefresh(userId, sessionId, expiresAt);
 
     // Emit token stored event
@@ -543,12 +351,11 @@ export class RefreshTokenManager {
       }
     }
 
-    this.logger.info("Tokens stored with refresh support", {
+    this.logger.info("Token refresh scheduled (tokens stored in vault)", {
       userId,
       sessionId,
       expiresAt: expiresAt.toISOString(),
       refreshExpiresAt: refreshExpiresAt?.toISOString(),
-      hasRefreshToken: !!refreshToken,
     });
   }
 
@@ -588,7 +395,28 @@ export class RefreshTokenManager {
         };
       }
 
-      // Store the new tokens
+      // Update tokens in vault via SessionStore
+      const now = new Date();
+      const updateTokensInput: {
+        accessToken: string;
+        refreshToken?: string;
+        expiresAt: Date;
+        refreshExpiresAt?: Date;
+      } = {
+        accessToken: refreshResult.access_token,
+        refreshToken: refreshResult.refresh_token || tokenInfo.refreshToken,
+        expiresAt: new Date(now.getTime() + refreshResult.expires_in * 1000),
+      };
+
+      if (refreshResult.refresh_expires_in) {
+        updateTokensInput.refreshExpiresAt = new Date(
+          now.getTime() + refreshResult.refresh_expires_in * 1000
+        );
+      }
+
+      await this.sessionStore.updateSessionTokens(sessionId, updateTokensInput);
+
+      // Re-schedule automatic refresh with new expiration
       await this.storeTokensWithRefresh(
         userId,
         sessionId,
@@ -638,17 +466,30 @@ export class RefreshTokenManager {
    * Remove stored tokens and cancel automatic refresh
    */
   async removeStoredTokens(userId: string, sessionId: string): Promise<void> {
-    const cacheKey = this.generateRefreshCacheKey(userId, sessionId);
-    await this.cacheManager.invalidate("stored_tokens", cacheKey);
+    try {
+      // Get session metadata to find accountId
+      const session = await this.sessionStore.retrieveSession(sessionId, false);
 
-    // Cancel any scheduled refresh using the scheduler
-    const refreshKey = `${userId}:${sessionId}`;
-    this.scheduler.cancelRefresh(refreshKey);
+      if (session && (session as any).accountId) {
+        // Clear tokens from vault
+        await this.accountService.clearTokens((session as any).accountId);
+      }
 
-    this.logger.debug("Stored tokens removed", {
-      userId,
-      sessionId,
-    });
+      // Cancel any scheduled refresh using the scheduler
+      const refreshKey = `${userId}:${sessionId}`;
+      this.scheduler.cancelRefresh(refreshKey);
+
+      this.logger.debug("Stored tokens removed from vault", {
+        userId,
+        sessionId,
+      });
+    } catch (error) {
+      this.logger.error("Failed to remove stored tokens", {
+        userId,
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**

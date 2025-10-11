@@ -33,6 +33,19 @@ export {
 export type KeycloakSessionData = import("@libs/database").UserSession;
 
 /**
+ * UserSession with tokens attached (from vault)
+ * Used when retrieveSession(id, true) is called
+ * Tokens are fetched from Account vault and dynamically attached
+ */
+export type UserSessionWithTokens = import("@libs/database").UserSession & {
+  accessToken?: string | undefined;
+  refreshToken?: string | undefined;
+  idToken?: string | undefined;
+  tokenExpiresAt?: Date | undefined;
+  refreshTokenExpiresAt?: Date | undefined;
+};
+
+/**
  * Session creation options with smart defaults for required DB fields
  */
 export interface SessionCreationOptions {
@@ -57,35 +70,22 @@ export interface SessionCreationOptions {
 /**
  * Converts SessionCreationOptions to UserSessionCreateInput
  * Handles smart defaults for required DB fields
- * Uses Prisma's relation syntax for foreign keys
+ * Uses direct scalar fields (userId) instead of Prisma relation syntax
  */
 export function toUserSessionCreateInput(
   options: SessionCreationOptions
 ): import("@libs/database").UserSessionCreateInput {
   const input: import("@libs/database").UserSessionCreateInput = {
-    // Use Prisma relation syntax for foreign keys
-    user: { connect: { id: options.userId } },
+    // Use direct userId scalar (Unchecked input)
+    userId: options.userId,
   };
 
   // Add optional fields only if defined (to satisfy exactOptionalPropertyTypes)
   if (options.keycloakSessionId !== undefined) {
     input.keycloakSessionId = options.keycloakSessionId;
   }
-  if (options.accessToken !== undefined) {
-    input.accessToken = options.accessToken;
-  }
-  if (options.refreshToken !== undefined) {
-    input.refreshToken = options.refreshToken;
-  }
-  if (options.idToken !== undefined) {
-    input.idToken = options.idToken;
-  }
-  if (options.tokenExpiresAt !== undefined) {
-    input.tokenExpiresAt = options.tokenExpiresAt;
-  }
-  if (options.refreshExpiresAt !== undefined) {
-    input.refreshExpiresAt = options.refreshExpiresAt;
-  }
+  // NOTE: Token fields (accessToken, refreshToken, idToken, tokenExpiresAt, refreshExpiresAt)
+  // are NO LONGER stored in UserSession table - they go to Account vault via SessionStore
   if (options.fingerprint !== undefined) {
     input.fingerprint = options.fingerprint;
   }
@@ -124,7 +124,9 @@ export function isKeycloakSession(
  */
 
 // Simple ID validation for parameters (CUID format from Prisma)
-export const SessionIdSchema = z.string().min(1, "Session ID must not be empty");
+export const SessionIdSchema = z
+  .string()
+  .min(1, "Session ID must not be empty");
 export const UserIdSchema = z.string().min(1, "User ID must not be empty");
 
 /**
